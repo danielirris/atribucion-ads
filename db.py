@@ -62,11 +62,25 @@ def init_db() -> None:
     with _LOCK, _conn() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS conexiones (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                alias       TEXT,
+                app_id      TEXT,
+                app_secret  TEXT,
+                token       TEXT NOT NULL,
+                activo      INTEGER DEFAULT 1,
+                ultimo_error TEXT,
+                creado      TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS anuncios (
                 ad_id                TEXT PRIMARY KEY,
                 nombre               TEXT,
                 adset_id             TEXT,
                 activo               INTEGER DEFAULT 1,
+                conexion_id          INTEGER,
+                cuenta_id            TEXT,
+                cuenta_nombre        TEXT,
                 ultima_actualizacion TEXT
             );
 
@@ -99,6 +113,9 @@ def init_db() -> None:
     _asegurar_columna("anuncios", "adset_id", "TEXT")
     _asegurar_columna("anuncios", "fecha_creacion", "TEXT")
     _asegurar_columna("anuncios", "effective_status", "TEXT")
+    _asegurar_columna("anuncios", "conexion_id", "INTEGER")
+    _asegurar_columna("anuncios", "cuenta_id", "TEXT")
+    _asegurar_columna("anuncios", "cuenta_nombre", "TEXT")
 
 
 def _asegurar_columna(tabla: str, columna: str, tipo: str) -> None:
@@ -114,26 +131,77 @@ def _asegurar_columna(tabla: str, columna: str, tipo: str) -> None:
 # --------------------------------------------------------------------------- #
 def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
                    activo: int = 1, fecha_creacion: Optional[str] = None,
-                   effective_status: Optional[str] = None) -> None:
+                   effective_status: Optional[str] = None,
+                   conexion_id: Optional[int] = None, cuenta_id: Optional[str] = None,
+                   cuenta_nombre: Optional[str] = None) -> None:
     """Inserta o actualiza un anuncio."""
     with _LOCK, _conn() as conn:
         conn.execute(
             """
             INSERT INTO anuncios
-                (ad_id, nombre, adset_id, activo, fecha_creacion,
-                 effective_status, ultima_actualizacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (ad_id, nombre, adset_id, activo, fecha_creacion, effective_status,
+                 conexion_id, cuenta_id, cuenta_nombre, ultima_actualizacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ad_id) DO UPDATE SET
                 nombre               = excluded.nombre,
                 adset_id             = COALESCE(excluded.adset_id, anuncios.adset_id),
                 activo               = excluded.activo,
                 fecha_creacion       = COALESCE(excluded.fecha_creacion, anuncios.fecha_creacion),
                 effective_status     = excluded.effective_status,
+                conexion_id          = COALESCE(excluded.conexion_id, anuncios.conexion_id),
+                cuenta_id            = COALESCE(excluded.cuenta_id, anuncios.cuenta_id),
+                cuenta_nombre        = COALESCE(excluded.cuenta_nombre, anuncios.cuenta_nombre),
                 ultima_actualizacion = excluded.ultima_actualizacion
             """,
-            (str(ad_id), nombre, adset_id, activo, fecha_creacion,
-             effective_status, a_texto(ahora())),
+            (str(ad_id), nombre, adset_id, activo, fecha_creacion, effective_status,
+             conexion_id, cuenta_id, cuenta_nombre, a_texto(ahora())),
         )
+        conn.commit()
+
+
+# --------------------------------------------------------------------------- #
+#  CONEXIONES (multi-Business / multi-token)
+# --------------------------------------------------------------------------- #
+def agregar_conexion(alias: str, token: str, app_id: Optional[str] = None,
+                     app_secret: Optional[str] = None) -> int:
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO conexiones (alias, app_id, app_secret, token, activo, creado)
+               VALUES (?, ?, ?, ?, 1, ?)""",
+            (alias, app_id, app_secret, token, a_texto(ahora())),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def obtener_conexiones(solo_activas: bool = False) -> list:
+    with _conn() as conn:
+        q = "SELECT * FROM conexiones"
+        if solo_activas:
+            q += " WHERE activo = 1"
+        q += " ORDER BY id"
+        return [dict(r) for r in conn.execute(q)]
+
+
+def obtener_conexion(conexion_id: int) -> Optional[dict]:
+    with _conn() as conn:
+        r = conn.execute("SELECT * FROM conexiones WHERE id = ?", (conexion_id,)).fetchone()
+        return dict(r) if r else None
+
+
+def actualizar_conexion(conexion_id: int, **campos) -> None:
+    if not campos:
+        return
+    cols = ", ".join(f"{k} = ?" for k in campos)
+    with _LOCK, _conn() as conn:
+        conn.execute(f"UPDATE conexiones SET {cols} WHERE id = ?",
+                     (*campos.values(), conexion_id))
+        conn.commit()
+
+
+def eliminar_conexion(conexion_id: int) -> None:
+    with _LOCK, _conn() as conn:
+        conn.execute("DELETE FROM conexiones WHERE id = ?", (conexion_id,))
         conn.commit()
 
 

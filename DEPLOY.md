@@ -24,16 +24,22 @@ En la pestaña **Environment** del servicio, agrega (tú pones los valores reale
 nunca se suben al repo):
 
 ```
-APP_ID=<tu_app_id>
-APP_SECRET=<tu_app_secret>
-ACCESS_TOKEN=<tu_access_token_de_larga_duracion>
-AD_ACCOUNT_ID=act_<tu_id_de_cuenta>
+APP_ID=<tu_app_id_central>
+APP_SECRET=<tu_app_secret_central>
+APP_PASSWORD=<una_clave_para_entrar_a_la_app>
 STORAGE_ROOT=/data
 POLLING_INTERVAL_SEG=300
 ```
 
-> El `ACCESS_TOKEN` necesita el permiso **`ads_management`** para leer/modificar
-> presupuestos y duplicar anuncios. Usa un token de **larga duración**.
+> **Multi-Business (tu caso):** NO pongas tokens aquí. Los tokens de cada Business
+> se agregan **dentro de la app**, en la sección **🔌 Conexiones**, y se guardan en
+> el volumen `/data`. `APP_ID`/`APP_SECRET` son la app central (una sola).
+>
+> **Una sola cuenta (alternativa):** si prefieres, agrega también
+> `ACCESS_TOKEN=<token>` y `AD_ACCOUNT_ID=act_<id>` y te saltas la sección Conexiones.
+>
+> Los tokens necesitan permisos **`ads_management`, `ads_read`, `business_management`**.
+> `APP_PASSWORD` pone un candado de acceso (recomendado en dominio público).
 
 ## 3. Volumen persistente (¡IMPORTANTE!)
 
@@ -70,11 +76,15 @@ Pulsa **Deploy**. Cuando termine el build, abre `https://anuncios.datibot.lat`.
 
 ## 6. Primer arranque
 
-1. Barra lateral → **📥 Recargar anuncios de Facebook** para traer tus anuncios
-   activos y abrir un período inicial por cada uno.
-2. Verifica en la barra lateral que **Facebook API: conectada**. Si dice “sin
-   conexión”, revisa las variables de entorno y el permiso `ads_management`.
-3. Registra ventas de dos formas:
+1. Entra con tu `APP_PASSWORD`.
+2. Ve a **🔌 Conexiones** (abajo del todo) → **Agregar conexión**: pega el token
+   de Usuario del Sistema de cada Business (uno por Business), ponle un alias y
+   **Probar y descubrir cuentas** para confirmar. Guarda cada uno.
+3. Barra lateral → **📥 Recargar anuncios de Facebook**: trae los anuncios de
+   **todas las cuentas de todas las conexiones** y abre un período por cada uno.
+4. Verifica en la barra lateral: **Conexiones / Cuentas / Anuncios activos**.
+5. Filtra la tabla por **Cuenta / Business** y por **Activos / Apagados**.
+6. Registra ventas de dos formas:
    - **⬆️ Subir ventas.xlsx** (barra lateral): sube tu Excel; solo procesa las
      filas nuevas respecto a lo ya visto.
    - **🧾 Registrar venta**: captura una venta al instante (ideal en la nube).

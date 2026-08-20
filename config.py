@@ -43,6 +43,10 @@ EXCEL_PATH = str(STORAGE_ROOT / os.getenv("EXCEL_FILE", "ventas.xlsx"))
 # Intervalo de polling a Facebook (segundos). Por defecto 5 minutos.
 POLLING_INTERVAL_SEG = int(os.getenv("POLLING_INTERVAL_SEG", "300"))
 
+# Contraseña de acceso a la app. Si está vacía, la app queda abierta (no
+# recomendado en un dominio público, ya que puede mover presupuestos reales).
+APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
+
 # Minutos en un día (para el cálculo de gasto estimado)
 MINUTOS_POR_DIA = 1440
 

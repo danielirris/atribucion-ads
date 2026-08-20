@@ -139,11 +139,12 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
         return {"ok": False, "error": "Anuncio no encontrado.", "solo_local": False}
 
     adset_id = anuncio.get("adset_id")
-    estado_api = fb.obtener_estado()
+    conexion_id = anuncio.get("conexion_id")
+    hay_conexion = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
 
-    # Si la API está disponible, intentamos el cambio en Facebook.
-    if fb.SDK_DISPONIBLE and config.facebook_configurado() and adset_id:
-        r = fb.actualizar_presupuesto_facebook(adset_id, nuevo_monto)
+    # Si hay API/conexión disponible, intentamos el cambio en Facebook.
+    if fb.SDK_DISPONIBLE and hay_conexion and adset_id:
+        r = fb.actualizar_presupuesto_facebook(adset_id, nuevo_monto, conexion_id)
         if not r["ok"]:
             # NO cerramos el período en SQLite.
             return {"ok": False, "error": r["error"], "solo_local": False}
@@ -152,7 +153,7 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 
     # Sin API disponible: registro local solamente (advertencia).
     db.cambiar_periodo(ad_id, nuevo_monto)
-    motivo = "sin adset_id" if not adset_id else "API de Facebook no disponible"
+    motivo = "sin adset_id" if not adset_id else "Facebook no disponible"
     return {"ok": True, "error": None, "solo_local": True, "motivo": motivo}
 
 
@@ -174,7 +175,10 @@ def sidebar_estado():
         st.sidebar.caption(f"⚠️ {est_fb['ultimo_error']}")
     up = est_fb.get("ultimo_polling")
     st.sidebar.caption(f"Último polling: {db.a_texto(up) if isinstance(up, datetime) else '—'}")
-    st.sidebar.caption(f"Anuncios activos: {est_fb.get('num_anuncios', 0)}")
+    st.sidebar.caption(
+        f"Conexiones: {est_fb.get('num_conexiones', 0)} · "
+        f"Cuentas: {est_fb.get('num_cuentas', 0)} · "
+        f"Anuncios activos: {est_fb.get('num_anuncios', 0)}")
 
     # Watcher
     if est_wt["activo"]:
@@ -190,16 +194,16 @@ def sidebar_estado():
         st.rerun()
 
     if st.sidebar.button("📥 Recargar anuncios de Facebook", use_container_width=True):
-        with st.spinner("Consultando Facebook..."):
-            r = fb.cargar_anuncios_activos()
+        with st.spinner("Consultando Facebook (todas las conexiones)..."):
+            r = fb.cargar_todo()
             try:
                 _insights_cache.clear()
             except Exception:
                 pass
-        if r["ok"]:
-            st.sidebar.success(f"{len(r['anuncios'])} anuncios cargados.")
-        else:
-            st.sidebar.error(f"Error: {r['error']}")
+        if r["num_anuncios"]:
+            st.sidebar.success(f"{r['num_anuncios']} anuncios de {r['num_cuentas']} cuenta(s).")
+        if r["errores"]:
+            st.sidebar.error("Errores: " + "; ".join(r["errores"])[:300])
         st.rerun()
 
     if st.sidebar.button("📄 Importar TODO el Excel", use_container_width=True,
@@ -258,17 +262,24 @@ def seccion_vista_general():
         "Máximo": ("maximum", None),
     }
     date_preset, cutoff = RANGO[rango_lbl]
-    with c3:
-        st.write("")
-        st.caption(f"Ordenado por ROAS ↓ · rango: {rango_lbl}")
 
     todos = db.obtener_anuncios(solo_activos=False)
+    cuentas_disp = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
+    with c3:
+        cuenta_sel = st.selectbox("Cuenta / Business",
+                                  ["Todas"] + cuentas_disp, key="cuenta_sel")
+
     if filtro == "Activos":
         anuncios = [a for a in todos if _es_activo(a)]
     elif filtro == "Apagados":
         anuncios = [a for a in todos if not _es_activo(a)]
     else:
         anuncios = todos
+    if cuenta_sel != "Todas":
+        anuncios = [a for a in anuncios if (a.get("cuenta_nombre") or "—") == cuenta_sel]
+
+    st.caption(f"Ordenado por ROAS ↓ · rango: {rango_lbl} · "
+               f"{len(cuentas_disp)} cuenta(s) · mostrando {len(anuncios)} anuncio(s)")
 
     if not anuncios:
         st.info("No hay anuncios para este filtro. Usa **📥 Recargar anuncios de Facebook** "
@@ -462,15 +473,17 @@ def _c_accion(f):
 
 
 def _render_tabla(filas):
-    cols = ["Anuncio", "Entrega", "Creado", "Presupuesto", "Gasto / Presup.",
+    cols = ["Anuncio", "Cuenta", "Entrega", "Creado", "Presupuesto", "Gasto / Presup.",
             "CPM / CTR", "Ventas", "Ganancia", "ROAS ↓", "Salud 7d",
             "Conversaciones", "Costo por conversación", "Últimas acciones"]
     ths = "".join(f"<th>{c}</th>" for c in cols)
     trs = []
     for f in filas:
         nombre = _html.escape(str(f["a"]["nombre"]))[:60]
+        cuenta = _html.escape(str(f["a"].get("cuenta_nombre") or "—"))[:34]
         celdas = [
             f'<div class="big">{nombre}</div><div class="sub">{f["ad_id"]}</div>',
+            f'<div class="sub">{cuenta}</div>',
             _c_estado(f),
             f'<div class="sub">{_fecha_corta(f["a"].get("fecha_creacion"))}</div>',
             _c_presupuesto(f),
@@ -703,11 +716,17 @@ def _bloque_duplicar(ad_id, anuncio, ahora):
             enviado = st.form_submit_button("⚡ Duplicar ahora", type="primary")
 
         if enviado:
-            if not (fb.SDK_DISPONIBLE and config.facebook_configurado()):
-                st.error("Facebook API no está disponible/configurada. No se puede duplicar.")
+            hay_conexion = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
+            if not hay_conexion:
+                st.error("No hay conexión de Facebook disponible. Agrega un token en "
+                         "**Conexiones** o revisa el .env. No se puede duplicar.")
                 return
             with st.spinner(f"Duplicando {n} veces en Facebook..."):
-                res = fb.duplicar_anuncio(ad_id, int(n), float(presup), activar=bool(activar))
+                res = fb.duplicar_anuncio(
+                    ad_id, int(n), float(presup), activar=bool(activar),
+                    conexion_id=anuncio.get("conexion_id") if anuncio else None,
+                    cuenta_id=anuncio.get("cuenta_id") if anuncio else None,
+                    cuenta_nombre=anuncio.get("cuenta_nombre") if anuncio else None)
 
             if res.get("error_global"):
                 st.error(f"❌ {res['error_global']}")
@@ -780,9 +799,102 @@ def seccion_manual():
 
 
 # --------------------------------------------------------------------------- #
+#  Candado de contraseña
+# --------------------------------------------------------------------------- #
+def _gate_password():
+    if not config.APP_PASSWORD:
+        return
+    if st.session_state.get("_auth_ok"):
+        return
+    st.title("🔒 Acceso")
+    st.caption("Esta app puede modificar presupuestos reales. Ingresa la contraseña.")
+    pwd = st.text_input("Contraseña", type="password", key="_pwd")
+    if st.button("Entrar"):
+        if pwd == config.APP_PASSWORD:
+            st.session_state["_auth_ok"] = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+    st.stop()
+
+
+# --------------------------------------------------------------------------- #
+#  Sección — Conexiones (multi-Business / tokens)
+# --------------------------------------------------------------------------- #
+def seccion_conexiones():
+    st.header("🔌 Conexiones (Business / tokens)")
+    st.caption("Agrega un token de **Usuario del Sistema** por cada Business. La app "
+               "descubre sus cuentas automáticamente. Los tokens se guardan solo en "
+               "este servidor (volumen /data), nunca en el repositorio.")
+
+    cons = db.obtener_conexiones()
+    if cons:
+        for c in cons:
+            with st.container(border=True):
+                col = st.columns([4, 2, 2, 2])
+                tok = c.get("token") or ""
+                col[0].markdown(f"**{c.get('alias') or 'Conexión'}**  ·  id {c['id']}")
+                col[0].caption(f"token …{tok[-6:]}" + ("  ·  app propia" if c.get("app_id") else ""))
+                if c.get("ultimo_error"):
+                    col[0].caption(f"⚠️ {c['ultimo_error']}")
+                col[1].write("🟢 activa" if c["activo"] else "⚪ inactiva")
+                if col[2].button("🔎 Probar", key=f"probar_{c['id']}"):
+                    r = fb.probar_conexion(tok, c.get("app_id"), c.get("app_secret"))
+                    if r["ok"]:
+                        nombres = ", ".join(x["name"] for x in r["cuentas"][:12])
+                        st.success(f"OK · {len(r['cuentas'])} cuenta(s): {nombres}")
+                    else:
+                        st.error(r["error"])
+                if col[3].button("🗑️ Eliminar", key=f"del_{c['id']}"):
+                    db.eliminar_conexion(c["id"])
+                    st.rerun()
+    else:
+        st.info("Aún no hay conexiones guardadas. Si definiste credenciales en el .env, "
+                "se usa esa única cuenta por defecto.")
+
+    st.subheader("➕ Agregar conexión")
+    with st.form("form_conexion"):
+        alias = st.text_input("Alias (ej. BM Tienda MX)")
+        token = st.text_area("Token de Usuario del Sistema", height=90,
+                             help="Business Settings → Usuarios del sistema → Generar token")
+        with st.expander("App propia (opcional, solo si no usas la app central del .env)"):
+            app_id = st.text_input("APP_ID (opcional)")
+            app_secret = st.text_input("APP_SECRET (opcional)", type="password")
+        cc1, cc2 = st.columns(2)
+        probar = cc1.form_submit_button("🔎 Probar y descubrir cuentas")
+        guardar = cc2.form_submit_button("💾 Guardar conexión", type="primary")
+
+    if probar:
+        if not token.strip():
+            st.error("Pega primero el token.")
+        else:
+            r = fb.probar_conexion(token.strip(), app_id or None, app_secret or None)
+            if r["ok"]:
+                st.success(f"✅ {len(r['cuentas'])} cuenta(s) encontradas:")
+                st.dataframe(pd.DataFrame(r["cuentas"]), use_container_width=True, hide_index=True)
+            else:
+                st.error(f"❌ {r['error']}")
+    if guardar:
+        if not token.strip():
+            st.error("Pega el token.")
+        else:
+            cid = db.agregar_conexion(alias or "Business", token.strip(),
+                                      app_id or None, app_secret or None)
+            try:
+                _insights_cache.clear()
+            except Exception:
+                pass
+            st.success(f"✅ Conexión #{cid} guardada. Pulsa **📥 Recargar anuncios de "
+                       "Facebook** (barra lateral) para cargar sus cuentas.")
+            time.sleep(1.0)
+            st.rerun()
+
+
+# --------------------------------------------------------------------------- #
 #  Layout principal
 # --------------------------------------------------------------------------- #
 def main():
+    _gate_password()
     st.title("📊 Atribución de ventas · Facebook Ads")
     st.caption(f"Actualizado: {db.a_texto(db.ahora())} · auto-refresco cada 2 min")
 
@@ -799,6 +911,8 @@ def main():
     seccion_lote()
     st.divider()
     seccion_manual()
+    st.divider()
+    seccion_conexiones()
 
     auto_refresco(120)
 

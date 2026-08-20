@@ -1,61 +1,83 @@
 """
 facebook_api.py
-Conexión con la Facebook Marketing API mediante el SDK facebook-business.
+Conexión con la Facebook Marketing API — MULTI-BUSINESS / MULTI-TOKEN.
 
-Responsabilidades:
-  - Cargar los anuncios activos de la cuenta (ad_id, nombre, adset_id, presupuesto).
-  - Polling en segundo plano (hilo aparte) cada N segundos para detectar cambios
-    de daily_budget a nivel de Adset y disparar el cierre/apertura de período.
-  - Modificar el daily_budget de un Adset en Facebook (Parte 8).
-  - Duplicar anuncios con /{ad-id}/copies deep_copy=true (Parte 7).
+Cada "conexión" (fila en la tabla `conexiones`) representa un Business con su
+token de Usuario del Sistema. Una app central (APP_ID/APP_SECRET del .env) se usa
+por defecto, pero cada conexión puede traer su propio app_id/app_secret.
 
-Todo el módulo tolera que Facebook no responda: nunca tumba la app.
-El estado del último polling / errores se expone para mostrarlo en la UI.
+La app:
+  - Descubre automáticamente TODAS las cuentas publicitarias accesibles por cada
+    token (no hay que listar los act_ a mano).
+  - Carga los anuncios (activos y pausados) de todas las cuentas de todas las
+    conexiones y los guarda con su conexion_id / cuenta_id / cuenta_nombre.
+  - Trae Insights (gasto, CPM, CTR, conversaciones) por anuncio, agregando todo.
+  - Cambia presupuesto y duplica usando el token correcto de cada anuncio.
+
+Compatibilidad: si NO hay conexiones en la BD pero el .env tiene credenciales de
+una sola cuenta, se usa esa como conexión implícita (conexion_id = 0).
+
+Nada tumba la app: los errores por conexión/cuenta se acumulan y se muestran.
 """
+import os
 import threading
-import time
 import traceback
 from typing import Optional
 
 import config
 import db
 
-# --- Import defensivo del SDK: si no está instalado la app sigue viva ---
+# --- Import defensivo del SDK ---
 SDK_DISPONIBLE = True
 SDK_ERROR_IMPORT = None
 try:
     from facebook_business.api import FacebookAdsApi
+    from facebook_business.session import FacebookSession
     from facebook_business.adobjects.adaccount import AdAccount
+    from facebook_business.adobjects.user import User
     from facebook_business.adobjects.ad import Ad
     from facebook_business.adobjects.adset import AdSet
     from facebook_business.exceptions import FacebookRequestError
-except Exception as e:  # pragma: no cover - depende del entorno
+except Exception as e:  # pragma: no cover
     SDK_DISPONIBLE = False
     SDK_ERROR_IMPORT = str(e)
-    FacebookRequestError = Exception  # fallback para except
+    FacebookRequestError = Exception
 
+# ID de la conexión implícita basada en el .env (una sola cuenta).
+ENV_CONEXION_ID = 0
 
-# Estado compartido con la UI (protegido por lock).
+# Tipos de acción que cuentan como "conversación iniciada" (mensajería).
+_MSG_DEFAULT = [
+    "onsite_conversion.messaging_conversation_started_7d",
+    "onsite_conversion.total_messaging_connection",
+    "messaging_conversation_started_7d",
+]
+MSG_ACTION_TYPES = [t.strip() for t in
+                    os.getenv("MSG_ACTION_TYPES", ",".join(_MSG_DEFAULT)).split(",")
+                    if t.strip()]
+
+# Estado compartido con la UI.
 _ESTADO_LOCK = threading.Lock()
 ESTADO = {
     "api_ok": False,
-    "ultimo_polling": None,      # datetime
-    "ultimo_error": None,        # str
+    "ultimo_polling": None,
+    "ultimo_error": None,
     "num_anuncios": 0,
+    "num_cuentas": 0,
+    "num_conexiones": 0,
     "polling_activo": False,
-    "mensajes": [],              # historial corto de eventos
+    "mensajes": [],
 }
 
 _POLLING_THREAD = None
 _POLLING_STOP = threading.Event()
-_API_INICIALIZADA = False
 
 
 def _log(msg: str) -> None:
     with _ESTADO_LOCK:
         ts = db.a_texto(db.ahora())
         ESTADO["mensajes"].insert(0, f"[{ts}] {msg}")
-        del ESTADO["mensajes"][20:]  # conservar solo los últimos 20
+        del ESTADO["mensajes"][30:]
 
 
 def _set_estado(**kwargs) -> None:
@@ -69,171 +91,292 @@ def obtener_estado() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-#  Inicialización de la API
+#  Construcción de sesiones/API por conexión
 # --------------------------------------------------------------------------- #
+def _api_desde(token: str, app_id: Optional[str], app_secret: Optional[str]):
+    """Crea una instancia FacebookAdsApi aislada (no toca el default global)."""
+    session = FacebookSession(
+        app_id=app_id or config.APP_ID or None,
+        app_secret=app_secret or config.APP_SECRET or None,
+        access_token=token,
+    )
+    return FacebookAdsApi(session)
+
+
+def _conexiones_efectivas() -> list:
+    """
+    Lista de conexiones a usar: las activas de la BD y, si no hay ninguna pero el
+    .env tiene credenciales, una conexión implícita basada en el .env.
+    Cada item: {"id","alias","token","app_id","app_secret","env_account"}.
+    """
+    cons = [c for c in db.obtener_conexiones(solo_activas=True) if c.get("token")]
+    if cons:
+        return [{
+            "id": c["id"], "alias": c.get("alias") or f"Conexión {c['id']}",
+            "token": c["token"], "app_id": c.get("app_id"),
+            "app_secret": c.get("app_secret"), "env_account": None,
+        } for c in cons]
+    # Fallback al .env (una sola cuenta).
+    if config.facebook_configurado():
+        return [{
+            "id": ENV_CONEXION_ID, "alias": "ENV (.env)",
+            "token": config.ACCESS_TOKEN, "app_id": config.APP_ID,
+            "app_secret": config.APP_SECRET, "env_account": config.AD_ACCOUNT_ID,
+        }]
+    return []
+
+
+def _api_para_conexion(conexion_id: Optional[int]):
+    """Devuelve un FacebookAdsApi para la conexión indicada (o None)."""
+    if not SDK_DISPONIBLE:
+        return None
+    if conexion_id in (None, ENV_CONEXION_ID):
+        if config.facebook_configurado():
+            return _api_desde(config.ACCESS_TOKEN, config.APP_ID, config.APP_SECRET)
+        return None
+    c = db.obtener_conexion(conexion_id)
+    if not c or not c.get("token"):
+        return None
+    return _api_desde(c["token"], c.get("app_id"), c.get("app_secret"))
+
+
 def inicializar_api() -> bool:
-    """Inicializa el SDK de Facebook. Devuelve True si quedó lista."""
-    global _API_INICIALIZADA
+    """Compat: True si hay al menos una conexión utilizable."""
     if not SDK_DISPONIBLE:
         _set_estado(api_ok=False, ultimo_error=f"SDK no disponible: {SDK_ERROR_IMPORT}")
         return False
-    if not config.facebook_configurado():
+    cons = _conexiones_efectivas()
+    if not cons:
         _set_estado(api_ok=False,
-                    ultimo_error="Faltan credenciales en .env (APP_ID/APP_SECRET/ACCESS_TOKEN/AD_ACCOUNT_ID)")
+                    ultimo_error="No hay conexiones. Agrega un token en 'Conexiones' "
+                                 "o define credenciales en .env.")
         return False
-    try:
-        FacebookAdsApi.init(config.APP_ID, config.APP_SECRET, config.ACCESS_TOKEN)
-        _API_INICIALIZADA = True
-        _set_estado(api_ok=True, ultimo_error=None)
-        return True
-    except Exception as e:
-        _set_estado(api_ok=False, ultimo_error=f"Error init API: {e}")
-        return False
-
-
-def _cuenta() -> "AdAccount":
-    return AdAccount(config.AD_ACCOUNT_ID)
+    _set_estado(num_conexiones=len(cons))
+    return True
 
 
 # --------------------------------------------------------------------------- #
-#  Carga de anuncios activos
+#  Descubrimiento de cuentas
 # --------------------------------------------------------------------------- #
-def cargar_anuncios_activos(abrir_periodos: bool = True) -> dict:
+def _descubrir_cuentas(api, env_account: Optional[str] = None) -> list:
     """
-    Descarga los anuncios activos de la cuenta y los guarda en SQLite.
-    Para cada anuncio obtiene también su adset_id y el daily_budget del adset.
-
-    Devuelve {"ok": bool, "anuncios": [...], "error": str|None}.
+    Devuelve [{"act_id","account_id","name"}] accesibles por el token.
+    Si env_account está dado (conexión .env), usa solo esa cuenta.
     """
-    if not (_API_INICIALIZADA or inicializar_api()):
-        return {"ok": False, "anuncios": [], "error": obtener_estado()["ultimo_error"]}
+    if env_account:
+        try:
+            acc = AdAccount(env_account, api=api).api_get(fields=["account_id", "name"])
+            return [{"act_id": env_account,
+                     "account_id": acc.get("account_id"),
+                     "name": acc.get("name") or env_account}]
+        except Exception:
+            return [{"act_id": env_account, "account_id": env_account.replace("act_", ""),
+                     "name": env_account}]
+    cuentas = []
+    accts = User(fbid="me", api=api).get_ad_accounts(
+        fields=["account_id", "name"], params={"limit": 200})
+    for a in accts:
+        acc_id = a.get("account_id")
+        act_id = a.get("id") or (f"act_{acc_id}" if acc_id else None)
+        if not act_id:
+            continue
+        cuentas.append({"act_id": act_id, "account_id": acc_id,
+                        "name": a.get("name") or act_id})
+    return cuentas
 
+
+def probar_conexion(token: str, app_id: Optional[str] = None,
+                    app_secret: Optional[str] = None) -> dict:
+    """
+    Prueba un token y descubre sus cuentas (para la UI 'Conexiones').
+    Devuelve {"ok","cuentas":[...],"error"}.
+    """
+    if not SDK_DISPONIBLE:
+        return {"ok": False, "cuentas": [], "error": f"SDK no disponible: {SDK_ERROR_IMPORT}"}
     try:
-        # Cargamos ACTIVE y PAUSED para poder filtrar "Activos / Apagados" en la UI.
-        ads = _cuenta().get_ads(
-            params={
-                "effective_status": ["ACTIVE", "PAUSED", "ADSET_PAUSED", "CAMPAIGN_PAUSED"],
-                "limit": 500,
-            },
-            fields=[
-                Ad.Field.id,
-                Ad.Field.name,
-                Ad.Field.adset_id,
-                Ad.Field.effective_status,
-                Ad.Field.created_time,
-            ],
-        )
-
-        anuncios = []
-        cache_budget = {}  # adset_id -> presupuesto (unidades de moneda)
-        n_activos = 0
-
-        for ad in ads:
-            ad_id = ad.get(Ad.Field.id)
-            nombre = ad.get(Ad.Field.name) or f"Anuncio {ad_id}"
-            adset_id = ad.get(Ad.Field.adset_id)
-            estado = ad.get(Ad.Field.effective_status) or ""
-            creado = ad.get(Ad.Field.created_time)  # ISO con zona, ej "2026-08-04T10:00:00-0700"
-            es_activo = 1 if estado == "ACTIVE" else 0
-            if es_activo:
-                n_activos += 1
-
-            presupuesto = None
-            if adset_id:
-                if adset_id in cache_budget:
-                    presupuesto = cache_budget[adset_id]
-                else:
-                    presupuesto = _leer_daily_budget_adset(adset_id)
-                    cache_budget[adset_id] = presupuesto
-
-            db.upsert_anuncio(ad_id, nombre, adset_id=adset_id, activo=es_activo,
-                              fecha_creacion=creado, effective_status=estado)
-
-            # Solo abrimos período a los ACTIVOS (los pausados no gastan).
-            if abrir_periodos and es_activo and presupuesto is not None:
-                db.asegurar_periodo_inicial(ad_id, presupuesto)
-
-            anuncios.append({
-                "ad_id": ad_id, "nombre": nombre, "adset_id": adset_id,
-                "presupuesto": presupuesto, "effective_status": estado,
-                "fecha_creacion": creado,
-            })
-
-        db.marcar_inactivos([a["ad_id"] for a in anuncios])
-        _set_estado(api_ok=True, num_anuncios=n_activos,
-                    ultimo_error=None, ultimo_polling=db.ahora())
-        _log(f"Cargados {len(anuncios)} anuncios ({n_activos} activos).")
-        return {"ok": True, "anuncios": anuncios, "error": None}
-
+        api = _api_desde(token, app_id, app_secret)
+        cuentas = _descubrir_cuentas(api)
+        return {"ok": True, "cuentas": cuentas, "error": None}
     except FacebookRequestError as e:
-        msg = _fmt_fb_error(e)
-        _set_estado(api_ok=False, ultimo_error=msg)
-        _log(f"Error cargando anuncios: {msg}")
-        return {"ok": False, "anuncios": [], "error": msg}
+        return {"ok": False, "cuentas": [], "error": _fmt_fb_error(e)}
     except Exception as e:
-        _set_estado(api_ok=False, ultimo_error=str(e))
-        _log(f"Error inesperado cargando anuncios: {e}")
-        return {"ok": False, "anuncios": [], "error": str(e)}
+        return {"ok": False, "cuentas": [], "error": str(e)}
 
 
-# Tipos de acción que cuentan como "conversación iniciada" (mensajería).
-# Se pueden sobreescribir con la env var MSG_ACTION_TYPES (separadas por coma).
-import os as _os
-_MSG_DEFAULT = [
-    "onsite_conversion.messaging_conversation_started_7d",
-    "onsite_conversion.total_messaging_connection",
-    "messaging_conversation_started_7d",
-]
-MSG_ACTION_TYPES = [t.strip() for t in
-                    _os.getenv("MSG_ACTION_TYPES", ",".join(_MSG_DEFAULT)).split(",")
-                    if t.strip()]
+# --------------------------------------------------------------------------- #
+#  Carga de anuncios de TODAS las conexiones/cuentas
+# --------------------------------------------------------------------------- #
+def cargar_todo(abrir_periodos: bool = True) -> dict:
+    """
+    Recorre todas las conexiones → cuentas → anuncios (activos y pausados) y los
+    guarda. Devuelve {"ok","num_anuncios","num_cuentas","errores":[...]}.
+    """
+    if not SDK_DISPONIBLE:
+        _set_estado(api_ok=False, ultimo_error=f"SDK no disponible: {SDK_ERROR_IMPORT}")
+        return {"ok": False, "num_anuncios": 0, "num_cuentas": 0,
+                "errores": [SDK_ERROR_IMPORT]}
+
+    cons = _conexiones_efectivas()
+    if not cons:
+        msg = "No hay conexiones configuradas."
+        _set_estado(api_ok=False, ultimo_error=msg)
+        return {"ok": False, "num_anuncios": 0, "num_cuentas": 0, "errores": [msg]}
+
+    total_ads = 0
+    total_activos = 0
+    total_cuentas = 0
+    ids_vistos = []
+    errores = []
+
+    for con in cons:
+        try:
+            api = _api_desde(con["token"], con["app_id"], con["app_secret"])
+        except Exception as e:
+            errores.append(f"{con['alias']}: {e}")
+            continue
+
+        try:
+            cuentas = _descubrir_cuentas(api, con.get("env_account"))
+        except FacebookRequestError as e:
+            err = _fmt_fb_error(e)
+            errores.append(f"{con['alias']}: {err}")
+            if con["id"] != ENV_CONEXION_ID:
+                db.actualizar_conexion(con["id"], ultimo_error=err)
+            continue
+        except Exception as e:
+            errores.append(f"{con['alias']}: {e}")
+            continue
+
+        total_cuentas += len(cuentas)
+        cache_budget = {}
+
+        for cta in cuentas:
+            try:
+                ads = AdAccount(cta["act_id"], api=api).get_ads(
+                    params={"effective_status": ["ACTIVE", "PAUSED",
+                                                 "ADSET_PAUSED", "CAMPAIGN_PAUSED"],
+                            "limit": 500},
+                    fields=[Ad.Field.id, Ad.Field.name, Ad.Field.adset_id,
+                            Ad.Field.effective_status, Ad.Field.created_time],
+                )
+            except FacebookRequestError as e:
+                errores.append(f"{con['alias']}/{cta['name']}: {_fmt_fb_error(e)}")
+                continue
+            except Exception as e:
+                errores.append(f"{con['alias']}/{cta['name']}: {e}")
+                continue
+
+            for ad in ads:
+                ad_id = ad.get(Ad.Field.id)
+                nombre = ad.get(Ad.Field.name) or f"Anuncio {ad_id}"
+                adset_id = ad.get(Ad.Field.adset_id)
+                estado = ad.get(Ad.Field.effective_status) or ""
+                creado = ad.get(Ad.Field.created_time)
+                es_activo = 1 if estado == "ACTIVE" else 0
+                total_ads += 1
+                if es_activo:
+                    total_activos += 1
+
+                presupuesto = None
+                if adset_id:
+                    if adset_id in cache_budget:
+                        presupuesto = cache_budget[adset_id]
+                    else:
+                        presupuesto = _leer_daily_budget_adset(adset_id, api)
+                        cache_budget[adset_id] = presupuesto
+
+                db.upsert_anuncio(
+                    ad_id, nombre, adset_id=adset_id, activo=es_activo,
+                    fecha_creacion=creado, effective_status=estado,
+                    conexion_id=con["id"], cuenta_id=cta["act_id"],
+                    cuenta_nombre=cta["name"],
+                )
+                ids_vistos.append(ad_id)
+
+                if abrir_periodos and es_activo and presupuesto is not None:
+                    db.asegurar_periodo_inicial(ad_id, presupuesto)
+
+        if con["id"] != ENV_CONEXION_ID:
+            db.actualizar_conexion(con["id"], ultimo_error=None)
+
+    if ids_vistos:
+        db.marcar_inactivos(ids_vistos)
+
+    _set_estado(api_ok=(total_ads > 0 or not errores),
+                num_anuncios=total_activos, num_cuentas=total_cuentas,
+                num_conexiones=len(cons),
+                ultimo_error=("; ".join(errores)[:400] if errores else None),
+                ultimo_polling=db.ahora())
+    _log(f"Cargados {total_ads} anuncios ({total_activos} activos) de "
+         f"{total_cuentas} cuentas en {len(cons)} conexión(es). "
+         f"{len(errores)} error(es).")
+    return {"ok": not errores or total_ads > 0, "num_anuncios": total_ads,
+            "num_cuentas": total_cuentas, "errores": errores}
 
 
+# Alias de compatibilidad (app y polling llaman a este nombre).
+def cargar_anuncios_activos(abrir_periodos: bool = True) -> dict:
+    r = cargar_todo(abrir_periodos=abrir_periodos)
+    return {"ok": r["ok"], "anuncios": [], "error": "; ".join(r["errores"]) or None}
+
+
+def _leer_daily_budget_adset(adset_id: str, api=None) -> Optional[float]:
+    """Lee daily_budget de un adset (centavos → unidades). Requiere api."""
+    try:
+        adset = AdSet(adset_id, api=api).api_get(fields=[AdSet.Field.daily_budget])
+        raw = adset.get(AdSet.Field.daily_budget)
+        return (float(raw) / 100.0) if raw is not None else None
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------- #
+#  Insights agregados de todas las conexiones/cuentas
+# --------------------------------------------------------------------------- #
 def obtener_insights(date_preset: str = "today") -> dict:
     """
-    Trae métricas reales de Facebook por anuncio para el rango indicado.
-    Devuelve {ad_id: {"spend","cpm","ctr","impressions","clicks",
-                       "conversaciones","costo_conversacion"}}.
-    Nunca lanza: si falla, devuelve {} y registra el error.
-
-    date_preset admite: today, yesterday, last_7d, last_30d, this_month, maximum, ...
+    {ad_id: {"spend","cpm","ctr","impressions","clicks","conversaciones",
+             "costo_conversacion"}} agregando todas las conexiones/cuentas.
+    Nunca lanza.
     """
-    if not (_API_INICIALIZADA or inicializar_api()):
+    if not SDK_DISPONIBLE:
         return {}
-    try:
-        insights = _cuenta().get_insights(
-            params={"level": "ad", "date_preset": date_preset, "limit": 500},
-            fields=["ad_id", "spend", "cpm", "ctr", "impressions",
-                    "clicks", "actions"],
-        )
-        resultado = {}
-        for row in insights:
-            ad_id = row.get("ad_id")
-            if not ad_id:
+    cons = _conexiones_efectivas()
+    resultado = {}
+    for con in cons:
+        try:
+            api = _api_desde(con["token"], con["app_id"], con["app_secret"])
+            cuentas = _descubrir_cuentas(api, con.get("env_account"))
+        except Exception as e:
+            _log(f"Insights: fallo en {con['alias']}: {e}")
+            continue
+        for cta in cuentas:
+            try:
+                filas = AdAccount(cta["act_id"], api=api).get_insights(
+                    params={"level": "ad", "date_preset": date_preset, "limit": 500},
+                    fields=["ad_id", "spend", "cpm", "ctr", "impressions",
+                            "clicks", "actions"])
+            except Exception as e:
+                _log(f"Insights {cta['name']}: {e}")
                 continue
-            spend = _to_float(row.get("spend"))
-            conversaciones = 0.0
-            for a in (row.get("actions") or []):
-                if a.get("action_type") in MSG_ACTION_TYPES:
-                    conversaciones += _to_float(a.get("value"))
-            resultado[str(ad_id)] = {
-                "spend": spend,
-                "cpm": _to_float(row.get("cpm")),
-                "ctr": _to_float(row.get("ctr")),
-                "impressions": _to_float(row.get("impressions")),
-                "clicks": _to_float(row.get("clicks")),
-                "conversaciones": conversaciones,
-                "costo_conversacion": (spend / conversaciones) if conversaciones > 0 else None,
-            }
-        return resultado
-    except FacebookRequestError as e:
-        _set_estado(ultimo_error=_fmt_fb_error(e))
-        _log(f"Error en insights: {_fmt_fb_error(e)}")
-        return {}
-    except Exception as e:
-        _set_estado(ultimo_error=str(e))
-        _log(f"Error inesperado en insights: {e}")
-        return {}
+            for row in filas:
+                ad_id = row.get("ad_id")
+                if not ad_id:
+                    continue
+                spend = _to_float(row.get("spend"))
+                conv = 0.0
+                for a in (row.get("actions") or []):
+                    if a.get("action_type") in MSG_ACTION_TYPES:
+                        conv += _to_float(a.get("value"))
+                resultado[str(ad_id)] = {
+                    "spend": spend, "cpm": _to_float(row.get("cpm")),
+                    "ctr": _to_float(row.get("ctr")),
+                    "impressions": _to_float(row.get("impressions")),
+                    "clicks": _to_float(row.get("clicks")),
+                    "conversaciones": conv,
+                    "costo_conversacion": (spend / conv) if conv > 0 else None,
+                }
+    return resultado
 
 
 def _to_float(v) -> float:
@@ -243,37 +386,23 @@ def _to_float(v) -> float:
         return 0.0
 
 
-def _leer_daily_budget_adset(adset_id: str) -> Optional[float]:
-    """Lee el daily_budget de un adset (viene en centavos) y lo pasa a unidades."""
-    try:
-        adset = AdSet(adset_id).api_get(fields=[AdSet.Field.daily_budget])
-        raw = adset.get(AdSet.Field.daily_budget)
-        if raw is None:
-            return None
-        return float(raw) / 100.0
-    except Exception:
-        return None
-
-
 # --------------------------------------------------------------------------- #
-#  Modificación de presupuesto (Parte 8)
+#  Modificación de presupuesto (usa el token de la conexión del anuncio)
 # --------------------------------------------------------------------------- #
-def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float) -> dict:
-    """
-    POST /{adset-id} con daily_budget en centavos (monto * 100).
-    Devuelve {"ok": bool, "error": str|None}.
-    NO toca SQLite: el llamador decide cerrar/abrir período solo si ok=True.
-    """
-    if not (_API_INICIALIZADA or inicializar_api()):
-        return {"ok": False, "error": obtener_estado()["ultimo_error"]}
+def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float,
+                                    conexion_id: Optional[int] = None) -> dict:
+    """POST /{adset-id} daily_budget (monto*100). NO toca SQLite."""
+    if not SDK_DISPONIBLE:
+        return {"ok": False, "error": f"SDK no disponible: {SDK_ERROR_IMPORT}"}
     if not adset_id:
-        return {"ok": False, "error": "Este anuncio no tiene adset_id guardado. "
-                                       "Recarga los anuncios desde Facebook."}
+        return {"ok": False, "error": "El anuncio no tiene adset_id. Recarga los anuncios."}
+    api = _api_para_conexion(conexion_id)
+    if api is None:
+        return {"ok": False, "error": "No hay token para la conexión de este anuncio."}
     try:
         centavos = int(round(float(nuevo_monto) * 100))
-        adset = AdSet(adset_id)
-        adset.api_update(params={AdSet.Field.daily_budget: centavos})
-        _log(f"Presupuesto de adset {adset_id} actualizado a {nuevo_monto:.2f}.")
+        AdSet(adset_id, api=api).api_update(params={AdSet.Field.daily_budget: centavos})
+        _log(f"Presupuesto de adset {adset_id} → {nuevo_monto:.2f}.")
         return {"ok": True, "error": None}
     except FacebookRequestError as e:
         return {"ok": False, "error": _fmt_fb_error(e)}
@@ -282,24 +411,20 @@ def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-#  Duplicación de anuncios (Parte 7)
+#  Duplicación de anuncios
 # --------------------------------------------------------------------------- #
 def duplicar_anuncio(ad_id: str, num_copias: int, presupuesto: float,
-                     activar: bool = False) -> dict:
-    """
-    Duplica un anuncio `num_copias` veces con /{ad-id}/copies deep_copy=true.
-    Cada copia:
-      - se crea PAUSED (o ACTIVE si activar=True),
-      - recibe el presupuesto indicado en su nuevo adset,
-      - se guarda en `anuncios` y se le abre un período nuevo.
-
-    Devuelve {"exitosas": [...], "fallidas": [...], "error_global": str|None}.
-    Nunca lanza excepción: los errores por copia se acumulan.
-    """
+                     activar: bool = False, conexion_id: Optional[int] = None,
+                     cuenta_id: Optional[str] = None,
+                     cuenta_nombre: Optional[str] = None) -> dict:
+    """Duplica un anuncio N veces con deep_copy usando el token de su conexión."""
     resultado = {"exitosas": [], "fallidas": [], "error_global": None}
-
-    if not (_API_INICIALIZADA or inicializar_api()):
-        resultado["error_global"] = obtener_estado()["ultimo_error"]
+    if not SDK_DISPONIBLE:
+        resultado["error_global"] = f"SDK no disponible: {SDK_ERROR_IMPORT}"
+        return resultado
+    api = _api_para_conexion(conexion_id)
+    if api is None:
+        resultado["error_global"] = "No hay token para la conexión de este anuncio."
         return resultado
 
     num_copias = max(1, min(int(num_copias), 10))
@@ -310,47 +435,35 @@ def duplicar_anuncio(ad_id: str, num_copias: int, presupuesto: float,
     for i in range(1, num_copias + 1):
         nombre_copia = f"{nombre_base} - Copia {i}"
         try:
-            ad = Ad(ad_id)
-            # El endpoint /copies con deep_copy=true copia adset + creativo.
-            copia = ad.create_copy(params={
-                "deep_copy": True,
-                "status_option": status_copia,
-            })
-
+            copia = Ad(ad_id, api=api).create_copy(params={
+                "deep_copy": True, "status_option": status_copia})
             nuevo_ad_id = copia.get("copied_ad_id") or copia.get("ad_id") or copia.get("id")
-            # Estructura de retorno variable: intentamos resolver el adset nuevo.
-            nuevo_adset_id = _resolver_adset_de_copia(copia, nuevo_ad_id)
-
+            nuevo_adset_id = _resolver_adset_de_copia(copia, nuevo_ad_id, api)
             if not nuevo_ad_id:
                 raise RuntimeError("Facebook no devolvió el ad_id de la copia.")
 
-            # Asignar presupuesto a la copia (en su adset nuevo).
             if nuevo_adset_id:
-                r = actualizar_presupuesto_facebook(nuevo_adset_id, presupuesto)
+                r = actualizar_presupuesto_facebook(nuevo_adset_id, presupuesto, conexion_id)
                 if not r["ok"]:
-                    _log(f"Copia {nuevo_ad_id} creada pero no se pudo fijar presupuesto: {r['error']}")
+                    _log(f"Copia {nuevo_ad_id}: presupuesto no aplicado: {r['error']}")
 
-            # Guardar en SQLite + abrir período nuevo.
-            db.upsert_anuncio(nuevo_ad_id, nombre_copia, adset_id=nuevo_adset_id, activo=1)
+            db.upsert_anuncio(nuevo_ad_id, nombre_copia, adset_id=nuevo_adset_id,
+                              activo=1 if activar else 0, effective_status=status_copia,
+                              conexion_id=conexion_id, cuenta_id=cuenta_id,
+                              cuenta_nombre=cuenta_nombre)
             db.abrir_periodo(nuevo_ad_id, float(presupuesto))
-
             resultado["exitosas"].append({
                 "ad_id": nuevo_ad_id, "nombre": nombre_copia,
-                "adset_id": nuevo_adset_id, "presupuesto": presupuesto,
-            })
+                "adset_id": nuevo_adset_id, "presupuesto": presupuesto})
             _log(f"Copia creada: {nombre_copia} ({nuevo_ad_id}).")
-
         except FacebookRequestError as e:
             resultado["fallidas"].append({"nombre": nombre_copia, "error": _fmt_fb_error(e)})
         except Exception as e:
             resultado["fallidas"].append({"nombre": nombre_copia, "error": str(e)})
-
     return resultado
 
 
-def _resolver_adset_de_copia(copia: dict, nuevo_ad_id: Optional[str]) -> Optional[str]:
-    """Intenta extraer el adset_id de la respuesta de /copies o consultándolo."""
-    # Algunas respuestas traen ad_object_ids con la estructura de copiado.
+def _resolver_adset_de_copia(copia: dict, nuevo_ad_id: Optional[str], api) -> Optional[str]:
     try:
         obj = copia.get("ad_object_ids") or {}
         adsets = obj.get("adsets")
@@ -361,10 +474,9 @@ def _resolver_adset_de_copia(copia: dict, nuevo_ad_id: Optional[str]) -> Optiona
             return str(primero)
     except Exception:
         pass
-    # Fallback: consultar el ad recién creado por su adset_id.
     if nuevo_ad_id:
         try:
-            ad = Ad(nuevo_ad_id).api_get(fields=[Ad.Field.adset_id])
+            ad = Ad(nuevo_ad_id, api=api).api_get(fields=[Ad.Field.adset_id])
             return ad.get(Ad.Field.adset_id)
         except Exception:
             return None
@@ -375,52 +487,51 @@ def _resolver_adset_de_copia(copia: dict, nuevo_ad_id: Optional[str]) -> Optiona
 #  Polling en segundo plano
 # --------------------------------------------------------------------------- #
 def _revisar_cambios_presupuesto() -> None:
-    """
-    Recorre los anuncios activos, lee el daily_budget actual de su adset y,
-    si cambió respecto al período abierto, cierra ese período y abre uno nuevo.
-    """
+    """Detecta cambios de daily_budget y cierra/abre período."""
     anuncios = db.obtener_anuncios(solo_activos=True)
+    apis = {}
     cache_budget = {}
     cambios = 0
     for anuncio in anuncios:
         adset_id = anuncio.get("adset_id")
         if not adset_id:
             continue
-        if adset_id in cache_budget:
-            actual = cache_budget[adset_id]
+        cid = anuncio.get("conexion_id")
+        if cid not in apis:
+            apis[cid] = _api_para_conexion(cid)
+        api = apis[cid]
+        if api is None:
+            continue
+        clave = (cid, adset_id)
+        if clave in cache_budget:
+            actual = cache_budget[clave]
         else:
-            actual = _leer_daily_budget_adset(adset_id)
-            cache_budget[adset_id] = actual
+            actual = _leer_daily_budget_adset(adset_id, api)
+            cache_budget[clave] = actual
         if actual is None:
             continue
-
         abierto = db.periodo_abierto(anuncio["ad_id"])
         if abierto is None:
             db.abrir_periodo(anuncio["ad_id"], actual)
             continue
-
-        # Comparación con tolerancia de 1 centavo.
         if abs(float(abierto["presupuesto"]) - float(actual)) > 0.01:
             db.cambiar_periodo(anuncio["ad_id"], actual)
             cambios += 1
-            _log(f"Cambio detectado en '{anuncio['nombre']}': "
-                 f"{abierto['presupuesto']:.2f} → {actual:.2f}. Nuevo período abierto.")
+            _log(f"Cambio en '{anuncio['nombre']}': "
+                 f"{abierto['presupuesto']:.2f} → {actual:.2f}. Nuevo período.")
     if cambios:
         _log(f"Polling: {cambios} cambio(s) de presupuesto aplicados.")
 
 
 def _loop_polling() -> None:
     _set_estado(polling_activo=True)
-    # Primera carga inmediata.
     try:
-        inicializar_api()
-        cargar_anuncios_activos()
+        cargar_todo()
     except Exception as e:
         _log(f"Fallo en carga inicial: {e}")
-
     while not _POLLING_STOP.wait(config.POLLING_INTERVAL_SEG):
         try:
-            cargar_anuncios_activos(abrir_periodos=True)
+            cargar_todo(abrir_periodos=True)
             _revisar_cambios_presupuesto()
             _set_estado(ultimo_polling=db.ahora())
         except Exception as e:
@@ -430,7 +541,6 @@ def _loop_polling() -> None:
 
 
 def iniciar_polling() -> None:
-    """Arranca el hilo de polling una sola vez por proceso."""
     global _POLLING_THREAD
     if _POLLING_THREAD and _POLLING_THREAD.is_alive():
         return
@@ -448,12 +558,11 @@ def detener_polling() -> None:
 #  Utilidades
 # --------------------------------------------------------------------------- #
 def _fmt_fb_error(e) -> str:
-    """Extrae el mensaje legible de un FacebookRequestError."""
     try:
         msg = e.api_error_message() or ""
         code = e.api_error_code()
         sub = e.api_error_subcode()
-        partes = [p for p in [msg, f"(code {code}" + (f"/{sub}" if sub else "") + ")"] if p]
-        return " ".join(partes).strip() or str(e)
+        extra = f"(code {code}" + (f"/{sub}" if sub else "") + ")"
+        return " ".join([p for p in [msg, extra] if p]).strip() or str(e)
     except Exception:
         return str(e)
