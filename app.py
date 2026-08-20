@@ -44,22 +44,6 @@ servicios = arrancar_servicios()
 
 
 # --------------------------------------------------------------------------- #
-#  Auto-refresco cada 2 minutos (recarga la página)
-# --------------------------------------------------------------------------- #
-def auto_refresco(segundos: int = 120):
-    st.components.v1.html(
-        f"""
-        <script>
-            setTimeout(function() {{
-                window.parent.location.reload();
-            }}, {segundos * 1000});
-        </script>
-        """,
-        height=0,
-    )
-
-
-# --------------------------------------------------------------------------- #
 #  Helpers de UI
 # --------------------------------------------------------------------------- #
 def _fmt_money(v):
@@ -895,8 +879,20 @@ def seccion_conexiones():
 # --------------------------------------------------------------------------- #
 def main():
     _gate_password()
-    st.title("📊 Atribución de ventas · Facebook Ads")
-    st.caption(f"Actualizado: {db.a_texto(db.ahora())} · auto-refresco cada 2 min")
+    top1, top2 = st.columns([5, 1])
+    with top1:
+        st.title("📊 Atribución de ventas · Facebook Ads")
+        st.caption(f"Última actualización: {db.a_texto(db.ahora())}")
+    with top2:
+        st.write("")
+        st.write("")
+        if st.button("🔄 Actualizar", use_container_width=True, type="primary",
+                     help="Refresca la vista y las métricas de Facebook cuando tú quieras."):
+            try:
+                _insights_cache.clear()
+            except Exception:
+                pass
+            st.rerun()
 
     sidebar_estado()
 
@@ -913,8 +909,6 @@ def main():
     seccion_manual()
     st.divider()
     seccion_conexiones()
-
-    auto_refresco(120)
 
 
 if __name__ == "__main__":
