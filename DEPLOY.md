@@ -56,9 +56,16 @@ con la base de datos vacía.
 
 ## 4. Puerto y dominio
 
+> ⚠️ **Puerto:** EasyPanel inyecta la variable `PORT` (normalmente **80**) y la app
+> la respeta, así que Streamlit escucha en ese puerto. Revisa a qué puerto apunta
+> el **dominio por defecto** que crea EasyPanel (en Dominios verás algo como
+> `→ http://<servicio>:80/`) y usa **ese mismo puerto** en tu dominio propio.
+> En la práctica: **usa el puerto `80`** (no 8501) salvo que el dominio por
+> defecto muestre otro.
+
 1. Pestaña **Domains** → **Add Domain**:
    - Host: `anuncios.datibot.lat`
-   - **Port: `8501`** (puerto interno del contenedor / Streamlit)
+   - **Port: `80`** (el mismo que usa el dominio por defecto de EasyPanel)
    - **HTTPS / SSL: activado** (Let's Encrypt).
 2. **DNS**: en tu proveedor de `datibot.lat`, crea un registro **A**:
    - `anuncios` → la **IP pública de tu VPS** de EasyPanel.
