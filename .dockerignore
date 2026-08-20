@@ -1,0 +1,12 @@
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.env
+datos.db
+datos.db-wal
+datos.db-shm
+ventas.xlsx
+.git/
+.DS_Store

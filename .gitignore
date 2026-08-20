@@ -1,0 +1,18 @@
+# Credenciales — NUNCA subir a git
+.env
+
+# Base de datos y datos locales
+datos.db
+datos.db-wal
+datos.db-shm
+ventas.xlsx
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Sistema
+.DS_Store

@@ -1,0 +1,17 @@
+# Configuración de Streamlit para correr detrás del proxy de EasyPanel
+[server]
+headless = true
+address = "0.0.0.0"
+port = 8501
+# Detrás de un reverse proxy con un solo dominio: desactivar CORS/XSRF evita
+# problemas de websocket y de subida de archivos.
+enableCORS = false
+enableXsrfProtection = false
+# Subir Excels de hasta 50 MB
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
