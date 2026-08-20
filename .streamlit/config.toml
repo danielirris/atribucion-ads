@@ -9,6 +9,9 @@ enableCORS = false
 enableXsrfProtection = false
 # Subir Excels de hasta 50 MB
 maxUploadSize = 50
+# Servir archivos estáticos de la carpeta ./static (para las páginas legales,
+# accesibles en /app/static/<archivo> sin pasar por la contraseña).
+enableStaticServing = true
 
 [browser]
 gatherUsageStats = false
