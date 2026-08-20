@@ -95,8 +95,10 @@ def init_db() -> None:
         )
         conn.commit()
 
-    # Migración defensiva: agrega adset_id si la DB viene de una versión previa.
+    # Migración defensiva: agrega columnas nuevas si la DB viene de versión previa.
     _asegurar_columna("anuncios", "adset_id", "TEXT")
+    _asegurar_columna("anuncios", "fecha_creacion", "TEXT")
+    _asegurar_columna("anuncios", "effective_status", "TEXT")
 
 
 def _asegurar_columna(tabla: str, columna: str, tipo: str) -> None:
@@ -111,20 +113,26 @@ def _asegurar_columna(tabla: str, columna: str, tipo: str) -> None:
 #  ANUNCIOS
 # --------------------------------------------------------------------------- #
 def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
-                   activo: int = 1) -> None:
+                   activo: int = 1, fecha_creacion: Optional[str] = None,
+                   effective_status: Optional[str] = None) -> None:
     """Inserta o actualiza un anuncio."""
     with _LOCK, _conn() as conn:
         conn.execute(
             """
-            INSERT INTO anuncios (ad_id, nombre, adset_id, activo, ultima_actualizacion)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO anuncios
+                (ad_id, nombre, adset_id, activo, fecha_creacion,
+                 effective_status, ultima_actualizacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ad_id) DO UPDATE SET
                 nombre               = excluded.nombre,
                 adset_id             = COALESCE(excluded.adset_id, anuncios.adset_id),
                 activo               = excluded.activo,
+                fecha_creacion       = COALESCE(excluded.fecha_creacion, anuncios.fecha_creacion),
+                effective_status     = excluded.effective_status,
                 ultima_actualizacion = excluded.ultima_actualizacion
             """,
-            (str(ad_id), nombre, adset_id, activo, a_texto(ahora())),
+            (str(ad_id), nombre, adset_id, activo, fecha_creacion,
+             effective_status, a_texto(ahora())),
         )
         conn.commit()
 
@@ -299,6 +307,31 @@ def resumen_ventas_periodo(periodo_id: int) -> dict:
             (periodo_id,),
         ).fetchone()
         return {"num_ventas": r["num"], "ingreso_total": r["total"]}
+
+
+def ventas_agg_por_ad(cutoff: Optional[datetime] = None) -> dict:
+    """
+    Agrega ventas por anuncio: {ad_id: {"num_ventas": n, "ingreso_total": x}}.
+    Si se pasa `cutoff`, solo cuenta ventas con hora_venta >= cutoff.
+    """
+    with _conn() as conn:
+        if cutoff is not None:
+            rows = conn.execute(
+                """
+                SELECT ad_id, COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
+                FROM ventas WHERE hora_venta >= ? GROUP BY ad_id
+                """,
+                (a_texto(cutoff),),
+            )
+        else:
+            rows = conn.execute(
+                """
+                SELECT ad_id, COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
+                FROM ventas GROUP BY ad_id
+                """
+            )
+        return {r["ad_id"]: {"num_ventas": r["num"], "ingreso_total": float(r["total"])}
+                for r in rows}
 
 
 def obtener_ventas(ad_id: Optional[str] = None) -> list:

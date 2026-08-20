@@ -109,6 +109,60 @@ def formato_antiguedad(minutos: float) -> str:
     return f"{dias}d {horas_r}h"
 
 
+def salud_badge(roas: float, num_ventas: int) -> dict:
+    """
+    Etiqueta heurística de 'salud' del anuncio (aproximación al 'Salud 7d' de
+    otras herramientas; se basa en ROAS y volumen de ventas atribuidas).
+    Devuelve {"texto","color"}.
+    """
+    if num_ventas == 0:
+        return {"texto": "Aprendiendo", "color": "#3b82f6"}   # azul
+    if roas >= 3:
+        return {"texto": "Excelente", "color": "#22c55e"}     # verde
+    if roas >= 2:
+        return {"texto": "Robusto", "color": "#16a34a"}       # verde oscuro
+    if roas >= 1:
+        return {"texto": "Sano", "color": "#a3a30a"}          # oliva
+    return {"texto": "Bajo", "color": "#ef4444"}              # rojo
+
+
+def serie_roas_periodos(ad_id: str, n: int = 10, ahora: Optional[datetime] = None) -> list:
+    """Lista de ROAS de los últimos n períodos (para dibujar una mini-gráfica)."""
+    ahora = ahora or db.ahora()
+    ms = metricas_todos_los_periodos(ad_id, ahora)
+    serie = [m["roas"] for m in ms][-n:]
+    return serie
+
+
+def ultima_accion(ad_id: str, ahora: Optional[datetime] = None) -> dict:
+    """
+    Describe el último cambio de presupuesto del anuncio, comparando los dos
+    períodos más recientes. Devuelve {"texto","direccion","hace","detalle"}.
+    """
+    ahora = ahora or db.ahora()
+    periodos = db.obtener_periodos(ad_id)
+    if not periodos:
+        return {"texto": "Sin modificaciones", "direccion": "none", "hace": "", "detalle": ""}
+    actual = periodos[-1]
+    inicio = db.a_fecha(actual["hora_inicio"])
+    hace = formato_antiguedad((ahora - inicio).total_seconds() / 60.0) if inicio else ""
+    if len(periodos) == 1:
+        return {"texto": "Sin modificaciones", "direccion": "none",
+                "hace": f"hace {hace}" if hace else "", "detalle": ""}
+    anterior = periodos[-2]
+    p_ant = float(anterior["presupuesto"])
+    p_act = float(actual["presupuesto"])
+    if p_act > p_ant:
+        direccion, flecha = "up", "↗"
+    elif p_act < p_ant:
+        direccion, flecha = "down", "↘"
+    else:
+        direccion, flecha = "none", "→"
+    texto = f"{flecha} {p_ant:.2f} → {p_act:.2f} US$".replace(".", ",")
+    return {"texto": texto, "direccion": direccion,
+            "hace": f"hace {hace}" if hace else "", "detalle": ""}
+
+
 def evaluar_alertas(ahora: Optional[datetime] = None,
                     umbral_minutos: float = 30,
                     umbral_roas: float = 1.5) -> list:

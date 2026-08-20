@@ -7,7 +7,8 @@ Ejecutar con:
     streamlit run app.py
 """
 import time
-from datetime import datetime
+import html as _html
+from datetime import datetime, timedelta
 
 import pandas as pd
 import plotly.express as px
@@ -66,6 +67,65 @@ def _fmt_money(v):
         return f"${v:,.2f}"
     except Exception:
         return str(v)
+
+
+def _usd(v):
+    """Formato tipo '1.234,56 US$' (coma decimal), como la herramienta de referencia."""
+    if v is None:
+        return "—"
+    try:
+        s = f"{float(v):,.2f}"            # 1,234.56
+        s = s.replace(",", "@").replace(".", ",").replace("@", ".")
+        return f"{s} US$"
+    except Exception:
+        return str(v)
+
+
+def _roas_color(r):
+    if r is None:
+        return "#9ca3af"
+    if r >= 2:
+        return "#22c55e"
+    if r >= 1:
+        return "#eab308"
+    return "#ef4444"
+
+
+def _spark_svg(serie, color="#22c55e", w=78, h=26):
+    """Mini-gráfica (polyline SVG) a partir de una lista de valores."""
+    pts = [x for x in (serie or []) if x is not None]
+    if len(pts) < 2:
+        return f'<svg width="{w}" height="{h}"></svg>'
+    lo, hi = min(pts), max(pts)
+    rng = (hi - lo) or 1.0
+    n = len(pts)
+    coords = []
+    for i, v in enumerate(pts):
+        x = (i / (n - 1)) * (w - 4) + 2
+        y = h - 2 - ((v - lo) / rng) * (h - 4)
+        coords.append(f"{x:.1f},{y:.1f}")
+    path = " ".join(coords)
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
+            f'<polyline points="{path}" fill="none" stroke="{color}" '
+            f'stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>')
+
+
+def _fecha_corta(iso):
+    """'2026-08-04T10:00:00-0700' -> '04 ago 2026'."""
+    if not iso:
+        return "—"
+    meses = ["ene", "feb", "mar", "abr", "may", "jun",
+             "jul", "ago", "sep", "oct", "nov", "dic"]
+    d = db.a_fecha(str(iso)[:19].replace("T", " ")) if "T" in str(iso) else db.a_fecha(iso)
+    if not d:
+        return str(iso)[:10]
+    return f"{d.day:02d} {meses[d.month - 1]} {d.year}"
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _insights_cache(date_preset: str):
+    """Cachea los insights de Facebook 2 min para no llamar en cada rerun."""
+    return fb.obtener_insights(date_preset)
 
 
 def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
@@ -132,6 +192,10 @@ def sidebar_estado():
     if st.sidebar.button("📥 Recargar anuncios de Facebook", use_container_width=True):
         with st.spinner("Consultando Facebook..."):
             r = fb.cargar_anuncios_activos()
+            try:
+                _insights_cache.clear()
+            except Exception:
+                pass
         if r["ok"]:
             st.sidebar.success(f"{len(r['anuncios'])} anuncios cargados.")
         else:
@@ -167,58 +231,108 @@ def sidebar_estado():
 # --------------------------------------------------------------------------- #
 #  Sección 1 — Vista general de anuncios activos
 # --------------------------------------------------------------------------- #
+def _es_activo(a: dict) -> bool:
+    est = a.get("effective_status")
+    if est:
+        return est == "ACTIVE"
+    return a.get("activo") == 1
+
+
 def seccion_vista_general():
-    st.header("1 · Vista general de anuncios activos")
+    st.header("1 · Anuncios")
     ahora = db.ahora()
-    anuncios = db.obtener_anuncios(solo_activos=True)
+
+    # --- Controles: filtro de estado + rango de métricas de Facebook ---
+    c1, c2, c3 = st.columns([3, 2, 2])
+    with c1:
+        filtro = st.radio("Mostrar", ["Activos", "Apagados", "Todos"],
+                          horizontal=True, key="filtro_estado")
+    with c2:
+        rango_lbl = st.selectbox(
+            "Rango (gasto/CPM/CTR/conv. de Facebook)",
+            ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo"], key="rango_ins")
+    RANGO = {
+        "Hoy": ("today", ahora.replace(hour=0, minute=0, second=0, microsecond=0)),
+        "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
+        "Últimos 30 días": ("last_30d", ahora - timedelta(days=30)),
+        "Máximo": ("maximum", None),
+    }
+    date_preset, cutoff = RANGO[rango_lbl]
+    with c3:
+        st.write("")
+        st.caption(f"Ordenado por ROAS ↓ · rango: {rango_lbl}")
+
+    todos = db.obtener_anuncios(solo_activos=False)
+    if filtro == "Activos":
+        anuncios = [a for a in todos if _es_activo(a)]
+    elif filtro == "Apagados":
+        anuncios = [a for a in todos if not _es_activo(a)]
+    else:
+        anuncios = todos
 
     if not anuncios:
-        st.info("No hay anuncios activos. Usa **Recargar anuncios de Facebook** en la barra lateral "
-                "o registra cambios manuales más abajo.")
+        st.info("No hay anuncios para este filtro. Usa **📥 Recargar anuncios de Facebook** "
+                "en la barra lateral.")
         return
+
+    insights = _insights_cache(date_preset)
+    fb_ok = bool(insights)
+    ventas_agg = db.ventas_agg_por_ad(cutoff)
 
     filas = []
     for a in anuncios:
-        m = calculos.metricas_periodo_actual(a["ad_id"], ahora)
-        if m:
-            filas.append({
-                "🚦": calculos.color_roas(m["roas"]),
-                "Anuncio": a["nombre"],
-                "ad_id": a["ad_id"],
-                "Presupuesto": m["presupuesto"],
-                "Tiempo en este presupuesto": calculos.formato_antiguedad(m["duracion_minutos"]),
-                "Ventas (período actual)": m["num_ventas"],
-                "Ingreso (período)": m["ingreso_total"],
-                "ROAS (período actual)": m["roas"],
-            })
+        ad_id = a["ad_id"]
+        ins = insights.get(str(ad_id), {})
+        vagg = ventas_agg.get(ad_id, {"num_ventas": 0, "ingreso_total": 0.0})
+        num, ingresos = vagg["num_ventas"], vagg["ingreso_total"]
+
+        abierto = db.periodo_abierto(ad_id)
+        if abierto:
+            presupuesto = float(abierto["presupuesto"])
         else:
-            filas.append({
-                "🚦": "⚪", "Anuncio": a["nombre"], "ad_id": a["ad_id"],
-                "Presupuesto": None, "Tiempo en este presupuesto": "—",
-                "Ventas (período actual)": 0, "Ingreso (período)": 0.0,
-                "ROAS (período actual)": 0.0,
-            })
+            ps = db.obtener_periodos(ad_id)
+            presupuesto = float(ps[-1]["presupuesto"]) if ps else None
 
-    df = pd.DataFrame(filas)
-    st.dataframe(
-        df.drop(columns=["ad_id"]),
-        use_container_width=True, hide_index=True,
-        column_config={
-            "Presupuesto": st.column_config.NumberColumn(format="$%.2f"),
-            "Ingreso (período)": st.column_config.NumberColumn(format="$%.2f"),
-            "ROAS (período actual)": st.column_config.NumberColumn(format="%.2f x"),
-        },
-    )
+        spend_real = ins.get("spend")
+        if spend_real is not None:
+            gasto = spend_real
+        else:
+            m = calculos.metricas_periodo_actual(ad_id, ahora)
+            gasto = m["gasto_estimado"] if m else 0.0
 
-    # --- Opción A: editar presupuesto con lápiz (por anuncio) ---
+        roas = (ingresos / gasto) if gasto and gasto > 0 else 0.0
+        filas.append({
+            "a": a, "ad_id": ad_id, "activo": _es_activo(a),
+            "presupuesto": presupuesto, "spend": spend_real, "gasto": gasto,
+            "pct": (spend_real / presupuesto * 100) if (spend_real is not None and presupuesto) else None,
+            "cpm": ins.get("cpm"), "ctr": ins.get("ctr"),
+            "num": num, "ingresos": ingresos,
+            "val_venta": (ingresos / num) if num > 0 else 0.0,
+            "ganancia": ingresos - (gasto or 0.0), "roas": roas,
+            "conv": ins.get("conversaciones"), "costo_conv": ins.get("costo_conversacion"),
+            "badge": calculos.salud_badge(roas, num),
+            "serie": calculos.serie_roas_periodos(ad_id, ahora=ahora),
+            "accion": calculos.ultima_accion(ad_id, ahora),
+        })
+
+    filas.sort(key=lambda f: f["roas"], reverse=True)
+
+    if not fb_ok:
+        st.caption("⚠️ Métricas de Facebook (gasto real, CPM, CTR, conversaciones) no "
+                   "disponibles ahora — se muestran '—' y el ROAS usa el gasto estimado. "
+                   "Revisa la conexión en la barra lateral.")
+
+    st.markdown(_TABLA_CSS + _render_tabla(filas), unsafe_allow_html=True)
+
+    # --- Opción A: editar presupuesto de un anuncio (envía a Facebook) ---
     st.subheader("✏️ Cambiar presupuesto de un anuncio (envía a Facebook)")
     col1, col2, col3 = st.columns([3, 2, 2])
-    opciones = {f"{a['nombre']}  ·  {a['ad_id']}": a["ad_id"] for a in anuncios}
+    opciones = {f"{f['a']['nombre']}  ·  {f['ad_id']}": f['ad_id'] for f in filas}
     with col1:
         sel = st.selectbox("Anuncio", list(opciones.keys()), key="edit_sel")
     ad_id_sel = opciones[sel]
-    m_actual = calculos.metricas_periodo_actual(ad_id_sel, ahora)
-    presup_actual = m_actual["presupuesto"] if m_actual else 0.0
+    abierto_sel = db.periodo_abierto(ad_id_sel)
+    presup_actual = float(abierto_sel["presupuesto"]) if abierto_sel else 0.0
     with col2:
         nuevo = st.number_input("Nuevo presupuesto diario", min_value=0.0,
                                 value=float(presup_actual or 0.0), step=1.0, key="edit_monto")
@@ -235,6 +349,145 @@ def seccion_vista_general():
                 st.error(f"❌ Facebook rechazó el cambio: {r['error']}\n\nEl período NO se cerró.")
             time.sleep(1.0)
             st.rerun()
+
+
+# --------------------------------------------------------------------------- #
+#  Render de la tabla rica (HTML)
+# --------------------------------------------------------------------------- #
+_TABLA_CSS = """
+<style>
+.tbl-wrap { overflow-x:auto; border:1px solid #1f2a37; border-radius:10px; }
+table.ads { width:100%; border-collapse:collapse; font-size:12px;
+            color:#e5e7eb; background:#0b1220; min-width:1180px; }
+table.ads th { text-align:left; font-weight:600; color:#93a4b8; font-size:10.5px;
+               text-transform:uppercase; letter-spacing:.03em; padding:9px 10px;
+               border-bottom:1px solid #1f2a37; white-space:nowrap; }
+table.ads td { padding:9px 10px; border-bottom:1px solid #141d2b; vertical-align:middle; }
+table.ads tr:hover td { background:#0f1830; }
+.big { font-size:12.5px; font-weight:600; color:#f3f4f6; }
+.sub { font-size:10.5px; color:#8b9bb0; }
+.pill { display:inline-flex; align-items:center; gap:5px; padding:2px 8px;
+        border-radius:999px; font-size:10.5px; font-weight:600; }
+.pill-run { background:#0f2a1a; color:#4ade80; }
+.pill-off { background:#2a2f39; color:#9ca3af; }
+.dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+.tag { font-size:9.5px; color:#6b7a90; border:1px solid #263344; border-radius:4px;
+       padding:0 4px; margin-left:4px; }
+.badge { display:inline-block; padding:1px 7px; border-radius:5px; font-size:10px;
+         font-weight:700; color:#0b1220; }
+.bar { height:5px; background:#1f2a37; border-radius:4px; margin-top:4px; overflow:hidden; }
+.bar > span { display:block; height:100%; background:#3b82f6; }
+.chip { display:inline-block; background:#0f2a1a; color:#4ade80; border-radius:5px;
+        padding:1px 7px; font-size:10px; font-weight:600; }
+.up { color:#4ade80; } .down { color:#f87171; } .flat { color:#9ca3af; }
+</style>
+"""
+
+
+def _c_estado(f):
+    if f["activo"]:
+        return ('<span class="pill pill-run"><span class="dot" style="background:#4ade80"></span>'
+                'Corriendo</span>')
+    return ('<span class="pill pill-off"><span class="dot" style="background:#9ca3af"></span>'
+            'Pausado</span>')
+
+
+def _c_presupuesto(f):
+    return (f'<div class="big">{_usd(f["presupuesto"])}</div>'
+            f'<div class="sub">ABO</div>')
+
+
+def _c_gasto(f):
+    if f["spend"] is None:
+        return (f'<div class="big">{_usd(f["gasto"])}</div>'
+                f'<div class="sub">estimado</div>')
+    pct = f["pct"]
+    pct_txt = f"{pct:.0f}%" if pct is not None else "—"
+    ancho = min(100, max(0, pct)) if pct is not None else 0
+    return (f'<div class="big">{_usd(f["spend"])}</div>'
+            f'<div class="sub">{pct_txt}</div>'
+            f'<div class="bar"><span style="width:{ancho:.0f}%"></span></div>')
+
+
+def _c_cpm_ctr(f):
+    cpm = _usd(f["cpm"]) if f["cpm"] is not None else "—"
+    ctr = f'{f["ctr"]:.2f}% CTR' if f["ctr"] is not None else "— CTR"
+    return f'<div class="big">{cpm} <span class="sub">CPM</span></div><div class="sub">{ctr}</div>'
+
+
+def _c_ventas(f):
+    return (f'<div class="big">{_usd(f["val_venta"])} <span class="sub">/ venta</span></div>'
+            f'<div class="sub">{_usd(f["ingresos"])} ingresos</div>'
+            f'<div class="chip">{f["num"]} venta{"s" if f["num"]!=1 else ""}</div>')
+
+
+def _c_ganancia(f):
+    g = f["ganancia"]
+    cls = "up" if g >= 0 else "down"
+    signo = "+" if g >= 0 else ""
+    return f'<div class="big {cls}">{signo}{_usd(g)}</div>'
+
+
+def _c_roas(f):
+    col = _roas_color(f["roas"])
+    return f'<div class="big" style="color:{col};font-size:14px">{f["roas"]:.2f}x</div>'
+
+
+def _c_salud(f):
+    b = f["badge"]
+    spark = _spark_svg(f["serie"], color=b["color"])
+    return (f'{spark}'
+            f'<div><span class="badge" style="background:{b["color"]}">{b["texto"]}</span></div>')
+
+
+def _c_conv(f):
+    if f["conv"] is None:
+        return '<div class="big">—</div>'
+    cc = _usd(f["costo_conv"]) if f["costo_conv"] is not None else "—"
+    return (f'<div class="big">{int(f["conv"])}</div>'
+            f'<div class="sub">{cc} / conv.</div>')
+
+
+def _c_costo_conv(f):
+    if f.get("costo_conv") is None:
+        return '<div class="big">—</div>'
+    return f'<div class="big">{_usd(f["costo_conv"])}</div><div class="sub">por conversación</div>'
+
+
+def _c_accion(f):
+    ac = f["accion"]
+    cls = {"up": "up", "down": "down"}.get(ac["direccion"], "flat")
+    hace = f'<div class="sub">{_html.escape(ac["hace"])}</div>' if ac["hace"] else ""
+    return f'<div class="{cls}" style="font-weight:600">{_html.escape(ac["texto"])}</div>{hace}'
+
+
+def _render_tabla(filas):
+    cols = ["Anuncio", "Entrega", "Creado", "Presupuesto", "Gasto / Presup.",
+            "CPM / CTR", "Ventas", "Ganancia", "ROAS ↓", "Salud 7d",
+            "Conversaciones", "Costo por conversación", "Últimas acciones"]
+    ths = "".join(f"<th>{c}</th>" for c in cols)
+    trs = []
+    for f in filas:
+        nombre = _html.escape(str(f["a"]["nombre"]))[:60]
+        celdas = [
+            f'<div class="big">{nombre}</div><div class="sub">{f["ad_id"]}</div>',
+            _c_estado(f),
+            f'<div class="sub">{_fecha_corta(f["a"].get("fecha_creacion"))}</div>',
+            _c_presupuesto(f),
+            _c_gasto(f),
+            _c_cpm_ctr(f),
+            _c_ventas(f),
+            _c_ganancia(f),
+            _c_roas(f),
+            _c_salud(f),
+            _c_conv(f),
+            _c_costo_conv(f),
+            _c_accion(f),
+        ]
+        tds = "".join(f"<td>{c}</td>" for c in celdas)
+        trs.append(f"<tr>{tds}</tr>")
+    return (f'<div class="tbl-wrap"><table class="ads"><thead><tr>{ths}</tr></thead>'
+            f'<tbody>{"".join(trs)}</tbody></table></div>')
 
 
 # --------------------------------------------------------------------------- #

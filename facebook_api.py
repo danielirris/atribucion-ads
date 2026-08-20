@@ -109,23 +109,34 @@ def cargar_anuncios_activos(abrir_periodos: bool = True) -> dict:
         return {"ok": False, "anuncios": [], "error": obtener_estado()["ultimo_error"]}
 
     try:
+        # Cargamos ACTIVE y PAUSED para poder filtrar "Activos / Apagados" en la UI.
         ads = _cuenta().get_ads(
-            params={"effective_status": ["ACTIVE"], "limit": 500},
+            params={
+                "effective_status": ["ACTIVE", "PAUSED", "ADSET_PAUSED", "CAMPAIGN_PAUSED"],
+                "limit": 500,
+            },
             fields=[
                 Ad.Field.id,
                 Ad.Field.name,
                 Ad.Field.adset_id,
                 Ad.Field.effective_status,
+                Ad.Field.created_time,
             ],
         )
 
         anuncios = []
         cache_budget = {}  # adset_id -> presupuesto (unidades de moneda)
+        n_activos = 0
 
         for ad in ads:
             ad_id = ad.get(Ad.Field.id)
             nombre = ad.get(Ad.Field.name) or f"Anuncio {ad_id}"
             adset_id = ad.get(Ad.Field.adset_id)
+            estado = ad.get(Ad.Field.effective_status) or ""
+            creado = ad.get(Ad.Field.created_time)  # ISO con zona, ej "2026-08-04T10:00:00-0700"
+            es_activo = 1 if estado == "ACTIVE" else 0
+            if es_activo:
+                n_activos += 1
 
             presupuesto = None
             if adset_id:
@@ -135,20 +146,23 @@ def cargar_anuncios_activos(abrir_periodos: bool = True) -> dict:
                     presupuesto = _leer_daily_budget_adset(adset_id)
                     cache_budget[adset_id] = presupuesto
 
-            db.upsert_anuncio(ad_id, nombre, adset_id=adset_id, activo=1)
+            db.upsert_anuncio(ad_id, nombre, adset_id=adset_id, activo=es_activo,
+                              fecha_creacion=creado, effective_status=estado)
 
-            if abrir_periodos and presupuesto is not None:
+            # Solo abrimos período a los ACTIVOS (los pausados no gastan).
+            if abrir_periodos and es_activo and presupuesto is not None:
                 db.asegurar_periodo_inicial(ad_id, presupuesto)
 
             anuncios.append({
-                "ad_id": ad_id, "nombre": nombre,
-                "adset_id": adset_id, "presupuesto": presupuesto,
+                "ad_id": ad_id, "nombre": nombre, "adset_id": adset_id,
+                "presupuesto": presupuesto, "effective_status": estado,
+                "fecha_creacion": creado,
             })
 
         db.marcar_inactivos([a["ad_id"] for a in anuncios])
-        _set_estado(api_ok=True, num_anuncios=len(anuncios),
+        _set_estado(api_ok=True, num_anuncios=n_activos,
                     ultimo_error=None, ultimo_polling=db.ahora())
-        _log(f"Cargados {len(anuncios)} anuncios activos.")
+        _log(f"Cargados {len(anuncios)} anuncios ({n_activos} activos).")
         return {"ok": True, "anuncios": anuncios, "error": None}
 
     except FacebookRequestError as e:
@@ -160,6 +174,73 @@ def cargar_anuncios_activos(abrir_periodos: bool = True) -> dict:
         _set_estado(api_ok=False, ultimo_error=str(e))
         _log(f"Error inesperado cargando anuncios: {e}")
         return {"ok": False, "anuncios": [], "error": str(e)}
+
+
+# Tipos de acción que cuentan como "conversación iniciada" (mensajería).
+# Se pueden sobreescribir con la env var MSG_ACTION_TYPES (separadas por coma).
+import os as _os
+_MSG_DEFAULT = [
+    "onsite_conversion.messaging_conversation_started_7d",
+    "onsite_conversion.total_messaging_connection",
+    "messaging_conversation_started_7d",
+]
+MSG_ACTION_TYPES = [t.strip() for t in
+                    _os.getenv("MSG_ACTION_TYPES", ",".join(_MSG_DEFAULT)).split(",")
+                    if t.strip()]
+
+
+def obtener_insights(date_preset: str = "today") -> dict:
+    """
+    Trae métricas reales de Facebook por anuncio para el rango indicado.
+    Devuelve {ad_id: {"spend","cpm","ctr","impressions","clicks",
+                       "conversaciones","costo_conversacion"}}.
+    Nunca lanza: si falla, devuelve {} y registra el error.
+
+    date_preset admite: today, yesterday, last_7d, last_30d, this_month, maximum, ...
+    """
+    if not (_API_INICIALIZADA or inicializar_api()):
+        return {}
+    try:
+        insights = _cuenta().get_insights(
+            params={"level": "ad", "date_preset": date_preset, "limit": 500},
+            fields=["ad_id", "spend", "cpm", "ctr", "impressions",
+                    "clicks", "actions"],
+        )
+        resultado = {}
+        for row in insights:
+            ad_id = row.get("ad_id")
+            if not ad_id:
+                continue
+            spend = _to_float(row.get("spend"))
+            conversaciones = 0.0
+            for a in (row.get("actions") or []):
+                if a.get("action_type") in MSG_ACTION_TYPES:
+                    conversaciones += _to_float(a.get("value"))
+            resultado[str(ad_id)] = {
+                "spend": spend,
+                "cpm": _to_float(row.get("cpm")),
+                "ctr": _to_float(row.get("ctr")),
+                "impressions": _to_float(row.get("impressions")),
+                "clicks": _to_float(row.get("clicks")),
+                "conversaciones": conversaciones,
+                "costo_conversacion": (spend / conversaciones) if conversaciones > 0 else None,
+            }
+        return resultado
+    except FacebookRequestError as e:
+        _set_estado(ultimo_error=_fmt_fb_error(e))
+        _log(f"Error en insights: {_fmt_fb_error(e)}")
+        return {}
+    except Exception as e:
+        _set_estado(ultimo_error=str(e))
+        _log(f"Error inesperado en insights: {e}")
+        return {}
+
+
+def _to_float(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _leer_daily_budget_adset(adset_id: str) -> Optional[float]:
