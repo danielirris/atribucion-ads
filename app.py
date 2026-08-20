@@ -23,6 +23,9 @@ import excel_watcher as watcher
 
 st.set_page_config(page_title="Atribución Facebook Ads", page_icon="📊", layout="wide")
 
+# Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
+APP_VERSION = "v3 · 2026-08-20 · Conexiones arriba"
+
 
 # --------------------------------------------------------------------------- #
 #  Arranque único de servicios en segundo plano (una vez por proceso)
@@ -146,6 +149,7 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 # --------------------------------------------------------------------------- #
 def sidebar_estado():
     st.sidebar.header("⚙️ Estado del sistema")
+    st.sidebar.caption(f"Versión: {APP_VERSION}")
 
     est_fb = fb.obtener_estado()
     est_wt = watcher.obtener_estado()
@@ -896,6 +900,10 @@ def main():
 
     sidebar_estado()
 
+    # Conexiones al inicio (es el primer paso de configuración).
+    seccion_conexiones()
+    st.divider()
+
     seccion_vista_general()
     st.divider()
     seccion_alertas()
@@ -907,8 +915,6 @@ def main():
     seccion_lote()
     st.divider()
     seccion_manual()
-    st.divider()
-    seccion_conexiones()
 
 
 if __name__ == "__main__":
