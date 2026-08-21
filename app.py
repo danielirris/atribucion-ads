@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v46 · 2026-08-21"
+APP_VERSION = "v47 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -157,15 +157,10 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 def sidebar_estado(pagina: str = "dashboard"):
     # Los controles de datos y los filtros solo aplican al Dashboard.
     if pagina == "dashboard":
-        cta, ctb = st.sidebar.columns(2)
-        if cta.button("Actualizar", use_container_width=True):
-            try:
-                _insights_cache.clear()
-            except Exception:
-                pass
-            st.rerun()
-        if ctb.button("Recargar", use_container_width=True,
-                      help="Trae los anuncios de todas las conexiones de Facebook."):
+        if st.sidebar.button("🔄 Recargar de Facebook", use_container_width=True,
+                             help="Trae datos NUEVOS desde Facebook (anuncios, gasto, CPM). "
+                                  "Es lo más pesado; úsalo de vez en cuando. La app ya lo hace "
+                                  "sola cada 30 min, así que casi nunca lo necesitas."):
             with st.spinner("Consultando Facebook (todas las conexiones)..."):
                 r = fb.cargar_todo()
                 try:
@@ -600,9 +595,20 @@ def seccion_vista_general():
             default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
             key="f_nivel") or "Conjunto de anuncios"
     with ct2:
+        st.markdown('<span class="estado-anchor"></span>', unsafe_allow_html=True)
         st.segmented_control(
             "Estado", ["Activos", "Apagados", "Todos"],
             default=st.session_state.get("f_estado", "Activos"), key="f_estado")
+        # Color del chip seleccionado según el estado: verde/rojo/gris.
+        _est = st.session_state.get("f_estado") or "Activos"
+        _est_col = {"Activos": "#16a34a", "Apagados": "#dc2626",
+                    "Todos": "#6b7280"}.get(_est, "#6b7280")
+        st.markdown(
+            '<style>[data-testid="stElementContainer"]:has(.estado-anchor) + '
+            '[data-testid="stElementContainer"] '
+            'button[data-variant="segmented_control"][data-selected="true"]{'
+            f'background:{_est_col} !important;border-color:{_est_col} !important;'
+            'color:#fff !important;}</style>', unsafe_allow_html=True)
     with ct3:
         st.selectbox("Rango de fechas",
                      ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
@@ -654,14 +660,7 @@ def seccion_vista_general():
     if pais_sel != "Todos":
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
 
-    resumen_cta = "todas" if not cuentas_sel else f"{len(cuentas_sel)} cuenta(s)"
-    resumen_bus = "todos" if not business_sel else f"{len(business_sel)} business"
     fuente = db.get_config("fuente_ventas", "todas")
-    fuente_lbl = {"excel": "Excel", "gsheets": "Google Sheets", "supabase": "Supabase",
-                  "meta": "Meta (pixel)", "todas": "todas mis fuentes"}.get(fuente, "todas mis fuentes")
-    st.caption(f"Ver por: {nivel_lbl} · estado: {filtro} · business: {resumen_bus} · "
-               f"cuentas: {resumen_cta} · país: {pais_sel} · rango: {rango_lbl} · "
-               f"ventas: {fuente_lbl} · valores en USD")
 
     if not anuncios:
         st.info("No hay datos para este filtro. En la barra lateral (o arriba) pulsa **Recargar** "
@@ -1883,6 +1882,9 @@ def _inject_css():
     }
     [data-testid="stSidebar"] h3{ color:var(--tint); }
 
+    /* Oculta el indicador de "cargando/ejecutando" de arriba a la derecha
+       (las "ruedas" que confunden, sobre todo en el auto-refresco). */
+    [data-testid="stStatusWidget"]{ display:none !important; }
     /* Botones con BORDE de color (degradado) */
     .stButton>button, .stDownloadButton>button, .stFormSubmitButton>button{
         border-radius:12px; font-weight:600; color:var(--txt); transition:all .18s ease;
@@ -2424,8 +2426,10 @@ def pagina_dashboard():
     with top2:
         st.write("")
         st.write("")
-        if st.button("Actualizar", use_container_width=True, type="primary",
-                     help="Refresca la vista ahora (sin volver a llamar a Facebook)."):
+        if st.button("Actualizar vista", use_container_width=True, type="primary",
+                     help="RÁPIDO: recalcula los números con lo que ya está guardado "
+                          "(no llama a Facebook). Para traer datos NUEVOS de Facebook usa "
+                          "'Recargar de Facebook' en la barra lateral."):
             try:
                 _insights_cache.clear()
             except Exception:
