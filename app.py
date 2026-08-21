@@ -22,10 +22,10 @@ import facebook_api as fb
 import excel_watcher as watcher
 import supabase_source as supa
 
-st.set_page_config(page_title="Atribución Facebook Ads", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Atribución Facebook Ads", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v4 · 2026-08-20 · Config + filtros + Supabase + tema oscuro"
+APP_VERSION = "v5 · 2026-08-20 · Niveles (campaña/conjunto/anuncio) + sin emojis"
 
 
 # --------------------------------------------------------------------------- #
@@ -111,9 +111,9 @@ def _fecha_corta(iso):
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _insights_cache(date_preset: str):
-    """Cachea los insights de Facebook 2 min para no llamar en cada rerun."""
-    return fb.obtener_insights(date_preset)
+def _insights_cache(date_preset: str, nivel: str = "ad"):
+    """Cachea los insights de Facebook 2 min (por rango y nivel)."""
+    return fb.obtener_insights(date_preset, nivel)
 
 
 def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
@@ -149,45 +149,15 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 #  Barra lateral: estado de servicios
 # --------------------------------------------------------------------------- #
 def sidebar_estado():
-    st.sidebar.header("⚙️ Estado del sistema")
-    st.sidebar.caption(f"Versión: {APP_VERSION}")
-
-    est_fb = fb.obtener_estado()
-    est_wt = watcher.obtener_estado()
-
-    # Facebook
-    if est_fb["api_ok"]:
-        st.sidebar.success("Facebook API: conectada")
-    else:
-        st.sidebar.error("Facebook API: sin conexión")
-    if est_fb.get("ultimo_error"):
-        st.sidebar.caption(f"⚠️ {est_fb['ultimo_error']}")
-    up = est_fb.get("ultimo_polling")
-    st.sidebar.caption(f"Último polling: {db.a_texto(up) if isinstance(up, datetime) else '—'}")
-    st.sidebar.caption(
-        f"Conexiones: {est_fb.get('num_conexiones', 0)} · "
-        f"Cuentas: {est_fb.get('num_cuentas', 0)} · "
-        f"Anuncios activos: {est_fb.get('num_anuncios', 0)}")
-
-    # Watcher
-    if est_wt["activo"]:
-        st.sidebar.success("Watcher Excel: activo")
-    else:
-        st.sidebar.warning("Watcher Excel: inactivo")
-    if est_wt.get("ultimo_error"):
-        st.sidebar.caption(f"⚠️ {est_wt['ultimo_error']}")
-    st.sidebar.caption(f"Ventas procesadas (sesión): {est_wt.get('ventas_procesadas', 0)}")
-
-    st.sidebar.divider()
     cta, ctb = st.sidebar.columns(2)
-    if cta.button("🔄 Actualizar", use_container_width=True):
+    if cta.button("Actualizar", use_container_width=True):
         try:
             _insights_cache.clear()
         except Exception:
             pass
         st.rerun()
-    if ctb.button("📥 Recargar", use_container_width=True,
-                  help="Trae anuncios de todas las conexiones."):
+    if ctb.button("Recargar", use_container_width=True,
+                  help="Trae los anuncios de todas las conexiones de Facebook."):
         with st.spinner("Consultando Facebook (todas las conexiones)..."):
             r = fb.cargar_todo()
             try:
@@ -202,19 +172,21 @@ def sidebar_estado():
 
     sidebar_filtros()
 
-    with st.sidebar.expander("📋 Eventos recientes"):
-        for m in (est_fb.get("mensajes", []) + est_wt.get("mensajes", []))[:15]:
-            st.caption(m)
+    # Versión discreta al final (para confirmar el despliegue).
+    st.sidebar.divider()
+    st.sidebar.caption(f"Versión: {APP_VERSION}")
 
 
 def sidebar_filtros():
     """Filtros globales que afectan al Dashboard (se guardan en session_state)."""
     st.sidebar.divider()
-    st.sidebar.markdown("### 🔎 Filtros")
+    st.sidebar.markdown("### Filtros")
     todos = db.obtener_anuncios(solo_activos=False)
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
 
+    st.sidebar.selectbox("Ver por", ["Anuncio", "Conjunto de anuncios", "Campaña"],
+                         key="f_nivel")
     st.sidebar.radio("Estado", ["Activos", "Apagados", "Todos"],
                      horizontal=True, key="f_estado")
     st.sidebar.selectbox("Cuenta publicitaria", ["Todas"] + cuentas, key="f_cuenta")
@@ -223,7 +195,6 @@ def sidebar_filtros():
                          ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo"],
                          key="f_rango")
 
-    # Resumen de gasto invertido por país (rango actual).
     _resumen_pais(todos)
 
 
@@ -232,7 +203,7 @@ def _resumen_pais(todos):
     rango_lbl = st.session_state.get("f_rango", "Hoy")
     preset = {"Hoy": "today", "Últimos 7 días": "last_7d",
               "Últimos 30 días": "last_30d", "Máximo": "maximum"}.get(rango_lbl, "today")
-    insights = _insights_cache(preset)
+    insights = _insights_cache(preset, "ad")
     if not insights:
         return
     gasto_pais = {}
@@ -243,7 +214,7 @@ def _resumen_pais(todos):
             gasto_pais[pais] = gasto_pais.get(pais, 0.0) + sp
     if not gasto_pais:
         return
-    st.sidebar.markdown("**💸 Gasto por país**")
+    st.sidebar.markdown("**Gasto por país**")
     for pais, g in sorted(gasto_pais.items(), key=lambda x: -x[1]):
         st.sidebar.caption(f"{pais}: {_usd(g)}")
 
@@ -258,11 +229,88 @@ def _es_activo(a: dict) -> bool:
     return a.get("activo") == 1
 
 
-def seccion_vista_general():
-    st.header("Anuncios")
-    ahora = db.ahora()
+_NIVELES = {"Anuncio": "ad", "Conjunto de anuncios": "adset", "Campaña": "campaign"}
 
-    # Los filtros viven en la barra lateral (session_state).
+
+def _presupuesto_ad(ad_id: str):
+    abierto = db.periodo_abierto(ad_id)
+    if abierto:
+        return float(abierto["presupuesto"])
+    ps = db.obtener_periodos(ad_id)
+    return float(ps[-1]["presupuesto"]) if ps else None
+
+
+def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
+    grupos = {}
+    for a in anuncios:
+        if nivel == "adset":
+            gkey = a.get("adset_id") or a["ad_id"]
+            nombre = a.get("adset_nombre") or gkey
+            ins_key = str(a.get("adset_id") or "")
+        elif nivel == "campaign":
+            gkey = a.get("campaign_id") or a["ad_id"]
+            nombre = a.get("campaign_nombre") or gkey
+            ins_key = str(a.get("campaign_id") or "")
+        else:
+            gkey = a["ad_id"]
+            nombre = a["nombre"]
+            ins_key = str(a["ad_id"])
+        g = grupos.setdefault(gkey, {"nombre": nombre, "sub": gkey,
+                                     "cuenta": a.get("cuenta_nombre") or "—",
+                                     "ins_key": ins_key, "ads": []})
+        g["ads"].append(a)
+
+    filas = []
+    for gkey, g in grupos.items():
+        ads = g["ads"]
+        num = sum(ventas_agg.get(x["ad_id"], {}).get("num_ventas", 0) for x in ads)
+        ingresos = sum(ventas_agg.get(x["ad_id"], {}).get("ingreso_total", 0.0) for x in ads)
+
+        if nivel == "campaign":
+            vistos, presupuesto, hay = set(), 0.0, False
+            for x in ads:
+                asid = x.get("adset_id")
+                if asid in vistos:
+                    continue
+                vistos.add(asid)
+                p = _presupuesto_ad(x["ad_id"])
+                if p is not None:
+                    presupuesto += p
+                    hay = True
+            presupuesto = presupuesto if hay else None
+        else:
+            presupuesto = _presupuesto_ad(ads[0]["ad_id"])
+
+        ins = insights.get(g["ins_key"], {}) if g["ins_key"] else {}
+        spend = ins.get("spend")
+        if spend is not None:
+            gasto = spend
+        else:
+            gasto = sum((calculos.metricas_periodo_actual(x["ad_id"], ahora) or {}).get(
+                "gasto_estimado", 0.0) for x in ads)
+
+        roas = (ingresos / gasto) if gasto and gasto > 0 else 0.0
+        activos = sum(1 for x in ads if _es_activo(x))
+        filas.append({
+            "nombre": g["nombre"], "sub": g["sub"], "cuenta": g["cuenta"],
+            "activos": activos, "total": len(ads),
+            "presupuesto": presupuesto, "spend": spend, "gasto": gasto,
+            "pct": (spend / presupuesto * 100) if (spend is not None and presupuesto) else None,
+            "cpm": ins.get("cpm"), "ctr": ins.get("ctr"),
+            "num": num, "ingresos": ingresos,
+            "ganancia": ingresos - (gasto or 0.0), "roas": roas,
+            "conv": ins.get("conversaciones"), "costo_conv": ins.get("costo_conversacion"),
+        })
+    filas.sort(key=lambda f: f["roas"], reverse=True)
+    return filas
+
+
+def seccion_vista_general():
+    ahora = db.ahora()
+    nivel_lbl = st.session_state.get("f_nivel", "Anuncio")
+    nivel = _NIVELES.get(nivel_lbl, "ad")
+    st.header(nivel_lbl + "s" if nivel_lbl == "Anuncio" else nivel_lbl)
+
     filtro = st.session_state.get("f_estado", "Activos")
     rango_lbl = st.session_state.get("f_rango", "Hoy")
     cuenta_sel = st.session_state.get("f_cuenta", "Todas")
@@ -288,67 +336,38 @@ def seccion_vista_general():
     if pais_sel != "Todos":
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
 
-    st.caption(f"Ordenado por ROAS ↓ · estado: {filtro} · cuenta: {cuenta_sel} · "
-               f"país: {pais_sel} · rango: {rango_lbl} · {len(anuncios)} anuncio(s)")
+    st.caption(f"Ver por: {nivel_lbl} · estado: {filtro} · cuenta: {cuenta_sel} · "
+               f"país: {pais_sel} · rango: {rango_lbl}")
 
     if not anuncios:
-        st.info("No hay anuncios para este filtro. Usa **📥 Recargar anuncios de Facebook** "
-                "en la barra lateral.")
+        st.info("No hay datos para este filtro. En la barra lateral pulsa **Recargar** para "
+                "traer los anuncios de Facebook.")
         return
 
-    insights = _insights_cache(date_preset)
-    fb_ok = bool(insights)
+    insights = _insights_cache(date_preset, nivel)
     ventas_agg = db.ventas_agg_por_ad(cutoff)
+    filas = _construir_filas(anuncios, nivel, insights, ventas_agg, ahora)
 
-    filas = []
-    for a in anuncios:
-        ad_id = a["ad_id"]
-        ins = insights.get(str(ad_id), {})
-        vagg = ventas_agg.get(ad_id, {"num_ventas": 0, "ingreso_total": 0.0})
-        num, ingresos = vagg["num_ventas"], vagg["ingreso_total"]
+    if not insights:
+        st.info("El **gasto**, CPM, CTR y conversaciones vienen de Facebook. Aún no se ven "
+                "porque no hay una conexión activa: agrega un token en **Configuración → "
+                "Conexiones** y pulsa **Recargar**. Mientras tanto el gasto es estimado.")
 
-        abierto = db.periodo_abierto(ad_id)
-        if abierto:
-            presupuesto = float(abierto["presupuesto"])
-        else:
-            ps = db.obtener_periodos(ad_id)
-            presupuesto = float(ps[-1]["presupuesto"]) if ps else None
+    st.markdown(_TABLA_CSS + _render_tabla(filas, nivel), unsafe_allow_html=True)
 
-        spend_real = ins.get("spend")
-        if spend_real is not None:
-            gasto = spend_real
-        else:
-            m = calculos.metricas_periodo_actual(ad_id, ahora)
-            gasto = m["gasto_estimado"] if m else 0.0
+    _editor_presupuesto()
 
-        roas = (ingresos / gasto) if gasto and gasto > 0 else 0.0
-        filas.append({
-            "a": a, "ad_id": ad_id, "activo": _es_activo(a),
-            "presupuesto": presupuesto, "spend": spend_real, "gasto": gasto,
-            "pct": (spend_real / presupuesto * 100) if (spend_real is not None and presupuesto) else None,
-            "cpm": ins.get("cpm"), "ctr": ins.get("ctr"),
-            "num": num, "ingresos": ingresos,
-            "val_venta": (ingresos / num) if num > 0 else 0.0,
-            "ganancia": ingresos - (gasto or 0.0), "roas": roas,
-            "conv": ins.get("conversaciones"), "costo_conv": ins.get("costo_conversacion"),
-            "badge": calculos.salud_badge(roas, num),
-            "serie": calculos.serie_roas_periodos(ad_id, ahora=ahora),
-            "accion": calculos.ultima_accion(ad_id, ahora),
-        })
 
-    filas.sort(key=lambda f: f["roas"], reverse=True)
-
-    if not fb_ok:
-        st.caption("⚠️ Métricas de Facebook (gasto real, CPM, CTR, conversaciones) no "
-                   "disponibles ahora — se muestran '—' y el ROAS usa el gasto estimado. "
-                   "Revisa la conexión en la barra lateral.")
-
-    st.markdown(_TABLA_CSS + _render_tabla(filas), unsafe_allow_html=True)
-
-    # --- Opción A: editar presupuesto de un anuncio (envía a Facebook) ---
-    st.subheader("✏️ Cambiar presupuesto de un anuncio (envía a Facebook)")
+def _editor_presupuesto():
+    """Modifica el presupuesto de un anuncio (se aplica en Facebook)."""
+    st.subheader("Modificar presupuesto de un anuncio")
+    st.caption("El presupuesto se aplica en Facebook (a nivel de conjunto). Elige el anuncio, "
+               "escribe el nuevo monto diario y pulsa Aplicar.")
+    anuncios = db.obtener_anuncios(solo_activos=False)
+    if not anuncios:
+        return
+    opciones = {f"{a['nombre']}  ·  {a['ad_id']}": a['ad_id'] for a in anuncios}
     col1, col2, col3 = st.columns([3, 2, 2])
-    opciones = {f"{f['a']['nombre']}  ·  {f['ad_id']}": f['ad_id'] for f in filas}
     with col1:
         sel = st.selectbox("Anuncio", list(opciones.keys()), key="edit_sel")
     ad_id_sel = opciones[sel]
@@ -360,14 +379,14 @@ def seccion_vista_general():
     with col3:
         st.write("")
         st.write("")
-        if st.button("💾 Aplicar", key="edit_btn", use_container_width=True):
+        if st.button("Aplicar", key="edit_btn", use_container_width=True, type="primary"):
             r = cambio_presupuesto_completo(ad_id_sel, nuevo)
             if r["ok"] and r.get("solo_local"):
                 st.warning(f"Registrado localmente ({r.get('motivo')}). Nuevo período iniciado.")
             elif r["ok"]:
-                st.success("✅ Presupuesto actualizado en Facebook Ads — nuevo período iniciado")
+                st.success("Presupuesto actualizado en Facebook — nuevo período iniciado.")
             else:
-                st.error(f"❌ Facebook rechazó el cambio: {r['error']}\n\nEl período NO se cerró.")
+                st.error(f"Facebook rechazó el cambio: {r['error']}. El período NO se cerró.")
             time.sleep(1.0)
             st.rerun()
 
@@ -482,30 +501,54 @@ def _c_accion(f):
     return f'<div class="{cls}" style="font-weight:600">{_html.escape(ac["texto"])}</div>{hace}'
 
 
-def _render_tabla(filas):
-    cols = ["Anuncio", "Cuenta", "Entrega", "Creado", "Presupuesto", "Gasto / Presup.",
-            "CPM / CTR", "Ventas", "Ganancia", "ROAS ↓", "Salud 7d",
-            "Conversaciones", "Costo por conversación", "Últimas acciones"]
+def _celda_gasto(f):
+    base = f'<div class="big">{_usd(f["gasto"])}</div>'
+    if f["spend"] is None:
+        return base + '<div class="sub">estimado</div>'
+    pct = f["pct"]
+    pct_txt = f"{pct:.0f}% del presup." if pct is not None else ""
+    ancho = min(100, max(0, pct)) if pct is not None else 0
+    return base + f'<div class="sub">{pct_txt}</div><div class="bar"><span style="width:{ancho:.0f}%"></span></div>'
+
+
+def _celda_estado(f, nivel):
+    if nivel == "ad":
+        if f["activos"]:
+            return '<span class="pill pill-run"><span class="dot" style="background:#4ade80"></span>Corriendo</span>'
+        return '<span class="pill pill-off"><span class="dot" style="background:#9ca3af"></span>Pausado</span>'
+    return f'<div class="big">{f["activos"]}/{f["total"]}</div><div class="sub">activos</div>'
+
+
+def _render_tabla(filas, nivel):
+    primera = {"ad": "Anuncio", "adset": "Conjunto de anuncios", "campaign": "Campaña"}[nivel]
+    cols = [primera, "Estado", "Cuenta", "Presupuesto", "Gasto", "CPM / CTR",
+            "Ventas", "Ingresos", "Ganancia", "ROAS", "Conversaciones", "Costo/conv."]
     ths = "".join(f"<th>{c}</th>" for c in cols)
     trs = []
     for f in filas:
-        nombre = _html.escape(str(f["a"]["nombre"]))[:60]
-        cuenta = _html.escape(str(f["a"].get("cuenta_nombre") or "—"))[:34]
+        nombre = _html.escape(str(f["nombre"]))[:60]
+        sub = _html.escape(str(f["sub"]))
+        cuenta = _html.escape(str(f["cuenta"]))[:34]
+        g = f["ganancia"]
+        gcls = "up" if g >= 0 else "down"
+        cpm = _usd(f["cpm"]) if f["cpm"] is not None else "—"
+        ctr = f'{f["ctr"]:.2f}% CTR' if f["ctr"] is not None else "— CTR"
+        val_venta = (f["ingresos"] / f["num"]) if f["num"] else 0.0
+        conv = f'{int(f["conv"])}' if f["conv"] is not None else "—"
+        costoc = _usd(f["costo_conv"]) if f.get("costo_conv") is not None else "—"
         celdas = [
-            f'<div class="big">{nombre}</div><div class="sub">{f["ad_id"]}</div>',
+            f'<div class="big">{nombre}</div><div class="sub">{sub}</div>',
+            _celda_estado(f, nivel),
             f'<div class="sub">{cuenta}</div>',
-            _c_estado(f),
-            f'<div class="sub">{_fecha_corta(f["a"].get("fecha_creacion"))}</div>',
-            _c_presupuesto(f),
-            _c_gasto(f),
-            _c_cpm_ctr(f),
-            _c_ventas(f),
-            _c_ganancia(f),
-            _c_roas(f),
-            _c_salud(f),
-            _c_conv(f),
-            _c_costo_conv(f),
-            _c_accion(f),
+            f'<div class="big">{_usd(f["presupuesto"])}</div><div class="sub">diario</div>',
+            _celda_gasto(f),
+            f'<div class="big">{cpm}</div><div class="sub">{ctr}</div>',
+            f'<div class="big">{f["num"]}</div><div class="sub">{_usd(val_venta)}/venta</div>',
+            f'<div class="big">{_usd(f["ingresos"])}</div>',
+            f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
+            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:14px">{f["roas"]:.2f}x</div>',
+            f'<div class="big">{conv}</div>',
+            f'<div class="big">{costoc}</div>',
         ]
         tds = "".join(f"<td>{c}</td>" for c in celdas)
         trs.append(f"<tr>{tds}</tr>")
@@ -517,7 +560,7 @@ def _render_tabla(filas):
 #  Sección: Cambios rápidos de presupuesto en lote
 # --------------------------------------------------------------------------- #
 def seccion_lote():
-    st.header("⚡ Cambios rápidos de presupuesto en lote")
+    st.header("Cambios rápidos de presupuesto en lote")
     ahora = db.ahora()
     anuncios = db.obtener_anuncios(solo_activos=True)
     if not anuncios:
@@ -547,7 +590,7 @@ def seccion_lote():
         },
     )
 
-    if st.button("🚀 Aplicar todos los cambios", type="primary"):
+    if st.button("Aplicar todos los cambios", type="primary"):
         cambios = editado[abs(editado["Nuevo presupuesto"] - editado["Presupuesto actual"]) > 0.01]
         if cambios.empty:
             st.info("No hay cambios que aplicar.")
@@ -558,8 +601,8 @@ def seccion_lote():
                 resultados.append({
                     "Anuncio": fila["Anuncio"],
                     "Nuevo": _fmt_money(fila["Nuevo presupuesto"]),
-                    "Resultado": ("✅ OK" if r["ok"] and not r.get("solo_local")
-                                  else ("⚠️ Solo local" if r.get("solo_local") else f"❌ {r['error']}")),
+                    "Resultado": ("OK" if r["ok"] and not r.get("solo_local")
+                                  else ("Solo local" if r.get("solo_local") else f"{r['error']}")),
                 })
             st.dataframe(pd.DataFrame(resultados), use_container_width=True, hide_index=True)
             time.sleep(1.0)
@@ -569,7 +612,7 @@ def seccion_lote():
 #  Registro rápido de venta manual (útil en despliegue online)
 # --------------------------------------------------------------------------- #
 def seccion_venta_manual():
-    st.header("🧾 Registrar venta")
+    st.header("Registrar venta")
     st.caption("Registra una venta al instante (se atribuye al período de presupuesto "
                "activo del anuncio). Alternativa al Excel para uso online.")
     anuncios = db.obtener_anuncios(solo_activos=False)
@@ -605,9 +648,9 @@ def seccion_venta_manual():
         r = watcher.registrar_venta_manual(ad_id, valor, hora=hora)
         if r["ok"]:
             destino = f"período {r['periodo_id']}" if r["periodo_id"] else "sin período (no había presupuesto activo a esa hora)"
-            st.success(f"✅ Venta registrada y atribuida a {destino}.")
+            st.success(f"Venta registrada y atribuida a {destino}.")
         else:
-            st.error(f"❌ {r['error']}")
+            st.error(f"{r['error']}")
         time.sleep(0.8)
         st.rerun()
 
@@ -707,7 +750,7 @@ def seccion_detalle():
 #  Parte 7 — Duplicación de anuncios
 # --------------------------------------------------------------------------- #
 def _bloque_duplicar(ad_id, anuncio, ahora):
-    st.subheader("⚡ Duplicar anuncio")
+    st.subheader("Duplicar anuncio")
     m = calculos.metricas_periodo_actual(ad_id, ahora)
     presup_def = m["presupuesto"] if m else 0.0
 
@@ -723,7 +766,7 @@ def _bloque_duplicar(ad_id, anuncio, ahora):
                 activar = st.toggle("Activar copias inmediatamente", value=False)
                 st.caption("Si está apagado, las copias se crean en PAUSED.")
 
-            enviado = st.form_submit_button("⚡ Duplicar ahora", type="primary")
+            enviado = st.form_submit_button("Duplicar ahora", type="primary")
 
         if enviado:
             hay_conexion = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
@@ -739,13 +782,13 @@ def _bloque_duplicar(ad_id, anuncio, ahora):
                     cuenta_nombre=anuncio.get("cuenta_nombre") if anuncio else None)
 
             if res.get("error_global"):
-                st.error(f"❌ {res['error_global']}")
+                st.error(f"{res['error_global']}")
 
             exitosas = res.get("exitosas", [])
             fallidas = res.get("fallidas", [])
 
             if exitosas:
-                st.success(f"✅ {len(exitosas)} copia(s) creada(s) correctamente.")
+                st.success(f"{len(exitosas)} copia(s) creada(s) correctamente.")
                 st.dataframe(
                     pd.DataFrame([{"Nombre": e["nombre"], "Nuevo ad_id": e["ad_id"],
                                    "adset_id": e.get("adset_id"), "Presupuesto": _fmt_money(e["presupuesto"])}
@@ -753,7 +796,7 @@ def _bloque_duplicar(ad_id, anuncio, ahora):
                     use_container_width=True, hide_index=True,
                 )
             if fallidas:
-                st.error(f"⚠️ {len(fallidas)} copia(s) fallaron:")
+                st.error(f"{len(fallidas)} copia(s) fallaron:")
                 for f in fallidas:
                     st.write(f"- **{f['nombre']}**: {f['error']}")
             if not exitosas and not fallidas and not res.get("error_global"):
@@ -771,7 +814,7 @@ def seccion_alertas():
         return
     for a in alertas:
         st.error(
-            f"🚨 **{a['nombre']}** — presupuesto {_fmt_money(a['presupuesto'])}, "
+            f"**{a['nombre']}** — presupuesto {_fmt_money(a['presupuesto'])}, "
             f"lleva **{a['antiguedad']}** en este presupuesto y su ROAS actual es "
             f"**{a['roas']:.2f}x** ({a['num_ventas']} ventas). Considera ajustar."
         )
@@ -799,11 +842,11 @@ def seccion_manual():
         ad_id = opciones[sel]
         r = cambio_presupuesto_completo(ad_id, float(monto))
         if r["ok"] and r.get("solo_local"):
-            st.warning(f"⚠️ Registrado solo localmente ({r.get('motivo')}). Nuevo período iniciado.")
+            st.warning(f"Registrado solo localmente ({r.get('motivo')}). Nuevo período iniciado.")
         elif r["ok"]:
-            st.success("✅ Presupuesto actualizado en Facebook Ads — nuevo período iniciado")
+            st.success("Presupuesto actualizado en Facebook Ads — nuevo período iniciado")
         else:
-            st.error(f"❌ Facebook rechazó el cambio: {r['error']}\n\nEl período NO se cerró.")
+            st.error(f"Facebook rechazó el cambio: {r['error']}\n\nEl período NO se cerró.")
         time.sleep(1.0)
         st.rerun()
 
@@ -816,7 +859,7 @@ def _gate_password():
         return
     if st.session_state.get("_auth_ok"):
         return
-    st.title("🔒 Acceso")
+    st.title("Acceso")
     st.caption("Esta app puede modificar presupuestos reales. Ingresa la contraseña.")
     pwd = st.text_input("Contraseña", type="password", key="_pwd")
     if st.button("Entrar"):
@@ -832,7 +875,7 @@ def _gate_password():
 #  Sección — Conexiones (multi-Business / tokens)
 # --------------------------------------------------------------------------- #
 def seccion_conexiones():
-    st.header("🔌 Conexiones (Business / tokens)")
+    st.header("Conexiones (Business / tokens)")
     st.caption("Agrega un token de **Usuario del Sistema** por cada Business. La app "
                "descubre sus cuentas automáticamente. Los tokens se guardan solo en "
                "este servidor (volumen /data), nunca en el repositorio.")
@@ -846,23 +889,23 @@ def seccion_conexiones():
                 col[0].markdown(f"**{c.get('alias') or 'Conexión'}**  ·  id {c['id']}")
                 col[0].caption(f"token …{tok[-6:]}" + ("  ·  app propia" if c.get("app_id") else ""))
                 if c.get("ultimo_error"):
-                    col[0].caption(f"⚠️ {c['ultimo_error']}")
-                col[1].write("🟢 activa" if c["activo"] else "⚪ inactiva")
-                if col[2].button("🔎 Probar", key=f"probar_{c['id']}"):
+                    col[0].caption(f"{c['ultimo_error']}")
+                col[1].write("activa" if c["activo"] else "inactiva")
+                if col[2].button("Probar", key=f"probar_{c['id']}"):
                     r = fb.probar_conexion(tok, c.get("app_id"), c.get("app_secret"))
                     if r["ok"]:
                         nombres = ", ".join(x["name"] for x in r["cuentas"][:12])
                         st.success(f"OK · {len(r['cuentas'])} cuenta(s): {nombres}")
                     else:
                         st.error(r["error"])
-                if col[3].button("🗑️ Eliminar", key=f"del_{c['id']}"):
+                if col[3].button("Eliminar", key=f"del_{c['id']}"):
                     db.eliminar_conexion(c["id"])
                     st.rerun()
     else:
         st.info("Aún no hay conexiones guardadas. Si definiste credenciales en el .env, "
                 "se usa esa única cuenta por defecto.")
 
-    st.subheader("➕ Agregar conexión")
+    st.subheader("Agregar conexión")
     with st.form("form_conexion"):
         alias = st.text_input("Alias (ej. BM Tienda MX)")
         token = st.text_area("Token de Usuario del Sistema", height=90,
@@ -871,8 +914,8 @@ def seccion_conexiones():
             app_id = st.text_input("APP_ID (opcional)")
             app_secret = st.text_input("APP_SECRET (opcional)", type="password")
         cc1, cc2 = st.columns(2)
-        probar = cc1.form_submit_button("🔎 Probar y descubrir cuentas")
-        guardar = cc2.form_submit_button("💾 Guardar conexión", type="primary")
+        probar = cc1.form_submit_button("Probar y descubrir cuentas")
+        guardar = cc2.form_submit_button("Guardar conexión", type="primary")
 
     if probar:
         if not token.strip():
@@ -880,10 +923,10 @@ def seccion_conexiones():
         else:
             r = fb.probar_conexion(token.strip(), app_id or None, app_secret or None)
             if r["ok"]:
-                st.success(f"✅ {len(r['cuentas'])} cuenta(s) encontradas:")
+                st.success(f"{len(r['cuentas'])} cuenta(s) encontradas:")
                 st.dataframe(pd.DataFrame(r["cuentas"]), use_container_width=True, hide_index=True)
             else:
-                st.error(f"❌ {r['error']}")
+                st.error(f"{r['error']}")
     if guardar:
         if not token.strip():
             st.error("Pega el token.")
@@ -894,7 +937,7 @@ def seccion_conexiones():
                 _insights_cache.clear()
             except Exception:
                 pass
-            st.success(f"✅ Conexión #{cid} guardada. Pulsa **📥 Recargar anuncios de "
+            st.success(f"Conexión #{cid} guardada. Pulsa **Recargar anuncios de "
                        "Facebook** (barra lateral) para cargar sus cuentas.")
             time.sleep(1.0)
             st.rerun()
@@ -971,7 +1014,7 @@ def _inject_css():
 #  Página: Configuración (Excel + Cuentas + Conexiones + Supabase)
 # --------------------------------------------------------------------------- #
 def _panel_excel():
-    st.subheader("📄 Excel (ventas del socio)")
+    st.subheader("Excel (ventas del socio)")
     st.caption("Fuente 1: el Excel con columnas ID_Anuncio, Valor_Venta, Hora_Venta. "
                "Súbelo aquí cada vez que se agreguen ventas; solo se procesan las nuevas.")
     subido = st.file_uploader("Subir / reemplazar ventas.xlsx", type=["xlsx"], key="up_excel_cfg")
@@ -979,14 +1022,14 @@ def _panel_excel():
     if subido is not None and c1.button("Procesar Excel subido", use_container_width=True):
         n = watcher.guardar_excel_subido(subido.getvalue(), reemplazar=True)
         st.success(f"{n} venta(s) nueva(s) procesada(s).")
-    if c2.button("📄 Reimportar TODO el Excel", use_container_width=True,
+    if c2.button("Reimportar TODO el Excel", use_container_width=True,
                  help="Reprocesa todas las filas (útil la primera vez)."):
         n = watcher.importar_todo()
         st.success(f"{n} ventas importadas.")
 
 
 def _panel_supabase():
-    st.subheader("🟩 Supabase (tus ventas)")
+    st.subheader("Supabase (tus ventas)")
     st.caption("Fuente 2: una tabla de Supabase con tus ventas. Se une con el Excel en la "
                "misma tabla de ventas. Las credenciales van en variables de entorno "
                "(SUPABASE_URL / SUPABASE_KEY).")
@@ -994,7 +1037,7 @@ def _panel_supabase():
         st.warning("Faltan **SUPABASE_URL** y **SUPABASE_KEY** en las variables de entorno "
                    "de EasyPanel. Agrégalas y redespliega.")
     else:
-        st.success("Credenciales de Supabase detectadas ✅")
+        st.success("Credenciales de Supabase detectadas ")
 
     m = supa.get_mapeo()
     with st.form("form_supabase"):
@@ -1007,8 +1050,8 @@ def _panel_supabase():
         col_prod = c4.text_input("Columna producto (opcional)", value=m[supa.K_PRODUCTO])
         col_id = c5.text_input("Columna id único (dedup)", value=m[supa.K_ID])
         gcol1, gcol2 = st.columns(2)
-        probar = gcol1.form_submit_button("🔎 Probar y ver columnas")
-        guardar = gcol2.form_submit_button("💾 Guardar mapeo", type="primary")
+        probar = gcol1.form_submit_button("Probar y ver columnas")
+        guardar = gcol2.form_submit_button("Guardar mapeo", type="primary")
 
     if guardar:
         supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id)
@@ -1017,25 +1060,25 @@ def _panel_supabase():
         supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id)
         r = supa.probar_conexion()
         if r["ok"]:
-            st.success(f"Conectado ✅ Columnas de tu tabla: {', '.join(r['columnas'])}")
+            st.success(f"Conectado Columnas de tu tabla: {', '.join(r['columnas'])}")
             if r["muestra"]:
                 st.dataframe(pd.DataFrame(r["muestra"]), use_container_width=True, hide_index=True)
         else:
-            st.error(f"❌ {r['error']}")
+            st.error(f"{r['error']}")
 
-    if st.button("🔄 Sincronizar ventas de Supabase ahora", type="primary"):
+    if st.button("Sincronizar ventas de Supabase ahora", type="primary"):
         r = supa.sincronizar()
         if r["ok"]:
-            msg = f"✅ {r['insertadas']} venta(s) importada(s) de Supabase."
+            msg = f"{r['insertadas']} venta(s) importada(s) de Supabase."
             if r["sin_periodo"]:
                 msg += f" ({r['sin_periodo']} sin período/anuncio activo a esa hora)."
             st.success(msg)
         else:
-            st.error(f"❌ {r['error']}")
+            st.error(f"{r['error']}")
 
 
 def _panel_cuentas():
-    st.subheader("🗂️ Cuentas publicitarias detectadas")
+    st.subheader("Cuentas publicitarias detectadas")
     todos = db.obtener_anuncios(solo_activos=False)
     if not todos:
         st.info("Aún no hay cuentas. Agrega una conexión y pulsa **Recargar** en la barra lateral.")
@@ -1054,10 +1097,10 @@ def _panel_cuentas():
 
 
 def pagina_configuracion():
-    st.title("⚙️ Configuración")
+    st.title("Configuración")
     st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase) y revisa "
                "tus cuentas.")
-    tabs = st.tabs(["🔌 Conexiones", "📄 Excel", "🟩 Supabase", "🗂️ Cuentas"])
+    tabs = st.tabs(["Conexiones", "Excel", "Supabase", "Cuentas"])
     with tabs[0]:
         seccion_conexiones()
     with tabs[1]:
@@ -1074,12 +1117,12 @@ def pagina_configuracion():
 def pagina_dashboard():
     top1, top2 = st.columns([5, 1])
     with top1:
-        st.title("📊 Dashboard")
+        st.title("Dashboard")
         st.caption(f"Última actualización: {db.a_texto(db.ahora())}")
     with top2:
         st.write("")
         st.write("")
-        if st.button("🔄 Actualizar", use_container_width=True, type="primary"):
+        if st.button("Actualizar", use_container_width=True, type="primary"):
             try:
                 _insights_cache.clear()
             except Exception:

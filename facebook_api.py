@@ -258,8 +258,9 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                     params={"effective_status": ["ACTIVE", "PAUSED",
                                                  "ADSET_PAUSED", "CAMPAIGN_PAUSED"],
                             "limit": 500},
-                    fields=[Ad.Field.id, Ad.Field.name, Ad.Field.adset_id,
-                            Ad.Field.effective_status, Ad.Field.created_time],
+                    fields=["id", "name", "adset_id", "campaign_id",
+                        "effective_status", "created_time",
+                        "campaign{name}", "adset{name}"],
                 )
             except FacebookRequestError as e:
                 errores.append(f"{con['alias']}/{cta['name']}: {_fmt_fb_error(e)}")
@@ -272,6 +273,11 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                 ad_id = ad.get(Ad.Field.id)
                 nombre = ad.get(Ad.Field.name) or f"Anuncio {ad_id}"
                 adset_id = ad.get(Ad.Field.adset_id)
+                campaign_id = ad.get("campaign_id")
+                camp = ad.get("campaign") or {}
+                aset = ad.get("adset") or {}
+                campaign_nombre = camp.get("name") if isinstance(camp, dict) else None
+                adset_nombre = aset.get("name") if isinstance(aset, dict) else None
                 estado = ad.get(Ad.Field.effective_status) or ""
                 creado = ad.get(Ad.Field.created_time)
                 es_activo = 1 if estado == "ACTIVE" else 0
@@ -292,6 +298,8 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                     fecha_creacion=creado, effective_status=estado,
                     conexion_id=con["id"], cuenta_id=cta["act_id"],
                     cuenta_nombre=cta["name"], cuenta_pais=cta.get("pais"),
+                    campaign_id=campaign_id, campaign_nombre=campaign_nombre,
+                    adset_nombre=adset_nombre,
                 )
                 ids_vistos.append(ad_id)
 
@@ -335,14 +343,19 @@ def _leer_daily_budget_adset(adset_id: str, api=None) -> Optional[float]:
 # --------------------------------------------------------------------------- #
 #  Insights agregados de todas las conexiones/cuentas
 # --------------------------------------------------------------------------- #
-def obtener_insights(date_preset: str = "today") -> dict:
+def obtener_insights(date_preset: str = "today", nivel: str = "ad") -> dict:
     """
-    {ad_id: {"spend","cpm","ctr","impressions","clicks","conversaciones",
-             "costo_conversacion"}} agregando todas las conexiones/cuentas.
+    Métricas agregadas de todas las conexiones/cuentas, al nivel indicado:
+      nivel='ad'       → clave = ad_id
+      nivel='adset'    → clave = adset_id
+      nivel='campaign' → clave = campaign_id
+    Cada valor: {spend, cpm, ctr, impressions, clicks, conversaciones, costo_conversacion}.
     Nunca lanza.
     """
     if not SDK_DISPONIBLE:
         return {}
+    nivel = nivel if nivel in ("ad", "adset", "campaign") else "ad"
+    id_field = {"ad": "ad_id", "adset": "adset_id", "campaign": "campaign_id"}[nivel]
     cons = _conexiones_efectivas()
     resultado = {}
     for con in cons:
@@ -355,14 +368,14 @@ def obtener_insights(date_preset: str = "today") -> dict:
         for cta in cuentas:
             try:
                 filas = AdAccount(cta["act_id"], api=api).get_insights(
-                    params={"level": "ad", "date_preset": date_preset, "limit": 500},
-                    fields=["ad_id", "spend", "cpm", "ctr", "impressions",
+                    params={"level": nivel, "date_preset": date_preset, "limit": 500},
+                    fields=[id_field, "spend", "cpm", "ctr", "impressions",
                             "clicks", "actions"])
             except Exception as e:
                 _log(f"Insights {cta['name']}: {e}")
                 continue
             for row in filas:
-                ad_id = row.get("ad_id")
+                ad_id = row.get(id_field)
                 if not ad_id:
                     continue
                 spend = _to_float(row.get("spend"))

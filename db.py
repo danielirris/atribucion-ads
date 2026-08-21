@@ -124,6 +124,9 @@ def init_db() -> None:
     _asegurar_columna("anuncios", "cuenta_id", "TEXT")
     _asegurar_columna("anuncios", "cuenta_nombre", "TEXT")
     _asegurar_columna("anuncios", "cuenta_pais", "TEXT")
+    _asegurar_columna("anuncios", "campaign_id", "TEXT")
+    _asegurar_columna("anuncios", "campaign_nombre", "TEXT")
+    _asegurar_columna("anuncios", "adset_nombre", "TEXT")
     _asegurar_columna("ventas", "ext_id", "TEXT")
     _asegurar_columna("ventas", "producto", "TEXT")
 
@@ -143,15 +146,18 @@ def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
                    activo: int = 1, fecha_creacion: Optional[str] = None,
                    effective_status: Optional[str] = None,
                    conexion_id: Optional[int] = None, cuenta_id: Optional[str] = None,
-                   cuenta_nombre: Optional[str] = None, cuenta_pais: Optional[str] = None) -> None:
+                   cuenta_nombre: Optional[str] = None, cuenta_pais: Optional[str] = None,
+                   campaign_id: Optional[str] = None, campaign_nombre: Optional[str] = None,
+                   adset_nombre: Optional[str] = None) -> None:
     """Inserta o actualiza un anuncio."""
     with _LOCK, _conn() as conn:
         conn.execute(
             """
             INSERT INTO anuncios
                 (ad_id, nombre, adset_id, activo, fecha_creacion, effective_status,
-                 conexion_id, cuenta_id, cuenta_nombre, cuenta_pais, ultima_actualizacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 conexion_id, cuenta_id, cuenta_nombre, cuenta_pais,
+                 campaign_id, campaign_nombre, adset_nombre, ultima_actualizacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ad_id) DO UPDATE SET
                 nombre               = excluded.nombre,
                 adset_id             = COALESCE(excluded.adset_id, anuncios.adset_id),
@@ -162,10 +168,14 @@ def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
                 cuenta_id            = COALESCE(excluded.cuenta_id, anuncios.cuenta_id),
                 cuenta_nombre        = COALESCE(excluded.cuenta_nombre, anuncios.cuenta_nombre),
                 cuenta_pais          = COALESCE(excluded.cuenta_pais, anuncios.cuenta_pais),
+                campaign_id          = COALESCE(excluded.campaign_id, anuncios.campaign_id),
+                campaign_nombre      = COALESCE(excluded.campaign_nombre, anuncios.campaign_nombre),
+                adset_nombre         = COALESCE(excluded.adset_nombre, anuncios.adset_nombre),
                 ultima_actualizacion = excluded.ultima_actualizacion
             """,
             (str(ad_id), nombre, adset_id, activo, fecha_creacion, effective_status,
-             conexion_id, cuenta_id, cuenta_nombre, cuenta_pais, a_texto(ahora())),
+             conexion_id, cuenta_id, cuenta_nombre, cuenta_pais,
+             campaign_id, campaign_nombre, adset_nombre, a_texto(ahora())),
         )
         conn.commit()
 
