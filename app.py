@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v45 · 2026-08-21"
+APP_VERSION = "v46 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -1568,96 +1568,167 @@ def seccion_manual():
 # --------------------------------------------------------------------------- #
 _LOGIN_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700&family=Inter:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap');
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
-[data-testid="collapsedControl"], header[data-testid="stHeader"]{ display:none !important; }
-[data-testid="stAppViewContainer"]{ background:#0a0d13 !important; overflow:hidden; }
-[data-testid="stAppViewContainer"] .main .block-container{ max-width:940px; padding-top:13vh; }
-/* Marca a un costado (tipo Facebook) */
-.login-side .login-logo{ margin:0 0 18px; }
-.login-title-side{ font-family:'Geist',sans-serif;font-weight:700;font-size:32px;line-height:1.12;
-    background:linear-gradient(100deg,#eafcff,#c7f6ee 45%,#d9cbff);
-    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;margin:0; }
-.login-sub-side{ font-family:'Inter',sans-serif;color:#a7b6c4;font-size:14.5px;
-    margin:12px 0 18px;max-width:380px;line-height:1.55; }
-.login-feats{ list-style:none;padding:0;margin:0; }
-.login-feats li{ font-family:'Inter',sans-serif;color:#c3ccd6;font-size:13.5px;
-    margin:9px 0;padding-left:24px;position:relative; }
-.login-feats li::before{ content:"";position:absolute;left:0;top:5px;width:12px;height:12px;
-    border-radius:50%;background:linear-gradient(135deg,#8cd2d7,#c7c4ff);
-    box-shadow:0 0 10px rgba(140,210,215,.5); }
-.login-foot{ position:fixed; left:0; right:0; bottom:16px; text-align:center;
-    font-family:'Inter',sans-serif; color:#7c8a99; font-size:12px; z-index:3; line-height:1.7; }
-.login-foot .ver{ color:#5f6b7a; font-size:11px; }
-.login-foot .hp{ color:#ff7a90; }
-/* Matriz de puntos animada */
-[data-testid="stAppViewContainer"]::before{
-    content:""; position:fixed; inset:-25%;
-    background-image:radial-gradient(rgba(140,210,215,.22) 1.5px, transparent 1.7px);
-    background-size:26px 26px;
-    animation:matrixPulse 5.5s ease-in-out infinite;
-    z-index:0;
-}
-[data-testid="stAppViewContainer"]::after{
-    content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+[data-testid="collapsedControl"], header[data-testid="stHeader"], [data-testid="stToolbar"]{ display:none !important; }
+[data-testid="stAppViewContainer"], .stApp{ background:#080810 !important; overflow:hidden; }
+/* Centrado perfecto: una sola columna en el centro exacto */
+[data-testid="stMain"]{ display:flex !important; align-items:center !important; justify-content:center !important; min-height:100vh; }
+[data-testid="stMainBlockContainer"], .block-container{ max-width:440px !important; width:100%;
+    padding:2.5vh 1.1rem !important; position:relative; z-index:2; }
+
+/* ---------- Fondo animado (aurora + grid + blobs + partículas) ---------- */
+.login-bg{ position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background:#080810; }
+.login-bg .aurora{ position:absolute; inset:-40%;
     background:
-      radial-gradient(560px 560px at 18% 22%, rgba(191,242,226,.22), transparent 60%),
-      radial-gradient(600px 600px at 84% 80%, rgba(230,213,255,.22), transparent 60%),
-      radial-gradient(520px 520px at 55% 8%, rgba(199,196,255,.16), transparent 60%),
-      radial-gradient(480px 480px at 8% 92%, rgba(140,210,215,.14), transparent 60%);
-    animation:orbFloat 16s ease-in-out infinite alternate;
-}
-.login-feats li:nth-child(1)::before{ background:linear-gradient(135deg,#8cd2d7,#a8eff4); }
-.login-feats li:nth-child(2)::before{ background:linear-gradient(135deg,#BFF2E2,#8cd2d7); }
-.login-feats li:nth-child(3)::before{ background:linear-gradient(135deg,#C7C4FF,#E6D5FF); }
-@keyframes matrixPulse{ 0%,100%{opacity:.35} 50%{opacity:.85} }
-@keyframes orbFloat{ 0%{transform:translate(0,0)} 100%{transform:translate(-24px,26px)} }
-/* Contenido por encima */
-[data-testid="stAppViewContainer"] .main .block-container > *{ position:relative; z-index:2; }
-.login-brand{ text-align:center; margin:2vh 0 0.5rem; }
-.login-logo{ width:64px;height:64px;margin:0 auto 14px;border-radius:20px;
-    background:linear-gradient(150deg,#a2e9ee,#8cd2d7 55%,#c4c1fb);
-    display:flex;align-items:center;justify-content:center;
-    box-shadow:0 10px 40px rgba(140,210,215,.35), inset 0 1px 0 rgba(255,255,255,.4); }
-.login-logo svg{ width:34px;height:34px; }
-.login-title{ font-family:'Geist',sans-serif;font-weight:700;font-size:23px;
-    letter-spacing:.12em;color:#eafcff;margin:0; }
-.login-sub{ font-family:'Inter',sans-serif;color:#9fb2c2;font-size:13.5px;margin-top:6px; }
-/* Tarjeta glass */
+      radial-gradient(45% 45% at 30% 30%, #1a0533 0%, transparent 60%),
+      radial-gradient(40% 40% at 72% 55%, #020818 0%, transparent 60%),
+      radial-gradient(50% 50% at 50% 80%, #14082e 0%, transparent 62%),
+      radial-gradient(35% 35% at 82% 22%, #0a1a3a 0%, transparent 60%);
+    filter:blur(40px); animation:aurora 22s ease-in-out infinite alternate; }
+.login-bg .grid{ position:absolute; inset:0;
+    background-image:linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+    background-size:46px 46px;
+    -webkit-mask:radial-gradient(circle at 50% 42%, #000 0%, transparent 78%);
+    mask:radial-gradient(circle at 50% 42%, #000 0%, transparent 78%); }
+.login-bg .blob{ position:absolute; width:440px; height:440px; border-radius:50%;
+    filter:blur(80px); opacity:.15; }
+.login-bg .blob-1{ background:#7c3aed; top:-130px; left:-120px; animation:blob1 20s ease-in-out infinite alternate; }
+.login-bg .blob-2{ background:#2563eb; bottom:-140px; right:-120px; animation:blob2 26s ease-in-out infinite alternate; }
+.login-bg .particles span{ position:absolute; width:3px; height:3px; border-radius:50%;
+    background:#c9d3ff; opacity:.35; box-shadow:0 0 6px rgba(201,211,255,.6);
+    animation:floaty linear infinite; }
+@keyframes aurora{
+    0%{ transform:translate(-4%,-3%) rotate(0deg) scale(1.1); }
+    50%{ transform:translate(4%,3%) rotate(7deg) scale(1.28); }
+    100%{ transform:translate(-2%,5%) rotate(-5deg) scale(1.16); } }
+@keyframes blob1{ 0%{transform:translate(0,0) scale(1)} 100%{transform:translate(60px,50px) scale(1.15)} }
+@keyframes blob2{ 0%{transform:translate(0,0) scale(1)} 100%{transform:translate(-50px,-40px) scale(1.1)} }
+@keyframes floaty{ 0%{transform:translate(0,0); opacity:0}
+    10%{opacity:.4} 90%{opacity:.4} 100%{transform:translate(14px,-120px); opacity:0} }
+
+/* ---------- Logo + título ---------- */
+.login-brand{ text-align:center; margin:0 0 22px; animation:fadeInDown .6s cubic-bezier(.2,.7,.3,1) both; }
+.login-logo{ width:76px; height:76px; margin:0 auto 20px; border-radius:22px;
+    background:linear-gradient(150deg,#7c3aed,#2563eb); display:flex; align-items:center; justify-content:center;
+    animation:logoPulse 2.6s ease-in-out infinite; }
+.login-logo svg{ width:40px; height:40px; }
+.login-title{ font-family:'Geist',sans-serif; font-weight:800; font-size:33px; line-height:1.1; margin:0;
+    background:linear-gradient(92deg,#ffffff 30%,#a855f7 100%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.login-sub{ font-family:'Inter',sans-serif; color:#9aa3b8; font-size:14px; margin:10px 0 0; }
+@keyframes logoPulse{
+    0%,100%{ box-shadow:0 0 22px 4px rgba(124,58,237,.35), 0 0 44px 10px rgba(37,99,235,.18); }
+    50%{ box-shadow:0 0 40px 10px rgba(124,58,237,.6), 0 0 70px 18px rgba(37,99,235,.38); } }
+
+/* ---------- Tarjeta glass ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"]{
-    background:rgba(20,24,32,.62) !important; backdrop-filter:blur(18px);
-    border:1px solid rgba(255,255,255,.09) !important; border-radius:20px !important;
-    box-shadow:0 24px 60px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.05); }
-.stTextInput input{ background:rgba(255,255,255,.04) !important; border-radius:12px !important;
-    border:1px solid rgba(255,255,255,.12) !important; color:#eaf2f6 !important; }
-.stTextInput input:focus{ border-color:#8cd2d7 !important; box-shadow:0 0 0 2px rgba(140,210,215,.25) !important; }
-.stButton>button, .stFormSubmitButton>button{ border-radius:12px !important;
-    background:linear-gradient(180deg,#a2e9ee,#8cd2d7) !important; color:#00373a !important;
-    font-family:'Geist',sans-serif;font-weight:700;border:none !important;
-    box-shadow:0 8px 26px rgba(140,210,215,.3) !important; }
+    position:relative; overflow:hidden;
+    background:rgba(255,255,255,.03) !important; backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,.08) !important; border-radius:20px !important;
+    box-shadow:0 30px 80px rgba(0,0,0,.5);
+    animation:fadeInUp .8s cubic-bezier(.2,.7,.3,1) .15s both; }
+div[data-testid="stVerticalBlockBorderWrapper"]::before{
+    content:""; position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg,#7c3aed,#2563eb); }
+.login-cardtitle{ font-family:'Geist',sans-serif; font-weight:700; font-size:28px; color:#fff; margin:4px 0 14px; }
+
+/* Campos */
+.stTextInput{ animation:fadeInUp .5s ease both; }
+.stTextInput:nth-of-type(1){ animation-delay:.30s; }
+.stTextInput:nth-of-type(2){ animation-delay:.40s; }
+.stTextInput label p, .stTextInput label{ color:#8a93a6 !important; font-family:'Inter',sans-serif;
+    font-size:11px !important; font-weight:600 !important; text-transform:uppercase; letter-spacing:.09em; }
+.stTextInput div[data-baseweb="input"], .stTextInput input{ background:rgba(255,255,255,.05) !important;
+    border-radius:10px !important; }
+.stTextInput input{ border:1px solid rgba(255,255,255,.1) !important; color:#fff !important;
+    padding:13px 14px !important; font-family:'Inter',sans-serif; }
+.stTextInput input:focus{ border-color:#7c3aed !important;
+    box-shadow:0 0 0 3px rgba(124,58,237,.25), 0 0 18px rgba(124,58,237,.35) !important; }
+.stTextInput div[data-baseweb="input"]{ border:none !important; }
+
+/* Botón con shimmer */
+.stButton{ animation:fadeInUp .5s ease .5s both; }
+.stButton>button{ position:relative; overflow:hidden; width:100%; border:none !important; border-radius:10px !important;
+    background:linear-gradient(90deg,#7c3aed,#2563eb) !important; color:#fff !important;
+    font-family:'Geist',sans-serif; font-weight:700 !important; padding:12px 0 !important;
+    box-shadow:0 8px 26px rgba(124,58,237,.35) !important; transition:box-shadow .25s, transform .1s; }
+.stButton>button:hover{ box-shadow:0 0 34px rgba(124,58,237,.65) !important; transform:translateY(-1px); }
+.stButton>button::after{ content:""; position:absolute; top:0; left:-70%; width:45%; height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent); transform:skewX(-20deg); }
+.stButton>button:hover::after{ animation:shimmer .9s ease; }
+@keyframes shimmer{ 0%{left:-70%} 100%{left:150%} }
+
+/* Features abajo */
+.login-feats2{ display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
+    margin:20px auto 0; animation:fadeInUp .6s ease .7s both; }
+.login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#8a93a6;
+    font-family:'Inter',sans-serif; font-size:11.5px; }
+.login-feats2 .feat svg{ width:15px; height:15px; stroke:#a855f7; opacity:.9; }
+.login-feats2 .sep{ width:1px; height:14px; background:rgba(255,255,255,.12); }
+.login-foot{ position:fixed; left:0; right:0; bottom:14px; text-align:center;
+    font-family:'Inter',sans-serif; color:#5a6478; font-size:11.5px; z-index:3; line-height:1.7; }
+.login-foot .ver{ color:#4a5265; font-size:11px; }
+.login-foot .hp{ color:#a855f7; }
+
+@keyframes fadeInDown{ 0%{opacity:0; transform:translateY(-18px)} 100%{opacity:1; transform:translateY(0)} }
+@keyframes fadeInUp{ 0%{opacity:0; transform:translateY(18px)} 100%{opacity:1; transform:translateY(0)} }
 </style>
 """
 
-_LOGIN_HEADER_SIDE = """
-<div class="login-side">
+_LOGIN_HEADER = """
+<div class="login-brand">
   <div class="login-logo">
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" fill="#00373a" opacity=".18"/>
-      <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="#00373a" stroke-width="1.3"/>
-      <path d="M7 14l3-4 2 2.4L15 8l2 3" stroke="#00373a" stroke-width="1.6"
+      <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" fill="#fff" opacity=".14"/>
+      <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="#fff" stroke-width="1.3"/>
+      <path d="M7 14l3-4 2 2.4L15 8l2 3" stroke="#fff" stroke-width="1.7"
             stroke-linecap="round" stroke-linejoin="round" fill="none"/>
     </svg>
   </div>
-  <h1 class="login-title-side">Ads Command Center</h1>
-  <p class="login-sub-side">Atribución de ventas y control de tus anuncios de Facebook.
-     Todo en dólares, en un solo lugar.</p>
-  <ul class="login-feats">
-    <li>Campañas, conjuntos y anuncios en una sola vista</li>
-    <li>ROAS, gasto y presupuesto de hoy</li>
-    <li>Excel + Supabase unidos automáticamente</li>
-  </ul>
+  <h1 class="login-title">Ads Command Center</h1>
+  <p class="login-sub">Control total de tus campañas de Facebook Ads</p>
 </div>
 """
+
+_LOGIN_FEATS = """
+<div class="login-feats2">
+  <div class="feat">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    <span>Campañas, conjuntos y anuncios</span>
+  </div>
+  <div class="sep"></div>
+  <div class="feat">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
+    <span>ROAS, gasto y presupuesto de hoy</span>
+  </div>
+  <div class="sep"></div>
+  <div class="feat">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
+      <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+    <span>Excel + Supabase unidos</span>
+  </div>
+</div>
+"""
+
+# Partículas flotantes (posiciones y duraciones fijas, deterministas).
+_LOGIN_PARTICULAS = [(8, 78, 15, 0), (18, 40, 18, 3), (27, 88, 13, 6), (36, 20, 20, 1),
+                     (45, 65, 16, 4), (54, 35, 19, 7), (63, 82, 14, 2), (72, 15, 21, 5),
+                     (80, 58, 17, 8), (88, 30, 15, 3), (94, 72, 19, 6), (13, 55, 16, 9)]
+
+
+def _login_bg_html() -> str:
+    parts = "".join(
+        f'<span style="left:{x}%;top:{y}%;animation-duration:{d}s;animation-delay:{dl}s"></span>'
+        for (x, y, d, dl) in _LOGIN_PARTICULAS)
+    return ('<div class="login-bg"><div class="aurora"></div><div class="grid"></div>'
+            '<div class="blob blob-1"></div><div class="blob blob-2"></div>'
+            f'<div class="particles">{parts}</div></div>')
 
 
 def _gate_password():
@@ -1667,22 +1738,20 @@ def _gate_password():
         return
 
     st.markdown(_LOGIN_CSS, unsafe_allow_html=True)
-    colL, colR = st.columns([1.1, 0.9], gap="large", vertical_alignment="center")
-    with colL:
-        st.markdown(_LOGIN_HEADER_SIDE, unsafe_allow_html=True)
-    with colR:
-        with st.container(border=True):
-            st.markdown("#### Iniciar sesión")
-            usuario = st.text_input("Usuario", key="_user", placeholder="usuario")
-            pwd = st.text_input("Contraseña", type="password", key="_pwd", placeholder="••••••••")
-            entrar = st.button("Entrar", use_container_width=True, type="primary")
-            if entrar:
-                if usuario.strip() == config.APP_USER and pwd == config.APP_PASSWORD:
-                    st.session_state["_auth_ok"] = True
-                    st.rerun()
-                else:
-                    st.error("Usuario o contraseña incorrectos.")
-
+    st.markdown(_login_bg_html(), unsafe_allow_html=True)
+    st.markdown(_LOGIN_HEADER, unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown('<div class="login-cardtitle">Iniciar sesión</div>', unsafe_allow_html=True)
+        usuario = st.text_input("Usuario", key="_user", placeholder="usuario")
+        pwd = st.text_input("Contraseña", type="password", key="_pwd", placeholder="••••••••")
+        entrar = st.button("Entrar", use_container_width=True, type="primary")
+        if entrar:
+            if usuario.strip() == config.APP_USER and pwd == config.APP_PASSWORD:
+                st.session_state["_auth_ok"] = True
+                st.rerun()
+            else:
+                st.error("Usuario o contraseña incorrectos.")
+    st.markdown(_LOGIN_FEATS, unsafe_allow_html=True)
     st.markdown(
         f'<div class="login-foot"><span class="ver">{_html.escape(APP_VERSION)}</span><br>'
         f'Hecho con <span class="hp">&#10084;</span> por Daniel M</div>',
