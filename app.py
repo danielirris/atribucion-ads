@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v51 · 2026-08-21"
+APP_VERSION = "v52 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -967,9 +967,10 @@ def _render_lista_nativa(filas, nivel):
         # Degradado rojo SOLO para los que van muy mal: gastan y su ROAS < 1 (pierden).
         muy_mal = bool(f["gasto"] and f["gasto"] > 0 and (f["roas"] or 0) < 1.0)
         roas_alto = bool(f["roas"] and f["roas"] > 5)
-        # Nombre en púrpura claro (premium); acento verde a la izquierda si ROAS > 5.
+        # Nombre coloreado por ESTADO (verde activo / rojo apagado / amarillo mixto);
+        # acento verde a la izquierda si ROAS > 5.
         borde = "border-left:3px solid #10b981;padding-left:8px;" if roas_alto else ""
-        nombre_html = (f'<div class="ad-name" style="{borde}color:#a78bfa;font-weight:700;'
+        nombre_html = (f'<div class="ad-name" style="{borde}color:{est_col};font-weight:700;'
                        f'font-size:14px;white-space:normal;word-break:break-word">'
                        f'{esc(str(f["nombre"]))[:120]}</div>')
         if muy_mal:
@@ -1036,41 +1037,49 @@ def _dialog_info():
     rate = f.get("rate_c") or 1.0
     a = db.obtener_anuncio(f["ad_rep"]) or {}
     creado = _fecha_corta(a.get("fecha_creacion"))
+    periodos = db.obtener_periodos(f["ad_rep"])
     ab = db.periodo_abierto(f["ad_rep"])
-    if ab:
-        inicio = db.a_fecha(ab["hora_inicio"])
-        ult_mod = db.a_texto(inicio) if inicio else "—"
-        vs = db.ventas_suma(f["ad_ids"], inicio)
-        fact = vs["ingreso_nat"] * rate
-        fact_n = vs["num"]
+    if ab and db.a_fecha(ab["hora_inicio"]):
+        ult_mod = _fecha_corta(db.a_fecha(ab["hora_inicio"]).isoformat())
     else:
-        ult_mod, fact, fact_n = "—", 0.0, 0
+        ult_mod = "—"
+    # Presupuesto actual y el ANTERIOR (el período previo al cambio), en USD.
+    presup_actual = f.get("presupuesto")
+    presup_ant = (float(periodos[-2]["presupuesto"]) * rate) if len(periodos) >= 2 else None
+    delta_presup = None
+    if presup_ant is not None and presup_actual is not None:
+        d = presup_actual - presup_ant
+        delta_presup = f"{'+' if d >= 0 else ''}{_usd(d)} vs. anterior"
 
-    c1, c2, c3 = st.columns(3)
+    st.markdown("&nbsp;", unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Creado", creado)
-    c2.metric("Última modif. de presupuesto", ult_mod)
-    c3.metric("Facturado desde entonces", _usd(fact), f"{fact_n} ventas")
+    c2.metric("Presupuesto actual",
+              _usd(presup_actual) if presup_actual is not None else "—", delta=delta_presup)
+    c3.metric("Presupuesto anterior",
+              _usd(presup_ant) if presup_ant is not None else "Sin cambios")
+    c4.metric("Último cambio", ult_mod)
 
-    # Métricas para verificar contra Facebook Ads
-    st.markdown("**Métricas del rango (para verificar con Facebook Ads):**")
-    ver = {
-        "Gasto (USD)": _usd(f["gasto"]),
-        "Gasto (moneda cuenta)": (f"{_num(f.get('spend_nat'))} {f['moneda']}"
-                                  if f.get("spend_nat") is not None else "—"),
-        "Impresiones": (f"{int(f['impresiones']):,}".replace(",", ".")
-                        if f.get("impresiones") is not None else "—"),
-        "Clics": (f"{int(f['clics']):,}".replace(",", ".")
-                  if f.get("clics") is not None else "—"),
-        "CPM (USD)": _usd(f["cpm"]) if f["cpm"] is not None else "—",
-        "CTR": f'{f["ctr"]:.2f}%' if f["ctr"] is not None else "—",
-        "Compras (Meta)": (int(f["compras_meta"]) if f.get("compras_meta") is not None else "—"),
-        "Valor compras (Meta, USD)": (_usd((f.get("compras_valor_meta") or 0) * rate)
-                                      if f.get("compras_valor_meta") is not None else "—"),
-        "Conversaciones": int(f["conv"]) if f["conv"] is not None else "—",
-        "Ventas (tus fuentes)": f["num"],
-        "Ingresos (tus fuentes, USD)": _usd(f["ingresos"]),
-    }
-    st.table(pd.DataFrame(list(ver.items()), columns=["Métrica", "Valor"]))
+    # Métricas para verificar contra Facebook Ads (en un desplegable para no saturar)
+    with st.expander("Métricas del rango (para verificar con Facebook Ads)"):
+        ver = {
+            "Gasto (USD)": _usd(f["gasto"]),
+            "Gasto (moneda cuenta)": (f"{_num(f.get('spend_nat'))} {f['moneda']}"
+                                      if f.get("spend_nat") is not None else "—"),
+            "Impresiones": (f"{int(f['impresiones']):,}".replace(",", ".")
+                            if f.get("impresiones") is not None else "—"),
+            "Clics": (f"{int(f['clics']):,}".replace(",", ".")
+                      if f.get("clics") is not None else "—"),
+            "CPM (USD)": _usd(f["cpm"]) if f["cpm"] is not None else "—",
+            "CTR": f'{f["ctr"]:.2f}%' if f["ctr"] is not None else "—",
+            "Compras (Meta)": (int(f["compras_meta"]) if f.get("compras_meta") is not None else "—"),
+            "Valor compras (Meta, USD)": (_usd((f.get("compras_valor_meta") or 0) * rate)
+                                          if f.get("compras_valor_meta") is not None else "—"),
+            "Conversaciones": int(f["conv"]) if f["conv"] is not None else "—",
+            "Ventas (tus fuentes)": f["num"],
+            "Ingresos (tus fuentes, USD)": _usd(f["ingresos"]),
+        }
+        st.table(pd.DataFrame(list(ver.items()), columns=["Métrica", "Valor"]))
 
     # Gráfica de los últimos 7 días: gasto (Facebook) e ingresos (tus ventas).
     ahora = db.ahora()
@@ -1086,9 +1095,9 @@ def _dialog_info():
     etiquetas = [d[5:] for d in dias]  # MM-DD
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#8cd2d7"))
+    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#7c3aed"))
     fig.add_trace(go.Scatter(x=etiquetas, y=ingresos, name="Ingresos (USD)", mode="lines+markers",
-                             line=dict(color="#c7c4ff", width=3)))
+                             line=dict(color="#10b981", width=3)))
     fig.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10),
                       legend=dict(orientation="h", y=1.15),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -1953,11 +1962,12 @@ def _inject_css():
 
     /* ---------- Fondo premium: aurora (30%) + blobs (10%) + grid ---------- */
     .app-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:#080810; }
-    .app-bg .aurora{ position:absolute; inset:-40%; opacity:.30;
+    .app-bg .aurora{ position:absolute; inset:-40%; opacity:.5;
         background:
-          radial-gradient(42% 42% at 28% 26%, #1a0533 0%, transparent 60%),
-          radial-gradient(38% 38% at 74% 58%, #020818 0%, transparent 60%),
-          radial-gradient(46% 46% at 52% 84%, #14082e 0%, transparent 62%);
+          radial-gradient(46% 46% at 26% 24%, #2a0a55 0%, transparent 60%),
+          radial-gradient(42% 42% at 72% 40%, #1a0533 0%, transparent 60%),
+          radial-gradient(40% 40% at 78% 70%, #061336 0%, transparent 60%),
+          radial-gradient(50% 50% at 50% 88%, #1c0940 0%, transparent 62%);
         filter:blur(50px); animation:dashAurora 26s ease-in-out infinite alternate; }
     .app-bg .grid{ position:absolute; inset:0;
         background-image:linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
@@ -2063,6 +2073,21 @@ def _inject_css():
         background:linear-gradient(90deg,#7c3aed,#2563eb); }
     .tcard:hover{ border-color:rgba(124,58,237,.45) !important; box-shadow:0 10px 30px rgba(124,58,237,.15); }
 
+    /* Botones de acción de la tabla (Info/Pres/Dup): visibles y UNIFORMES.
+       Los de Pres/Dup son popovers que antes salían casi invisibles. */
+    [data-testid="stPopoverButton"], .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)):not([kind="tertiary"]){
+        background:rgba(124,58,237,.12) !important; border:1px solid rgba(255,255,255,.14) !important;
+        border-radius:9px !important; color:#fff !important; min-height:0 !important;
+        padding:6px 8px !important; transition:all .15s ease;
+    }
+    [data-testid="stPopoverButton"]:hover, .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)):not([kind="tertiary"]):hover{
+        background:rgba(124,58,237,.28) !important; border-color:#7c3aed !important;
+        box-shadow:0 0 14px rgba(124,58,237,.3) !important;
+    }
+    [data-testid="stPopoverButton"] [data-testid="stIconMaterial"],
+    .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)) [data-testid="stIconMaterial"]{
+        color:#c4b5fd !important;
+    }
     /* Toggle On/Off rediseñado: OFF gris, ON verde con glow (transición suave) */
     [data-testid="stCheckbox"] label > div:first-of-type{
         background:#374151 !important; transition:background .2s ease, box-shadow .2s ease;
