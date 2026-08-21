@@ -435,7 +435,11 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                 ids_vistos.append(ad_id)
 
                 if abrir_periodos and es_activo and presupuesto is not None:
-                    db.asegurar_periodo_inicial(ad_id, presupuesto)
+                    # Ancla el período inicial a la fecha de CREACIÓN del anuncio
+                    # (no a la hora de carga), para que un anuncio nunca modificado
+                    # no aparezca como "modificado hoy".
+                    creado_dt = db.a_fecha(str(creado)[:19].replace("T", " ")) if creado else None
+                    db.asegurar_periodo_inicial(ad_id, presupuesto, creado_dt)
 
         if con["id"] != ENV_CONEXION_ID:
             db.actualizar_conexion(con["id"], ultimo_error=None)

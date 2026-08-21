@@ -356,15 +356,28 @@ def cambiar_periodo(ad_id: str, presupuesto_nuevo: float,
     return abrir_periodo(ad_id, presupuesto_nuevo, h)
 
 
-def asegurar_periodo_inicial(ad_id: str, presupuesto: float) -> dict:
+def asegurar_periodo_inicial(ad_id: str, presupuesto: float,
+                             hora_inicio: Optional[datetime] = None) -> dict:
     """
-    Garantiza que un anuncio tenga un período abierto. Si no lo tiene, abre uno.
-    Útil al cargar anuncios desde Facebook por primera vez.
+    Garantiza que un anuncio tenga un período abierto. Si no lo tiene, abre uno
+    anclado a `hora_inicio` (la fecha de creación del anuncio), NO a "ahora", para
+    que un anuncio nunca modificado no aparezca como "modificado hoy".
+
+    Además CORRIGE los períodos que quedaron mal: si el anuncio tiene un solo
+    período (nunca hubo un cambio real de presupuesto) y `hora_inicio` es anterior
+    a lo guardado, lo retrocede a esa fecha. Nunca lo adelanta ni toca historiales
+    con cambios reales (varios períodos).
     """
-    abierto = periodo_abierto(ad_id)
-    if abierto:
-        return abierto
-    abrir_periodo(ad_id, presupuesto)
+    periodos = obtener_periodos(ad_id)
+    if not periodos:
+        abrir_periodo(ad_id, presupuesto, hora_inicio)
+        return periodo_abierto(ad_id)
+    if (hora_inicio and len(periodos) == 1 and periodos[0]["hora_fin"] is None
+            and a_texto(hora_inicio) < str(periodos[0]["hora_inicio"])):
+        with _LOCK, _conn() as conn:
+            conn.execute("UPDATE periodos SET hora_inicio = ? WHERE id = ?",
+                         (a_texto(hora_inicio), periodos[0]["id"]))
+            conn.commit()
     return periodo_abierto(ad_id)
 
 
