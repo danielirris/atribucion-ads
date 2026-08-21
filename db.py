@@ -430,6 +430,30 @@ def ventas_por_pais(cutoff: Optional[datetime] = None,
         return {r["pais"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
 
 
+def ext_ids_de_fuente(hoja_origen: str) -> set:
+    """Todos los ext_id ya importados de una fuente (para dedup en memoria, rápido)."""
+    with _conn() as conn:
+        return {r["ext_id"] for r in conn.execute(
+            "SELECT ext_id FROM ventas WHERE hoja_origen = ? AND ext_id IS NOT NULL",
+            (hoja_origen,))}
+
+
+def insertar_ventas_bulk(filas: list) -> int:
+    """
+    Inserta muchas ventas de una vez. filas = lista de tuplas
+    (ad_id, valor, hora_texto, periodo_id, hoja_origen, ext_id, producto, pais).
+    """
+    if not filas:
+        return 0
+    with _LOCK, _conn() as conn:
+        conn.executemany(
+            """INSERT INTO ventas
+               (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen, ext_id, producto, pais)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", filas)
+        conn.commit()
+        return len(filas)
+
+
 def venta_existe(hoja_origen: str, ext_id: str) -> bool:
     """True si ya se importó una venta con ese ext_id desde esa fuente (dedup)."""
     if not ext_id:

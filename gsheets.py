@@ -105,16 +105,24 @@ def _descargar_xlsx(url: str):
     if not sid:
         return None, "No pude extraer el ID del Sheet de esa URL."
     export = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx"
-    try:
-        r = requests.get(export, timeout=30)
-        if r.status_code == 200 and r.content[:2] == b"PK":  # xlsx = zip (PK)
-            return r.content, None
-        if "text/html" in r.headers.get("content-type", ""):
-            return None, ("No tengo acceso al Sheet. Compártelo como "
-                          "'Cualquiera con el enlace: Lector'.")
-        return None, f"HTTP {r.status_code} al descargar el Sheet."
-    except Exception as e:
-        return None, str(e)
+    ultimo = None
+    # Reintentos con timeout amplio (los Sheets grandes tardan en exportarse).
+    for intento in range(3):
+        try:
+            r = requests.get(export, timeout=(15, 180), stream=True)
+            contenido = r.content  # descarga completa
+            if r.status_code == 200 and contenido[:2] == b"PK":  # xlsx = zip (PK)
+                return contenido, None
+            if "text/html" in r.headers.get("content-type", ""):
+                return None, ("No tengo acceso al Sheet. Compártelo como "
+                              "'Cualquiera con el enlace: Lector'.")
+            ultimo = f"HTTP {r.status_code} al descargar el Sheet."
+        except Exception as e:
+            ultimo = (f"{e}. El Sheet puede ser muy grande; reintentando..."
+                      if intento < 2 else
+                      f"{e}. El Sheet es muy grande y la descarga se pasó del tiempo. "
+                      "Prueba de nuevo, o divide el Sheet en menos filas/pestañas.")
+    return None, ultimo
 
 
 def probar() -> dict:
@@ -155,7 +163,9 @@ def sincronizar() -> dict:
     deteccion = db.ahora()
     dedup_cfg = get_dedup().strip().lower()
     ignora_cero = get_ignora_cero()
-    insertadas, sin_periodo = 0, 0
+    existentes = db.ext_ids_de_fuente(HOJA)  # dedup en memoria (rápido)
+    nuevos = set()
+    lote = []  # tuplas para inserción masiva
     detalle = []
     for nombre_hoja, dff in hojas.items():
         if dff is None or dff.empty:
@@ -187,7 +197,7 @@ def sincronizar() -> dict:
                 ext_id = f"{nombre_hoja}:{str(fila.get(dedup_col)).strip()}"
             else:
                 ext_id = f"{nombre_hoja}#{i}"
-            if db.venta_existe(HOJA, ext_id):
+            if ext_id in existentes or ext_id in nuevos:
                 dup += 1
                 continue
             valor = watcher._parse_valor(fila.get(cmap["valor"]))
@@ -205,18 +215,14 @@ def sincronizar() -> dict:
             hora = watcher._parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
             pais = fila.get(cmap["pais"]) if cmap["pais"] else None
             pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
-            periodo = db.periodo_para_hora(ad_id, hora)
-            periodo_id = periodo["id"] if periodo else None
-            if periodo_id is None:
-                sin_periodo += 1
-            db.insertar_venta(ad_id, valor, hora, periodo_id, HOJA,
-                              ext_id=ext_id, pais=pais)
-            insertadas += 1
+            nuevos.add(ext_id)
+            lote.append((ad_id, float(valor), db.a_texto(hora), None, HOJA, ext_id, None, pais))
             ins_hoja += 1
         detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": ins_hoja,
                         "columnas": cmap,
                         "motivo": (f"OK · {ins_hoja} nuevas, {dup} ya estaban, "
                                    f"{sin_val} sin valor, {ceros} con valor 0 ignoradas, "
                                    f"{sin_id} sin ID")})
-    return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo,
+    insertadas = db.insertar_ventas_bulk(lote)
+    return {"ok": True, "insertadas": insertadas, "sin_periodo": 0,
             "detalle": detalle, "error": None}
