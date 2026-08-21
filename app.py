@@ -25,7 +25,7 @@ import supabase_source as supa
 st.set_page_config(page_title="Atribución Facebook Ads", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v5 · 2026-08-20 · Niveles (campaña/conjunto/anuncio) + sin emojis"
+APP_VERSION = "v6 · 2026-08-20 · Login usuario+contraseña con matriz de puntos"
 
 
 # --------------------------------------------------------------------------- #
@@ -854,20 +854,92 @@ def seccion_manual():
 # --------------------------------------------------------------------------- #
 #  Candado de contraseña
 # --------------------------------------------------------------------------- #
+_LOGIN_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700&family=Inter:wght@400;500&display=swap');
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"], header[data-testid="stHeader"]{ display:none !important; }
+[data-testid="stAppViewContainer"]{ background:#0a0d13 !important; overflow:hidden; }
+[data-testid="stAppViewContainer"] .main .block-container{ max-width:520px; padding-top:5vh; }
+/* Matriz de puntos animada */
+[data-testid="stAppViewContainer"]::before{
+    content:""; position:fixed; inset:-25%;
+    background-image:radial-gradient(rgba(140,210,215,.22) 1.5px, transparent 1.7px);
+    background-size:26px 26px;
+    animation:matrixPulse 5.5s ease-in-out infinite;
+    z-index:0;
+}
+[data-testid="stAppViewContainer"]::after{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(520px 520px at 22% 20%, rgba(191,242,226,.16), transparent 60%),
+      radial-gradient(560px 560px at 82% 82%, rgba(230,213,255,.16), transparent 60%);
+    animation:orbFloat 16s ease-in-out infinite alternate;
+}
+@keyframes matrixPulse{ 0%,100%{opacity:.35} 50%{opacity:.85} }
+@keyframes orbFloat{ 0%{transform:translate(0,0)} 100%{transform:translate(-24px,26px)} }
+/* Contenido por encima */
+[data-testid="stAppViewContainer"] .main .block-container > *{ position:relative; z-index:2; }
+.login-brand{ text-align:center; margin:2vh 0 0.5rem; }
+.login-logo{ width:64px;height:64px;margin:0 auto 14px;border-radius:20px;
+    background:linear-gradient(150deg,#a2e9ee,#8cd2d7 55%,#c4c1fb);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 10px 40px rgba(140,210,215,.35), inset 0 1px 0 rgba(255,255,255,.4); }
+.login-logo svg{ width:34px;height:34px; }
+.login-title{ font-family:'Geist',sans-serif;font-weight:700;font-size:30px;
+    letter-spacing:.16em;color:#eafcff;margin:0; }
+.login-sub{ font-family:'Inter',sans-serif;color:#9fb2c2;font-size:13.5px;margin-top:6px; }
+/* Tarjeta glass */
+div[data-testid="stVerticalBlockBorderWrapper"]{
+    background:rgba(20,24,32,.62) !important; backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.09) !important; border-radius:20px !important;
+    box-shadow:0 24px 60px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.05); }
+.stTextInput input{ background:rgba(255,255,255,.04) !important; border-radius:12px !important;
+    border:1px solid rgba(255,255,255,.12) !important; color:#eaf2f6 !important; }
+.stTextInput input:focus{ border-color:#8cd2d7 !important; box-shadow:0 0 0 2px rgba(140,210,215,.25) !important; }
+.stButton>button, .stFormSubmitButton>button{ border-radius:12px !important;
+    background:linear-gradient(180deg,#a2e9ee,#8cd2d7) !important; color:#00373a !important;
+    font-family:'Geist',sans-serif;font-weight:700;border:none !important;
+    box-shadow:0 8px 26px rgba(140,210,215,.3) !important; }
+</style>
+"""
+
+_LOGIN_HEADER = """
+<div class="login-brand">
+  <div class="login-logo">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" fill="#00373a" opacity=".18"/>
+      <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="#00373a" stroke-width="1.3"/>
+      <path d="M7 14l3-4 2 2.4L15 8l2 3" stroke="#00373a" stroke-width="1.6"
+            stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </div>
+  <p class="login-title">ADCOMMAND</p>
+  <p class="login-sub">Atribución y control de tus anuncios en un solo lugar</p>
+</div>
+"""
+
+
 def _gate_password():
     if not config.APP_PASSWORD:
         return
     if st.session_state.get("_auth_ok"):
         return
-    st.title("Acceso")
-    st.caption("Esta app puede modificar presupuestos reales. Ingresa la contraseña.")
-    pwd = st.text_input("Contraseña", type="password", key="_pwd")
-    if st.button("Entrar"):
-        if pwd == config.APP_PASSWORD:
-            st.session_state["_auth_ok"] = True
-            st.rerun()
-        else:
-            st.error("Contraseña incorrecta.")
+
+    st.markdown(_LOGIN_CSS, unsafe_allow_html=True)
+    st.markdown(_LOGIN_HEADER, unsafe_allow_html=True)
+
+    with st.container(border=True):
+        st.markdown("#### Iniciar sesión")
+        usuario = st.text_input("Usuario", key="_user", placeholder="usuario")
+        pwd = st.text_input("Contraseña", type="password", key="_pwd", placeholder="••••••••")
+        entrar = st.button("Entrar", use_container_width=True, type="primary")
+        if entrar:
+            if usuario.strip() == config.APP_USER and pwd == config.APP_PASSWORD:
+                st.session_state["_auth_ok"] = True
+                st.rerun()
+            else:
+                st.error("Usuario o contraseña incorrectos.")
     st.stop()
 
 

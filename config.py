@@ -43,8 +43,10 @@ EXCEL_PATH = str(STORAGE_ROOT / os.getenv("EXCEL_FILE", "ventas.xlsx"))
 # Intervalo de polling a Facebook (segundos). Por defecto 5 minutos.
 POLLING_INTERVAL_SEG = int(os.getenv("POLLING_INTERVAL_SEG", "300"))
 
-# Contraseña de acceso a la app. Si está vacía, la app queda abierta (no
-# recomendado en un dominio público, ya que puede mover presupuestos reales).
+# Usuario y contraseña de acceso a la app. Si la contraseña está vacía, la app
+# queda abierta (no recomendado en un dominio público). El usuario por defecto
+# es "admin" si no se define APP_USER.
+APP_USER = os.getenv("APP_USER", "admin").strip()
 APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
 
 # --- Supabase (2ª fuente de ventas) ---
