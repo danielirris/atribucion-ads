@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v68 · 2026-08-21"
+APP_VERSION = "v69 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -445,17 +445,24 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             ingresos = ingresos_nat * rate_v  # -> USD
 
         if nivel == "campaign":
-            vistos, presup_nat, hay = set(), 0.0, False
-            for x in ads:
-                asid = x.get("adset_id")
-                if asid in vistos:
-                    continue
-                vistos.add(asid)
-                p = _presupuesto_ad(x["ad_id"])
-                if p is not None:
-                    presup_nat += p
-                    hay = True
-            presup_nat = presup_nat if hay else None
+            # ¿CBO? (presupuesto a nivel CAMPAÑA). Si lo es, el presupuesto es UNO
+            # solo (el pote de la campaña), NO se suma por conjunto.
+            es_cbo = any((x.get("budget_nivel") == "campaign") for x in ads)
+            if es_cbo:
+                presup_nat = _presupuesto_ad(ads[0]["ad_id"])  # todos comparten el mismo
+            else:
+                # Presupuesto por conjunto: sumar el de cada conjunto (adset) único.
+                vistos, presup_nat, hay = set(), 0.0, False
+                for x in ads:
+                    asid = x.get("adset_id")
+                    if asid in vistos:
+                        continue
+                    vistos.add(asid)
+                    p = _presupuesto_ad(x["ad_id"])
+                    if p is not None:
+                        presup_nat += p
+                        hay = True
+                presup_nat = presup_nat if hay else None
         else:
             presup_nat = _presupuesto_ad(ads[0]["ad_id"])
         presupuesto = (presup_nat * rate_c) if presup_nat is not None else None
