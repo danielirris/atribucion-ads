@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v61 · 2026-08-21"
+APP_VERSION = "v62 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -654,25 +654,8 @@ def seccion_vista_general():
         rlbl = st.session_state.get("f_rango", "Hoy")
         st.markdown('<div style="font-size:14px;color:#94a3b8;margin-bottom:1px">'
                     'Rango de fechas</div>', unsafe_allow_html=True)
-        with st.popover(f"📅  {rlbl}", use_container_width=True):
-            st.caption("Atajos rápidos")
-            _atajos = [("Hoy", "Hoy"), ("Ayer", "Ayer"), ("Últimos 7 días", "7 días"),
-                       ("Este mes", "Este mes"), ("Últimos 30 días", "30 días"),
-                       ("Máximo", "Máximo")]
-            _qc = st.columns(3)
-            for _i, (_val, _lab) in enumerate(_atajos):
-                if _qc[_i % 3].button(_lab, use_container_width=True, key=f"rq_{_val}"):
-                    st.session_state["f_rango"] = _val
-                    st.rerun()
-            st.divider()
-            st.caption("O elige un rango en el calendario:")
-            _hoy = db.ahora().date()
-            _def = st.session_state.get("f_rango_pers") or (_hoy - timedelta(days=7), _hoy)
-            st.date_input("Desde – hasta", value=_def, format="DD/MM/YYYY", key="f_rango_pers")
-            if st.button("Usar este rango del calendario", use_container_width=True,
-                         type="primary", key="rq_custom"):
-                st.session_state["f_rango"] = "Personalizado"
-                st.rerun()
+        if st.button(f"📅  {rlbl}", use_container_width=True, key="btn_rango"):
+            _dialog_rango()
     with ct4:
         st.text_input("Buscar", key="f_buscar", placeholder="nombre o ID…")
     nivel = _NIVELES.get(nivel_lbl, "adset")
@@ -991,7 +974,7 @@ def _render_lista_nativa(filas, nivel):
         # Color del nombre según estado: verde=activo, rojo=apagado, amarillo=mixto.
         a_n, t_n = f["activos"], f["total"]
         if t_n and a_n == t_n:
-            est_col = "#34d399"
+            est_col = "#008000"
         elif a_n == 0:
             est_col = "#ff8b84"
         else:
@@ -1032,7 +1015,7 @@ def _render_lista_nativa(filas, nivel):
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0),
         ]
-        est_txt = ("Activo" if est_col == "#34d399"
+        est_txt = ("Activo" if est_col == "#008000"
                    else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
         rc = st.columns(ACC, vertical_alignment="center")
         rc[0].markdown(
@@ -1149,6 +1132,28 @@ def _dialog_info():
     if not serie:
         st.caption("El gasto por día se llena cuando hay conexión de Facebook. Los ingresos "
                    "salen de tus ventas importadas.")
+
+
+@st.dialog("Rango de fechas")
+def _dialog_rango():
+    # Calendario ARRIBA, atajos rápidos ABAJO.
+    st.caption("Elige un rango en el calendario:")
+    hoy = db.ahora().date()
+    defv = st.session_state.get("f_rango_pers") or (hoy - timedelta(days=7), hoy)
+    st.date_input("Desde – hasta", value=defv, format="DD/MM/YYYY", key="f_rango_pers")
+    if st.button("Usar este rango del calendario", use_container_width=True, type="primary",
+                 key="rq_custom"):
+        st.session_state["f_rango"] = "Personalizado"
+        st.rerun()
+    st.divider()
+    st.caption("Atajos rápidos")
+    atajos = [("Hoy", "Hoy"), ("Ayer", "Ayer"), ("Últimos 7 días", "7 días"),
+              ("Este mes", "Este mes"), ("Últimos 30 días", "30 días"), ("Máximo", "Máximo")]
+    qc = st.columns(3)
+    for i, (val, lab) in enumerate(atajos):
+        if qc[i % 3].button(lab, use_container_width=True, key=f"rq_{val}"):
+            st.session_state["f_rango"] = val
+            st.rerun()
 
 
 @st.dialog("Modificar presupuesto")
