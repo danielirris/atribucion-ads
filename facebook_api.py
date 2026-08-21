@@ -77,13 +77,14 @@ ESTADO = {
     "polling_activo": False,
     "uso_api": None,        # % de uso máx. reportado por Facebook (0-100)
     "throttled": False,     # True si Facebook nos frenó en el último ciclo
+    "throttled_ts": None,   # cuándo fue el último freno (para que el aviso se limpie solo)
     "llamados_ciclo": 0,    # llamados a Facebook en el último ciclo
     "mensajes": [],
 }
 
 # --- Control de ritmo / límite de la API (rate limiting) ------------------- #
 # Pausa breve entre cuentas para no golpearlas todas a la vez.
-STAGGER_SEG = float(os.getenv("FB_STAGGER_SEG", "0.4"))
+STAGGER_SEG = float(os.getenv("FB_STAGGER_SEG", "0.7"))
 # Si el uso reportado supera este %, saltamos la cuenta y la reintentamos luego.
 UMBRAL_USO = int(os.getenv("FB_UMBRAL_USO", "80"))
 # Códigos de error de Facebook que significan "vas muy rápido / límite".
@@ -158,12 +159,27 @@ def _reiniciar_ciclo() -> None:
 
 def _marcar_throttle(e, nombre_cuenta: str) -> None:
     uso = _uso_de_error(e)
-    _set_estado(throttled=True,
+    _set_estado(throttled=True, throttled_ts=db.ahora(),
                 uso_api=(uso if uso is not None else ESTADO.get("uso_api")),
                 ultimo_error=("Facebook aplicó su límite de frecuencia; "
                               "bajando el ritmo y reintentando en el próximo ciclo."))
     _log(f"Límite de Facebook en {nombre_cuenta} "
          f"(uso {uso if uso is not None else '?'}%). Salto el resto de esta conexión.")
+
+
+def _throttled_reciente(minutos: int = 12) -> bool:
+    """True solo si hubo un freno de Facebook en los últimos `minutos`.
+    Así el aviso de la UI se limpia solo cuando ya se recuperó."""
+    with _ESTADO_LOCK:
+        if not ESTADO.get("throttled"):
+            return False
+        ts = ESTADO.get("throttled_ts")
+    if not ts:
+        return False
+    try:
+        return (db.ahora() - ts).total_seconds() < minutos * 60
+    except Exception:
+        return True
 
 _POLLING_THREAD = None
 _POLLING_STOP = threading.Event()

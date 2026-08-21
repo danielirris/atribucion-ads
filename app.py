@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v64 · 2026-08-21"
+APP_VERSION = "v65 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -127,7 +127,7 @@ def _fecha_corta(iso):
     return f"{d.day:02d} {meses[d.month - 1]} {d.year}"
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def _insights_cache(date_preset: str, nivel: str = "ad",
                     since: str = "", until: str = ""):
     """Cachea los insights de Facebook 10 min (por rango y nivel).
@@ -570,7 +570,7 @@ def _rango_actual(ahora):
     return dp, "", "", cut, None
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def _gasto_pais_cache(date_preset: str, since: str = "", until: str = ""):
     tr = {"since": since, "until": until} if (since and until) else None
     return fb.gasto_por_pais(date_preset, tr)
@@ -2647,10 +2647,10 @@ def _timer_actualizacion():
     # Línea de estado como micro-badges (pills) separados por puntos.
     badges = [f"🔄 Anuncios: {cuando}", f"automática {cad}"]
     uso = est.get("uso_api")
-    if uso is not None:
+    if uso:  # solo si es > 0 (0% no aporta y confunde)
         badges.append(f"Uso API {uso}%")
-    if est.get("throttled"):
-        badges.append("⚠️ Facebook frenó el ritmo")
+    if fb._throttled_reciente():  # se limpia solo cuando ya se recuperó
+        badges.append("⚠️ Facebook frenó el ritmo (temporal)")
     vent_check = db.get_config("ultima_sync_ventas", "") or ""
     dtv = db.a_fecha(vent_check) if vent_check else None
     if dtv:
