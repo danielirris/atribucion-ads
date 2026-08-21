@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v36 · 2026-08-21"
+APP_VERSION = "v37 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -546,18 +546,22 @@ def seccion_vista_general():
             default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
             key="f_nivel") or "Conjunto de anuncios"
     with ct2:
-        st.radio("Estado", ["Activos", "Apagados", "Todos"], horizontal=True, key="f_estado")
+        st.segmented_control(
+            "Estado", ["Activos", "Apagados", "Todos"],
+            default=st.session_state.get("f_estado", "Activos"), key="f_estado")
     with ct3:
         st.selectbox("Rango de fechas",
                      ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
                       "Máximo", "Personalizado"], key="f_rango")
-    if st.session_state.get("f_rango") == "Personalizado":
-        hoy = db.ahora().date()
-        st.date_input("Rango (desde – hasta)", value=(hoy - timedelta(days=7), hoy),
-                      format="DD/MM/YYYY", key="f_rango_pers")
+        # El calendario del rango personalizado va DEBAJO del selector (ancho de
+        # columna, no de toda la pantalla).
+        if st.session_state.get("f_rango") == "Personalizado":
+            hoy = db.ahora().date()
+            st.date_input("Desde – hasta", value=(hoy - timedelta(days=7), hoy),
+                          format="DD/MM/YYYY", key="f_rango_pers")
     nivel = _NIVELES.get(nivel_lbl, "adset")
 
-    filtro = st.session_state.get("f_estado", "Activos")
+    filtro = st.session_state.get("f_estado") or "Activos"
     rango_lbl = st.session_state.get("f_rango", "Hoy")
     cuentas_sel = st.session_state.get("f_cuenta", []) or []
     business_sel = st.session_state.get("f_business", []) or []
@@ -628,6 +632,9 @@ def seccion_vista_general():
 
     filas = _ordenar_filas(filas)
     st.markdown(_TABLA_CSS, unsafe_allow_html=True)
+    cta_a, _ = st.columns([1.2, 4])
+    cta_a.toggle("Ampliar conjunto", key="f_ancho_nombre",
+                 help="Ensancha la columna del conjunto/anuncio para ver nombres largos.")
     _render_lista_nativa(filas, nivel)
 
 
@@ -733,7 +740,9 @@ def _render_lista_nativa(filas, nivel):
               "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS"]
     keys = ["nombre", "cuenta", "presupuesto", "gasto", "conv", "costo_conv",
             "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas"]
-    GRID_W = [3.0, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6]
+    # Ancho de la columna del conjunto/anuncio (ampliable con el toggle).
+    name_w = 5.2 if st.session_state.get("f_ancho_nombre") else 3.0
+    GRID_W = [name_w, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6]
     ayudas = {"Presup.": "Presupuesto diario", "Gastado": "Importe gastado",
               "C/conv": "Costo por conversación", "CPM": "CPM / CTR",
               "C/venta": "Costo por venta", "Ingr.": "Ingresos",
@@ -817,9 +826,15 @@ def _render_lista_nativa(filas, nivel):
                      f'{"+" if util_mod>=0 else ""}{_usd(util_mod)}</b></div>')
         roas_mini = (f'<div class="meta-mini" title="ROAS desde la última modificación">'
                      f'mod. <b style="color:{rmod_col}">{rmod:.2f}x</b></div>')
+        # Degradado rojo SOLO para los que van muy mal: gastan y su ROAS < 1 (pierden).
+        muy_mal = bool(f["gasto"] and f["gasto"] > 0 and (f["roas"] or 0) < 1.0)
         nombre_html = (f'<div class="big" style="color:{est_col};white-space:normal;'
-                       f'word-break:break-word">{esc(str(f["nombre"]))[:90]}</div>'
+                       f'word-break:break-word">{esc(str(f["nombre"]))[:120]}</div>'
                        f'{mod_mini}')
+        if muy_mal:
+            nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
+                           f'debajo de 1x con gasto. Considera pausar o ajustar.">'
+                           f'{nombre_html}</div>')
         gastado_cell = (_money_html(f["gasto"], f["gasto_nat"], f["moneda"])
                         + ('<div class="sub">est.</div>' if f["spend"] is None else '')
                         + gasto_mini)
