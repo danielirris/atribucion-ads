@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v49 · 2026-08-21"
+APP_VERSION = "v50 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -787,20 +787,54 @@ def _estado_cell(f, nivel):
     return '<span class="pill pill-off">Pausado</span>'
 
 
+def _hace_amigable(dt, ahora) -> str:
+    """Tiempo transcurrido en formato humano: minutos → horas → días → fecha.
+    (Evita cosas como 'hace 191 horas'.)"""
+    if not dt:
+        return "—"
+    seg = int((ahora - dt).total_seconds())
+    if seg < 60:
+        return "hace un momento"
+    mins = seg // 60
+    if mins < 60:
+        return f"hace {mins} min"
+    horas = mins // 60
+    if horas < 24:
+        return f"hace {horas} h"
+    dias = horas // 24
+    if dias <= 13:
+        return f"hace {dias} día" + ("s" if dias != 1 else "")
+    return _fecha_corta(dt.isoformat())
+
+
+def _perf_help_text(f, ahora) -> str:
+    """Texto (markdown) del tooltip del botón ⓘ: rendimiento desde el último cambio."""
+    umod = f.get("ult_mod")
+    if not umod:
+        return ("Sin cambios de presupuesto registrados.\n\n"
+                "Haz clic para ver el detalle y la gráfica de 7 días.")
+    roas = f.get("roas_mod") or 0.0
+    emoji = "🟢" if roas > 2 else "🟡" if roas >= 1 else "🔴"
+    ventas = int(f.get("ventas_mod") or 0)
+    ingreso = f.get("ingresos_mod") or 0.0
+    return (
+        f"**Rendimiento desde el último cambio** · {_hace_amigable(umod, ahora)}\n\n"
+        f"Ventas: **{ventas}**  \n"
+        f"Ingreso: **{_usd(ingreso)}**  \n"
+        f"ROAS: **{roas:.2f}x** {emoji}\n\n"
+        f"Haz clic para ver el detalle y la gráfica de 7 días.")
+
+
 def _perf_block_html(f, ahora) -> str:
-    """Bloque 'Rendimiento desde el último cambio de presupuesto' (visible en la
-    fila y en la card). Datos en tiempo real desde SQLite."""
+    """Bloque 'Rendimiento desde el último cambio de presupuesto' (usado en la
+    card de detalle). Datos en tiempo real desde SQLite."""
     umod = f.get("ult_mod")
     if not umod:
         return ('<div class="perf-block"><div class="perf-line">'
                 '<span class="perf-time">Sin cambios de presupuesto registrados</span>'
                 '</div></div>')
     mins = max(0, int((ahora - umod).total_seconds() // 60))
-    if mins < 60:
-        hace = f"hace {mins} min"
-    else:
-        _h, _m = divmod(mins, 60)
-        hace = f"hace {_h}h {_m}m" if _m else f"hace {_h}h"
+    hace = _hace_amigable(umod, ahora)
     roas = f.get("roas_mod") or 0.0
     ventas = int(f.get("ventas_mod") or 0)
     ingreso = f.get("ingresos_mod") or 0.0
@@ -909,8 +943,8 @@ def _render_lista_nativa(filas, nivel):
         # Fecha de creación (se mantiene bajo Cuenta).
         creado = _fecha_corta(f.get("creado"))
         creado_mini = f'<div class="meta-mini" title="Fecha de creación">Creado <b>{creado}</b></div>'
-        # Bloque de rendimiento desde el último cambio, visible bajo el nombre.
-        perf = _perf_block_html(f, ahora)
+        # El rendimiento "desde el último cambio" ya NO va fijo en la fila (ruido
+        # visual); sale en el tooltip del botón ⓘ (abajo) y en la card de detalle.
         # Degradado rojo SOLO para los que van muy mal: gastan y su ROAS < 1 (pierden).
         muy_mal = bool(f["gasto"] and f["gasto"] > 0 and (f["roas"] or 0) < 1.0)
         nombre_html = (f'<div class="big" style="color:{est_col};white-space:normal;'
@@ -919,7 +953,6 @@ def _render_lista_nativa(filas, nivel):
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
                            f'debajo de 1x con gasto. Considera pausar o ajustar.">'
                            f'{nombre_html}</div>')
-        nombre_html += perf
         gastado_cell = (_money_html(f["gasto"], f["gasto_nat"], f["moneda"])
                         + ('<div class="sub">est.</div>' if f["spend"] is None else ''))
         cells = [
@@ -953,7 +986,7 @@ def _render_lista_nativa(filas, nivel):
             for col, cell in zip(dcols, cells):
                 col.markdown(f'<div class="gcell">{cell}</div>', unsafe_allow_html=True)
         if rc[2].button("", icon=":material/info:", key=f"info_{f['sub']}",
-                        help="Detalle y gráfica de 7 días"):
+                        help=_perf_help_text(f, ahora)):
             st.session_state["info_row"] = f
             _dialog_info()
         with rc[3].popover("", icon=":material/edit:"):
