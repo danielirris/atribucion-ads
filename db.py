@@ -496,6 +496,38 @@ def ventas_agg_por_ad(cutoff: Optional[datetime] = None,
                 for r in rows}
 
 
+def ventas_suma(ad_ids: list, desde: Optional[datetime] = None) -> dict:
+    """Suma de ventas (num, ingreso nativo) de varios anuncios desde una fecha."""
+    if not ad_ids:
+        return {"num": 0, "ingreso_nat": 0.0}
+    ph = ",".join("?" for _ in ad_ids)
+    args = [str(a) for a in ad_ids]
+    cond = ""
+    if desde is not None:
+        cond = " AND hora_venta >= ?"
+        args.append(a_texto(desde))
+    with _conn() as conn:
+        r = conn.execute(
+            f"""SELECT COUNT(*) num, COALESCE(SUM(valor_venta),0) total
+                FROM ventas WHERE ad_id IN ({ph}){cond}""", args).fetchone()
+        return {"num": r["num"], "ingreso_nat": float(r["total"])}
+
+
+def ventas_diarias(ad_ids: list, desde: datetime) -> dict:
+    """{'YYYY-MM-DD': {'num': n, 'ingreso_nat': x}} por día, desde 'desde'."""
+    if not ad_ids:
+        return {}
+    ph = ",".join("?" for _ in ad_ids)
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT substr(hora_venta,1,10) AS dia, COUNT(*) num,
+                       COALESCE(SUM(valor_venta),0) total
+                FROM ventas WHERE ad_id IN ({ph}) AND hora_venta >= ?
+                GROUP BY dia ORDER BY dia""",
+            [*[str(a) for a in ad_ids], a_texto(desde)])
+        return {r["dia"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+
+
 def obtener_ventas(ad_id: Optional[str] = None) -> list:
     with _conn() as conn:
         if ad_id:

@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v21 · 2026-08-21"
+APP_VERSION = "v22 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -202,6 +202,8 @@ def sidebar_filtros():
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
 
+    st.sidebar.text_input("Buscar (anuncio, conjunto o campaña)", key="f_buscar",
+                          placeholder="nombre o ID...")
     st.sidebar.radio("Estado", ["Activos", "Apagados", "Todos"],
                      horizontal=True, key="f_estado")
     st.sidebar.multiselect("Business", business, key="f_business",
@@ -547,13 +549,81 @@ def seccion_vista_general():
     ventas_agg = db.ventas_agg_por_ad(cutoff, hasta_dt)
     filas = _construir_filas(anuncios, nivel, insights, ventas_agg, ahora)
 
+    # Búsqueda por nombre o ID
+    q = (st.session_state.get("f_buscar") or "").strip().lower()
+    if q:
+        filas = [f for f in filas
+                 if q in str(f["nombre"]).lower() or q in str(f["sub"]).lower()]
+
+    _render_totales(filas)
+
     if not insights:
         st.info("El **gasto**, CPM y conversaciones vienen de Facebook. Aún no se ven porque no "
                 "hay conexión activa: agrega un token en **Configuración → Conexiones** y pulsa "
                 "**Recargar**. Mientras tanto el gasto es estimado.")
 
+    filas = _ordenar_filas(filas)
     st.markdown(_TABLA_CSS, unsafe_allow_html=True)
     _render_lista_nativa(filas, nivel)
+
+
+# Columnas ordenables: etiqueta -> (clave del dato, es_texto)
+_COLS_SORT = {
+    "nombre": ("nombre", True), "presupuesto": ("presupuesto", False),
+    "gasto": ("gasto", False), "cpm": ("cpm", False), "num": ("num", False),
+    "ingresos": ("ingresos", False), "ganancia": ("ganancia", False),
+    "roas": ("roas", False), "conv": ("conv", False), "costo_conv": ("costo_conv", False),
+    "cuenta": ("cuenta", True),
+}
+
+
+def _ordenar_filas(filas):
+    sort = st.query_params.get("sort", "roas")
+    direc = st.query_params.get("dir", "desc")
+    if sort not in _COLS_SORT:
+        sort = "roas"
+    clave, es_texto = _COLS_SORT[sort]
+
+    def keyf(f):
+        v = f.get(clave)
+        if es_texto:
+            return str(v or "").lower()
+        return (v is None, v if v is not None else 0)
+    filas.sort(key=keyf, reverse=(direc == "desc"))
+    return filas
+
+
+def _render_totales(filas):
+    gasto = sum(f["gasto"] or 0 for f in filas)
+    ingresos = sum(f["ingresos"] or 0 for f in filas)
+    num = sum(f["num"] or 0 for f in filas)
+    conv = sum((f["conv"] or 0) for f in filas)
+    roas = (ingresos / gasto) if gasto > 0 else 0.0
+    ganancia = ingresos - gasto
+    costo_venta = (gasto / num) if num > 0 else 0.0
+    costo_conv = (gasto / conv) if conv > 0 else 0.0
+    tarjetas = [
+        ("Gasto total", _usd(gasto), "#C7C4FF"),
+        ("Ventas", f"{num:,}".replace(",", "."), "#e6e7ee"),
+        ("Ingresos", _usd(ingresos), "#BFF2E2"),
+        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),
+        ("Costo/venta", _usd(costo_venta), "#e6e7ee"),
+        ("Costo/conv", _usd(costo_conv), "#e6e7ee"),
+        ("Ganancia", ("+" if ganancia >= 0 else "") + _usd(ganancia),
+         "#5ee7a0" if ganancia >= 0 else "#ff8b84"),
+    ]
+    cards = "".join(
+        f'<div class="tcard"><div class="tlbl">{t}</div>'
+        f'<div class="tval" style="color:{c}">{v}</div></div>'
+        for t, v, c in tarjetas)
+    st.markdown(
+        '<style>.trow{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0 10px;}'
+        '.tcard{flex:1;min-width:120px;background:rgba(23,26,34,.6);backdrop-filter:blur(12px);'
+        'border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px 14px;'
+        'box-shadow:0 8px 24px rgba(0,0,0,.22);}'
+        '.tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#93a4b8;}'
+        '.tval{font-family:Geist,sans-serif;font-weight:700;font-size:20px;margin-top:4px;}</style>'
+        f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
 
 
 _GRID_TMPL = "2.9fr .7fr .9fr .95fr .95fr .85fr .5fr .95fr .95fr .55fr .6fr .8fr .4fr"
@@ -579,15 +649,34 @@ def _render_lista_nativa(filas, nivel):
         f'<style>.gr{{display:grid;grid-template-columns:{_GRID_TMPL};gap:12px;'
         f'align-items:center;padding:6px 4px;}}'
         f'.gr .h2{{color:#8fd6db;font-size:11.5px;font-weight:700;text-transform:uppercase;'
-        f'letter-spacing:.04em;}}</style>', unsafe_allow_html=True)
+        f'letter-spacing:.04em;}}'
+        f'.hlink{{color:#8fd6db!important;text-decoration:none;cursor:pointer;}}'
+        f'.hlink:hover{{color:#BFF2E2!important;}}</style>', unsafe_allow_html=True)
 
-    ACC = [0.6, 11.6, 0.7, 0.7]
+    # Encabezados clicables para ordenar (usan query params).
+    sort_c = st.query_params.get("sort", "roas")
+    dir_c = st.query_params.get("dir", "desc")
+    keys = ["nombre", None, "cuenta", "presupuesto", "gasto", "cpm", "num",
+            "ingresos", "ganancia", "roas", "conv", "costo_conv", None]
+
+    def _hcell(label, key):
+        if not key:
+            return f'<div class="h2">{label}</div>'
+        if sort_c == key:
+            nd = "asc" if dir_c == "desc" else "desc"
+            arrow = " ▼" if dir_c == "desc" else " ▲"
+        else:
+            nd, arrow = "desc", ""
+        return f'<a class="h2 hlink" target="_self" href="?sort={key}&dir={nd}">{label}{arrow}</a>'
+
+    hdr = "".join(_hcell(l, k) for l, k in zip(labels, keys))
+    ACC = [0.5, 11.0, 0.55, 0.55, 0.55]
     hc = st.columns(ACC)
     hc[0].markdown('<div class="h2" style="text-align:center">On/Off</div>', unsafe_allow_html=True)
-    hc[1].markdown('<div class="gr">' + "".join(f'<div class="h2">{l}</div>' for l in labels)
-                   + '</div>', unsafe_allow_html=True)
-    hc[2].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
-    hc[3].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
+    hc[1].markdown(f'<div class="gr">{hdr}</div>', unsafe_allow_html=True)
+    hc[2].markdown('<div class="h2" style="text-align:center">Info</div>', unsafe_allow_html=True)
+    hc[3].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
+    hc[4].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
 
     for f in filas:
         g = f["ganancia"]
@@ -635,11 +724,68 @@ def _render_lista_nativa(filas, nivel):
                      label_visibility="collapsed",
                      help="Prender / Apagar en Facebook")
         rc[1].markdown(row_html, unsafe_allow_html=True)
-        with rc[2].popover("", icon=":material/edit:"):
+        if rc[2].button("", icon=":material/info:", key=f"info_{f['sub']}",
+                        help="Detalle y gráfica de 7 días"):
+            st.session_state["info_row"] = f
+            _dialog_info()
+        with rc[3].popover("", icon=":material/edit:"):
             _pop_presupuesto(f)
-        with rc[3].popover("", icon=":material/content_copy:"):
+        with rc[4].popover("", icon=":material/content_copy:"):
             _pop_duplicar(f)
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
+
+
+@st.dialog("Detalle del anuncio", width="large")
+def _dialog_info():
+    f = st.session_state.get("info_row")
+    if not f:
+        return
+    st.markdown(f"#### {f['nombre']}")
+    st.caption(f"{f.get('cuenta','')} · {f.get('sub','')}")
+
+    rate = f.get("rate_c") or 1.0
+    a = db.obtener_anuncio(f["ad_rep"]) or {}
+    creado = _fecha_corta(a.get("fecha_creacion"))
+    ab = db.periodo_abierto(f["ad_rep"])
+    if ab:
+        inicio = db.a_fecha(ab["hora_inicio"])
+        ult_mod = db.a_texto(inicio) if inicio else "—"
+        vs = db.ventas_suma(f["ad_ids"], inicio)
+        fact = vs["ingreso_nat"] * rate
+        fact_n = vs["num"]
+    else:
+        ult_mod, fact, fact_n = "—", 0.0, 0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Creado", creado)
+    c2.metric("Última modif. de presupuesto", ult_mod)
+    c3.metric("Facturado desde entonces", _usd(fact), f"{fact_n} ventas")
+
+    # Gráfica de los últimos 7 días: gasto (Facebook) e ingresos (tus ventas).
+    ahora = db.ahora()
+    dias = [(ahora - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
+    serie = fb.serie_diaria(f.get("status_obj_id"), f.get("status_nivel", "ad"),
+                            f.get("conexion_id"))
+    gasto_por_dia = {s["date"]: s["spend"] * rate for s in serie if s.get("date")}
+    vd = db.ventas_diarias(f["ad_ids"], ahora - timedelta(days=7))
+    ing_por_dia = {d: v["ingreso_nat"] * rate for d, v in vd.items()}
+
+    gastos = [round(gasto_por_dia.get(d, 0.0), 2) for d in dias]
+    ingresos = [round(ing_por_dia.get(d, 0.0), 2) for d in dias]
+    etiquetas = [d[5:] for d in dias]  # MM-DD
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#8cd2d7"))
+    fig.add_trace(go.Scatter(x=etiquetas, y=ingresos, name="Ingresos (USD)", mode="lines+markers",
+                             line=dict(color="#c7c4ff", width=3)))
+    fig.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10),
+                      legend=dict(orientation="h", y=1.15),
+                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                      font=dict(color="#c3ccd6"))
+    st.plotly_chart(fig, use_container_width=True)
+    if not serie:
+        st.caption("El gasto por día se llena cuando hay conexión de Facebook. Los ingresos "
+                   "salen de tus ventas importadas.")
 
 
 def _toggle_estado_cb(f):

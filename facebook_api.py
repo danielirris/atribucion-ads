@@ -537,6 +537,33 @@ def _to_float(v) -> float:
         return 0.0
 
 
+def serie_diaria(obj_id: str, nivel: str, conexion_id: Optional[int] = None,
+                 date_preset: str = "last_7d") -> list:
+    """
+    Gasto por día (últimos 7 días) de un anuncio/conjunto/campaña.
+    Devuelve [{"date": "YYYY-MM-DD", "spend": nativo}]. Nunca lanza.
+    """
+    if not SDK_DISPONIBLE or not obj_id:
+        return []
+    api = _api_para_conexion(conexion_id)
+    if api is None:
+        return []
+    try:
+        if nivel == "campaign":
+            obj = Campaign(obj_id, api=api)
+        elif nivel == "adset":
+            obj = AdSet(obj_id, api=api)
+        else:
+            obj = Ad(obj_id, api=api)
+        rows = obj.get_insights(
+            params={"date_preset": date_preset, "time_increment": 1},
+            fields=["spend"])
+        return [{"date": r.get("date_start"), "spend": _to_float(r.get("spend"))}
+                for r in rows]
+    except Exception:
+        return []
+
+
 def gasto_por_pais(date_preset: str = "today", time_range: Optional[dict] = None) -> list:
     """
     Gasto REAL por país usando el desglose (breakdown) de Facebook, a nivel de
