@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v65 · 2026-08-21"
+APP_VERSION = "v66 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -2595,7 +2595,8 @@ def pagina_configuracion():
     st.title("Configuración")
     st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase), la moneda y "
                "revisa tus cuentas.")
-    tabs = st.tabs(["Conexiones", "Excel", "Google Sheets", "Supabase", "Moneda", "Cuentas"])
+    tabs = st.tabs(["Conexiones", "Excel", "Google Sheets", "Supabase", "Moneda",
+                    "Cuentas", "Diagnóstico API"])
     with tabs[0]:
         seccion_conexiones()
     with tabs[1]:
@@ -2608,6 +2609,39 @@ def pagina_configuracion():
         _panel_moneda()
     with tabs[5]:
         _panel_cuentas()
+    with tabs[6]:
+        _panel_diagnostico_api()
+
+
+def _panel_diagnostico_api():
+    """Muestra el estado real de los llamados a Facebook (para ver si el freno es
+    real o estaba 'pegado')."""
+    st.subheader("Diagnóstico de la API de Facebook")
+    if st.button("🔄 Actualizar diagnóstico"):
+        st.rerun()
+    est = fb.obtener_estado()
+    ahora = db.ahora()
+    c1, c2, c3, c4 = st.columns(4)
+    up = est.get("ultimo_polling")
+    c1.metric("Última carga FB", _fmt_hace(up, ahora) if up else "—")
+    c2.metric("Llamados último ciclo", est.get("llamados_ciclo", 0))
+    tts = est.get("throttled_ts")
+    c3.metric("Último freno", _fmt_hace(tts, ahora) if tts else "nunca")
+    reciente = fb._throttled_reciente()
+    c4.metric("¿Frenado ahora?", "Sí" if reciente else "No")
+    uso = est.get("uso_api")
+    st.caption(f"Uso API reportado por Facebook: **{uso if uso is not None else '—'}%** · "
+               f"Cuentas: {est.get('num_cuentas', 0)} · Conexiones: {est.get('num_conexiones', 0)}")
+    if tts and not reciente:
+        st.success("El último freno ya pasó (hace más de ~12 min). El aviso NO debería "
+                   "estar saliendo; si lo ves, es que aún hay frenos recientes.")
+    st.markdown("**Registro del sistema** (cada freno queda con su hora y cuenta — así ves "
+                "si es real y cada cuánto pasa):")
+    msgs = est.get("mensajes", [])
+    if msgs:
+        st.code("\n".join(msgs[:25]))
+    else:
+        st.caption("Sin mensajes todavía.")
 
 
 # --------------------------------------------------------------------------- #
