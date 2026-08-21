@@ -23,6 +23,9 @@ import excel_watcher as watcher
 
 HOJA = "GoogleSheets"
 K_URL = "gsheet_url"
+# Overrides manuales de columnas (si el auto-detector se equivoca).
+K_COL = {"id": "gsheet_col_id", "valor": "gsheet_col_valor",
+         "hora": "gsheet_col_hora", "pais": "gsheet_col_pais"}
 
 
 def get_url() -> str:
@@ -31,6 +34,33 @@ def get_url() -> str:
 
 def set_url(url: str) -> None:
     db.set_config(K_URL, (url or "").strip())
+
+
+def get_overrides() -> dict:
+    return {k: (db.get_config(ck) or "") for k, ck in K_COL.items()}
+
+
+def set_overrides(id_c="", valor_c="", hora_c="", pais_c="") -> None:
+    db.set_config(K_COL["id"], id_c or "")
+    db.set_config(K_COL["valor"], valor_c or "")
+    db.set_config(K_COL["hora"], hora_c or "")
+    db.set_config(K_COL["pais"], pais_c or "")
+
+
+def _columnas(cols) -> dict:
+    """Detección automática, sobreescrita por los overrides manuales si existen."""
+    cmap = watcher.detectar_columnas(cols)
+    for k, ck in K_COL.items():
+        manual = (db.get_config(ck) or "").strip()
+        if manual:
+            # buscar la columna real por nombre (tolerante a mayúsculas/espacios)
+            for c in cols:
+                if str(c).strip().lower() == manual.lower():
+                    cmap[k] = c
+                    break
+            else:
+                cmap[k] = manual
+    return cmap
 
 
 def _extraer_id(url: str) -> Optional[str]:
@@ -75,7 +105,7 @@ def probar() -> dict:
     for nombre, dff in hojas.items():
         cols = [str(c).strip() for c in (dff.columns if dff is not None else [])]
         dfr = dff.rename(columns=lambda c: str(c).strip()) if dff is not None else None
-        cmap = watcher.detectar_columnas(cols)
+        cmap = _columnas(cols)
         muestra_id = None
         if dfr is not None and cmap["id"] and cmap["id"] in dfr.columns and len(dfr):
             for v in dfr[cmap["id"]].tolist():
@@ -106,7 +136,7 @@ def sincronizar() -> dict:
                             "motivo": "hoja vacía"})
             continue
         dff = dff.rename(columns=lambda c: str(c).strip())
-        cmap = watcher.detectar_columnas(list(dff.columns))
+        cmap = _columnas(list(dff.columns))
         if not cmap["id"] or not cmap["valor"]:
             detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": 0,
                             "motivo": f"no detecté columna de ID y/o valor. Columnas: {list(dff.columns)}"})

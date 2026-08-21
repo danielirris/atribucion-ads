@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v18 · 2026-08-20"
+APP_VERSION = "v19 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -214,9 +214,9 @@ def sidebar_filtros():
                          key="f_rango")
     if st.session_state.get("f_rango") == "Personalizado":
         hoy = db.ahora().date()
-        c1, c2 = st.sidebar.columns(2)
-        c1.date_input("Desde", value=hoy - timedelta(days=7), key="f_desde")
-        c2.date_input("Hasta", value=hoy, key="f_hasta")
+        st.sidebar.date_input("Desde", value=hoy - timedelta(days=7), key="f_desde",
+                              format="DD/MM/YYYY")
+        st.sidebar.date_input("Hasta", value=hoy, key="f_hasta", format="DD/MM/YYYY")
 
     _resumen_pais(todos)
 
@@ -1520,6 +1520,20 @@ def _panel_gsheets():
                 st.caption(f"• **{d['hoja']}**: {d['motivo']}")
         else:
             st.error(r["error"])
+
+    with st.expander("Columnas (opcional — si el auto-detector se equivoca)"):
+        st.caption("Deja en blanco para detección automática. Si el valor sale en 0 o toma la "
+                   "columna equivocada, escribe aquí el nombre EXACTO de la columna de tu Sheet.")
+        ov = gs.get_overrides()
+        o1, o2 = st.columns(2)
+        ov_id = o1.text_input("Columna del ID del anuncio", value=ov["id"], key="gs_ov_id")
+        ov_val = o2.text_input("Columna del valor/ingreso", value=ov["valor"], key="gs_ov_val")
+        o3, o4 = st.columns(2)
+        ov_hora = o3.text_input("Columna de fecha/hora", value=ov["hora"], key="gs_ov_hora")
+        ov_pais = o4.text_input("Columna de país", value=ov["pais"], key="gs_ov_pais")
+        if st.button("Guardar columnas manuales"):
+            gs.set_overrides(ov_id, ov_val, ov_hora, ov_pais)
+            st.success("Guardado. Vuelve a Sincronizar.")
 
     # Diagnóstico: ¿las ventas importadas coinciden con tus anuncios?
     with st.expander("Diagnóstico de ventas importadas (por qué no aparecen)"):
