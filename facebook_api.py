@@ -758,6 +758,20 @@ def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float,
     return actualizar_presupuesto(adset_id, "adset", nuevo_monto, conexion_id)
 
 
+def actualizar_presupuesto_async(obj_id: str, nivel: str, nuevo_monto: float,
+                                 conexion_id: Optional[int] = None,
+                                 etiqueta: str = "") -> None:
+    """Empuja el cambio de presupuesto a Facebook en SEGUNDO PLANO (no bloquea la
+    UI). El resultado (éxito o error) queda en los mensajes del sistema."""
+    def _worker():
+        r = actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id)
+        if r.get("ok"):
+            _log(f"✔ Presupuesto aplicado en Facebook: {etiqueta or obj_id} → {nuevo_monto:.2f}.")
+        else:
+            _log(f"⚠ Facebook rechazó el presupuesto de {etiqueta or obj_id}: {r.get('error')}")
+    threading.Thread(target=_worker, name="pres-async", daemon=True).start()
+
+
 def cambiar_estado(obj_id: str, nivel: str, activar: bool,
                    conexion_id: Optional[int] = None) -> dict:
     """
@@ -901,10 +915,10 @@ def _revisar_cambios_presupuesto() -> None:
 
 
 # Cadencia de actualización automática (hora de Bogotá vía db.ahora()):
-#   Día  (06:00–23:00): cada 15 minutos.
+#   Día  (06:00–23:00): cada 30 minutos.
 #   Noche(23:00–06:00): cada 60 minutos (menos presión sobre la API mientras duermes).
-INTERVALO_DIA_SEG = 15 * 60
-INTERVALO_NOCHE_SEG = 60 * 60
+INTERVALO_DIA_SEG = int(os.getenv("FB_INTERVAL_DIA", str(30 * 60)))
+INTERVALO_NOCHE_SEG = int(os.getenv("FB_INTERVAL_NOCHE", str(60 * 60)))
 HORA_INICIO_NOCHE = 23   # 11 PM
 HORA_FIN_NOCHE = 6       # 6 AM
 

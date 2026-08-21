@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v43 · 2026-08-21"
+APP_VERSION = "v44 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -979,16 +979,24 @@ def _pop_presupuesto(f):
                             key=f"pres_{f['sub']}")
     if (f["moneda"] or "USD").upper() != "USD":
         st.caption(f"Se enviará a Facebook ≈ {_num(nuevo / (f['rate_c'] or 1))} {f['moneda']}")
-    if st.button("Aplicar en Facebook", type="primary", key=f"presbtn_{f['sub']}",
+    if st.button("Aplicar", type="primary", key=f"presbtn_{f['sub']}",
                  use_container_width=True):
-        r = _aplicar_presupuesto_grupo(f, nuevo)
-        if r["ok"] and r.get("solo_local"):
-            st.warning("Guardado localmente (sin conexión de Facebook).")
-        elif r["ok"]:
-            st.success("Presupuesto actualizado en Facebook.")
+        # Rápido: aplica local al instante y empuja a Facebook en SEGUNDO PLANO.
+        rate = f.get("rate_c") or 1.0
+        nativo = (nuevo / rate) if rate else nuevo
+        for aid in f["ad_ids"]:
+            db.cambiar_periodo(aid, nativo)
+        hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
+        if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
+            fb.actualizar_presupuesto_async(
+                f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
+                f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40])
+            st.session_state["_estado_msg"] = (
+                "ok", f"Presupuesto de '{str(f['nombre'])[:35]}' → {_usd(nuevo)}. "
+                "Aplicándose en Facebook en segundo plano.")
         else:
-            st.error(f"Facebook rechazó el cambio: {r['error']}")
-        time.sleep(1.0)
+            st.session_state["_estado_msg"] = (
+                "ok", "Presupuesto guardado localmente (sin conexión de Facebook).")
         st.rerun()
 
 
@@ -1001,7 +1009,8 @@ def _pop_duplicar(f):
     n = st.number_input("Número de copias", min_value=1, max_value=10, value=4, step=1,
                         key=f"dupn_{f['sub']}")
     presu = st.number_input("Presupuesto por copia (USD)", min_value=0.0,
-                            value=float(f["presupuesto"] or 0.0), step=1.0, key=f"dupp_{f['sub']}")
+                            value=4.0, step=1.0, key=f"dupp_{f['sub']}",
+                            help="Por defecto 4 USD por copia.")
     activar = st.toggle("Activar copias de inmediato", value=False, key=f"dupa_{f['sub']}")
     if st.button("Duplicar ahora", type="primary", key=f"dupbtn_{f['sub']}",
                  use_container_width=True):
@@ -2112,7 +2121,7 @@ def _timer_actualizacion():
     hace = _fmt_hace(dt, ahora)
     cuando = f"{dt.strftime('%d/%m %H:%M')} · {hace}" if dt else hace
     de_noche = ahora.hour >= 23 or ahora.hour < 6
-    cad = "cada 1 h (modo noche 11 p.m.–6 a.m.)" if de_noche else "cada 15 min"
+    cad = "cada 1 h (modo noche 11 p.m.–6 a.m.)" if de_noche else "cada 30 min"
     # Indicador de uso del límite de la API de Facebook.
     try:
         est = fb.obtener_estado()
@@ -2212,7 +2221,6 @@ def pagina_dashboard():
                 pass
             st.rerun()
 
-    _panel_sync_ventas()
     seccion_vista_general()
     st.divider()
     seccion_por_pais()
