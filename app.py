@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v52 · 2026-08-21"
+APP_VERSION = "v53 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -271,18 +271,24 @@ def sidebar_filtros():
             productos.append(p)
 
     st.sidebar.multiselect("Business", business, key="f_business",
-                           placeholder="Todos los Business")
+                           placeholder="Todos los Business",
+                           help="Puedes elegir VARIOS: haz clic en cada Business (queda como chip).")
     st.sidebar.multiselect("Cuentas publicitarias", cuentas, key="f_cuenta",
-                           placeholder="Todas las cuentas")
+                           placeholder="Todas las cuentas",
+                           help="Puedes elegir VARIAS: haz clic en cada cuenta, una por una "
+                                "(cada una queda como chip). Deja vacío para ver todas.")
     st.sidebar.multiselect("Campaña", campanas, key="f_campana",
                            placeholder="Todas las campañas",
                            help="Elige una campaña y pon 'Ver por: Conjunto de anuncios' "
                                 "para ver sus conjuntos.")
-    if productos:
-        st.sidebar.multiselect("Producto", productos, key="f_producto",
-                               placeholder="Todos los productos",
-                               help="Se saca del nombre de la campaña (p. ej. BOLIS, "
-                                    "LAVADORAS). Filtra campañas/conjuntos que lo contengan.")
+    # El filtro de Producto SIEMPRE se muestra (aunque no haya productos aún).
+    st.sidebar.multiselect("Producto", productos, key="f_producto",
+                           placeholder=("Todos los productos" if productos
+                                        else "Sin productos aún — pulsa Recargar"),
+                           help="Se saca del NOMBRE de la campaña (p. ej. BOLIS, LAVADORAS, "
+                                "EDUCARTE). Puedes elegir varios. Filtra las campañas/conjuntos "
+                                "que contengan ese producto. Si sale vacío, pulsa 'Recargar de "
+                                "Facebook' para traer tus campañas.")
     st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
 
     _resumen_pais(todos)
