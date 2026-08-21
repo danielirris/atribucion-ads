@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v24 · 2026-08-21"
+APP_VERSION = "v25 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -223,8 +223,8 @@ def sidebar_filtros():
                                help="Filtra por producto (según el nombre de la campaña).")
     st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
     st.sidebar.selectbox("Rango de fechas",
-                         ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Máximo",
-                          "Personalizado"],
+                         ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
+                          "Máximo", "Personalizado"],
                          key="f_rango")
     if st.session_state.get("f_rango") == "Personalizado":
         hoy = db.ahora().date()
@@ -292,8 +292,8 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
 
     # Moneda en la que vienen las ventas (Excel/Supabase): 'auto' = la de la cuenta.
     moneda_ventas_cfg = db.get_config("moneda_ventas", "auto")
-    # Fuente de ventas del dashboard: 'propias' (Excel/Supabase/Sheets) o 'meta' (pixel).
-    origen_ventas = db.get_config("origen_ventas", "propias")
+    # Fuente de ventas del dashboard: excel / gsheets / supabase / todas / meta.
+    fuente_ventas = db.get_config("fuente_ventas", "todas")
 
     grupos = {}
     for a in anuncios:
@@ -325,8 +325,8 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
 
         ins = insights.get(g["ins_key"], {}) if g["ins_key"] else {}
 
-        # Fuente de ventas: propias (Excel/Supabase/Sheets) o Meta (compras del pixel).
-        if origen_ventas == "meta":
+        # Fuente de ventas: tus fuentes (ya filtradas en ventas_agg) o Meta (pixel).
+        if fuente_ventas == "meta":
             num = int(ins.get("compras") or 0)
             ingresos_nat = float(ins.get("compras_valor") or 0.0)
             ingresos = ingresos_nat * rate_c  # compras de Meta vienen en moneda de la cuenta
@@ -451,6 +451,8 @@ def _rango_actual(ahora):
         # cutoff = ayer 00:00, hasta = hoy 00:00; date_preset 'yesterday' usa la zona
         # horaria de la cuenta en Facebook (gasto más exacto).
         return "yesterday", "", "", medianoche - timedelta(days=1), medianoche
+    if rango_lbl == "Este mes":
+        return "this_month", "", "", medianoche.replace(day=1), None
     RANGO = {
         "Hoy": ("today", medianoche),
         "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
@@ -566,11 +568,12 @@ def seccion_vista_general():
 
     resumen_cta = "todas" if not cuentas_sel else f"{len(cuentas_sel)} cuenta(s)"
     resumen_bus = "todos" if not business_sel else f"{len(business_sel)} business"
-    origen = db.get_config("origen_ventas", "propias")
-    origen_lbl = "Meta (pixel)" if origen == "meta" else "tus ventas"
+    fuente = db.get_config("fuente_ventas", "todas")
+    fuente_lbl = {"excel": "Excel", "gsheets": "Google Sheets", "supabase": "Supabase",
+                  "meta": "Meta (pixel)", "todas": "todas mis fuentes"}.get(fuente, "todas mis fuentes")
     st.caption(f"Ver por: {nivel_lbl} · estado: {filtro} · business: {resumen_bus} · "
                f"cuentas: {resumen_cta} · país: {pais_sel} · rango: {rango_lbl} · "
-               f"ventas: {origen_lbl} · valores en USD")
+               f"ventas: {fuente_lbl} · valores en USD")
 
     if not anuncios:
         st.info("No hay datos para este filtro. En la barra lateral (o arriba) pulsa **Recargar** "
@@ -578,7 +581,9 @@ def seccion_vista_general():
         return
 
     insights = _insights_cache(date_preset, nivel, since, until)
-    ventas_agg = db.ventas_agg_por_ad(cutoff, hasta_dt)
+    fuente = db.get_config("fuente_ventas", "todas")
+    ventas_agg = db.ventas_agg_por_ad(cutoff, hasta_dt,
+                                      fuente if fuente != "meta" else "todas")
     filas = _construir_filas(anuncios, nivel, insights, ventas_agg, ahora)
 
     # Búsqueda por nombre o ID
@@ -634,6 +639,23 @@ def _render_totales(filas):
     ganancia = ingresos - gasto
     costo_venta = (gasto / num) if num > 0 else 0.0
     costo_conv = (gasto / conv) if conv > 0 else 0.0
+
+    # Sumas en moneda local (solo si todo el conjunto es una misma moneda).
+    monedas = {(f.get("moneda") or "USD") for f in filas}
+    mon = monedas.pop() if len(monedas) == 1 else None
+    if mon and mon != "USD":
+        gn = sum(f.get("gasto_nat") or 0 for f in filas)
+        inn = sum(f.get("ingresos_nat") or 0 for f in filas)
+        def loc(v):
+            return f"{_num(v)} {mon}"
+        nat = {
+            "Gasto total": loc(gn), "Ingresos": loc(inn),
+            "Costo/venta": loc(gn / num) if num > 0 else "", "Ganancia": loc(inn - gn),
+            "Costo/conv": loc(gn / conv) if conv > 0 else "",
+        }
+    else:
+        nat = {}
+
     tarjetas = [
         ("Gasto total", _usd(gasto), "#C7C4FF"),
         ("Ventas", f"{num:,}".replace(",", "."), "#e6e7ee"),
@@ -646,7 +668,9 @@ def _render_totales(filas):
     ]
     cards = "".join(
         f'<div class="tcard"><div class="tlbl">{t}</div>'
-        f'<div class="tval" style="color:{c}">{v}</div></div>'
+        f'<div class="tval" style="color:{c}">{v}</div>'
+        + (f'<div class="tnat">{nat.get(t)}</div>' if nat.get(t) else '')
+        + '</div>'
         for t, v, c in tarjetas)
     st.markdown(
         '<style>.trow{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0 10px;}'
@@ -654,7 +678,8 @@ def _render_totales(filas):
         'border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px 14px;'
         'box-shadow:0 8px 24px rgba(0,0,0,.22);}'
         '.tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#93a4b8;}'
-        '.tval{font-family:Geist,sans-serif;font-weight:700;font-size:20px;margin-top:4px;}</style>'
+        '.tval{font-family:Geist,sans-serif;font-weight:700;font-size:20px;margin-top:4px;}'
+        '.tnat{font-size:11px;color:#93a4b8;margin-top:2px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
 
 
@@ -1899,15 +1924,17 @@ def _panel_moneda():
 
     st.divider()
     st.markdown("**Fuente de las ventas del dashboard**")
-    st.caption("De dónde salen las columnas Ventas e Ingresos: tus ventas (Excel/Supabase/"
-               "Google Sheets) o las **compras que reporta Meta** (pixel).")
-    origen_actual = db.get_config("origen_ventas", "propias")
-    op = {"propias": "Mis ventas (Excel/Supabase/Sheets)", "meta": "Meta (compras del pixel)"}
+    st.caption("De dónde salen Ventas e Ingresos. Elige **UNA sola** para no duplicar si las "
+               "mismas ventas están en varias fuentes.")
+    actual = db.get_config("fuente_ventas", "todas")
+    op = {"excel": "Solo Excel", "gsheets": "Solo Google Sheets", "supabase": "Solo Supabase",
+          "todas": "Todas mis fuentes (Excel + Sheets + Supabase)",
+          "meta": "Meta (compras del pixel)"}
     sel_o = st.radio("Fuente de ventas", list(op.keys()),
-                     index=list(op.keys()).index(origen_actual) if origen_actual in op else 0,
-                     format_func=lambda k: op[k], horizontal=True, key="sel_origen")
+                     index=list(op.keys()).index(actual) if actual in op else 3,
+                     format_func=lambda k: op[k], key="sel_fuente")
     if st.button("Guardar fuente de ventas", type="primary"):
-        db.set_config("origen_ventas", sel_o)
+        db.set_config("fuente_ventas", sel_o)
         st.success("Guardado.")
 
     st.divider()

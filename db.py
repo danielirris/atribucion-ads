@@ -474,11 +474,25 @@ def resumen_ventas_periodo(periodo_id: int) -> dict:
         return {"num_ventas": r["num"], "ingreso_total": r["total"]}
 
 
+def _fuente_cond(fuente: Optional[str]):
+    """Condición SQL para filtrar ventas por fuente. Devuelve (sql, args)."""
+    f = (fuente or "todas").lower()
+    if f == "excel":
+        return "hoja_origen NOT IN ('GoogleSheets','Supabase','Manual')", []
+    if f in ("gsheets", "googlesheets"):
+        return "hoja_origen = ?", ["GoogleSheets"]
+    if f == "supabase":
+        return "hoja_origen = ?", ["Supabase"]
+    return "", []
+
+
 def ventas_agg_por_ad(cutoff: Optional[datetime] = None,
-                      hasta: Optional[datetime] = None) -> dict:
+                      hasta: Optional[datetime] = None,
+                      fuente: Optional[str] = "todas") -> dict:
     """
     Agrega ventas por anuncio: {ad_id: {"num_ventas": n, "ingreso_total": x}}.
     `cutoff` = fecha inicial (hora_venta >= cutoff); `hasta` = fecha final (< hasta).
+    `fuente` limita a una fuente: 'excel' | 'gsheets' | 'supabase' | 'todas'.
     """
     cond, args = [], []
     if cutoff is not None:
@@ -487,6 +501,10 @@ def ventas_agg_por_ad(cutoff: Optional[datetime] = None,
     if hasta is not None:
         cond.append("hora_venta < ?")
         args.append(a_texto(hasta))
+    fsql, fargs = _fuente_cond(fuente)
+    if fsql:
+        cond.append(fsql)
+        args += fargs
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
     with _conn() as conn:
         rows = conn.execute(
