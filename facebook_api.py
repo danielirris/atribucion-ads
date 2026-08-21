@@ -74,8 +74,95 @@ ESTADO = {
     "num_cuentas": 0,
     "num_conexiones": 0,
     "polling_activo": False,
+    "uso_api": None,        # % de uso máx. reportado por Facebook (0-100)
+    "throttled": False,     # True si Facebook nos frenó en el último ciclo
+    "llamados_ciclo": 0,    # llamados a Facebook en el último ciclo
     "mensajes": [],
 }
+
+# --- Control de ritmo / límite de la API (rate limiting) ------------------- #
+# Pausa breve entre cuentas para no golpearlas todas a la vez.
+STAGGER_SEG = float(os.getenv("FB_STAGGER_SEG", "0.4"))
+# Si el uso reportado supera este %, saltamos la cuenta y la reintentamos luego.
+UMBRAL_USO = int(os.getenv("FB_UMBRAL_USO", "80"))
+# Códigos de error de Facebook que significan "vas muy rápido / límite".
+_RATE_LIMIT_CODES = {4, 17, 32, 613, 80000, 80001, 80002, 80003, 80004,
+                     80005, 80006, 80008, 80009, 80014}
+
+
+def _es_rate_limit(e) -> bool:
+    """True si el error es por límite de frecuencia de Facebook."""
+    try:
+        if int(e.api_error_code()) in _RATE_LIMIT_CODES:
+            return True
+    except Exception:
+        pass
+    txt = str(e).lower()
+    return ("call to this ad-account" in txt or "rate limit" in txt
+            or "too many calls" in txt or "#80004" in txt or "user request limit" in txt)
+
+
+def _uso_de_headers(headers) -> Optional[int]:
+    """Extrae el % de uso máximo del header x-business-use-case-usage (0-100)."""
+    import json
+    try:
+        raw = None
+        for k in ("x-business-use-case-usage", "X-Business-Use-Case-Usage",
+                  "x-ad-account-usage", "X-Ad-Account-Usage"):
+            if headers and headers.get(k):
+                raw = headers.get(k)
+                break
+        if not raw:
+            return None
+        data = json.loads(raw)
+        maxp = 0
+        vals = data.values() if isinstance(data, dict) else [data]
+        for lst in vals:
+            for item in (lst if isinstance(lst, list) else [lst]):
+                if isinstance(item, dict):
+                    for kk in ("call_count", "total_cputime", "total_time",
+                               "acc_id_util_pct"):
+                        try:
+                            maxp = max(maxp, int(item.get(kk, 0) or 0))
+                        except Exception:
+                            pass
+        return maxp
+    except Exception:
+        return None
+
+
+def _uso_de_error(e) -> Optional[int]:
+    try:
+        return _uso_de_headers(e.http_headers())
+    except Exception:
+        return None
+
+
+def _dormir(seg: float) -> None:
+    """Pausa que respeta la señal de parada del hilo (no bloquea el apagado)."""
+    if seg > 0:
+        _POLLING_STOP.wait(seg)
+
+
+def _contar_llamado() -> None:
+    with _ESTADO_LOCK:
+        ESTADO["llamados_ciclo"] = ESTADO.get("llamados_ciclo", 0) + 1
+
+
+def _reiniciar_ciclo() -> None:
+    with _ESTADO_LOCK:
+        ESTADO["llamados_ciclo"] = 0
+        ESTADO["throttled"] = False
+
+
+def _marcar_throttle(e, nombre_cuenta: str) -> None:
+    uso = _uso_de_error(e)
+    _set_estado(throttled=True,
+                uso_api=(uso if uso is not None else ESTADO.get("uso_api")),
+                ultimo_error=("Facebook aplicó su límite de frecuencia; "
+                              "bajando el ritmo y reintentando en el próximo ciclo."))
+    _log(f"Límite de Facebook en {nombre_cuenta} "
+         f"(uso {uso if uso is not None else '?'}%). Salto el resto de esta conexión.")
 
 _POLLING_THREAD = None
 _POLLING_STOP = threading.Event()
@@ -234,6 +321,7 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
         _set_estado(api_ok=False, ultimo_error=msg)
         return {"ok": False, "num_anuncios": 0, "num_cuentas": 0, "errores": [msg]}
 
+    _reiniciar_ciclo()
     total_ads = 0
     total_activos = 0
     total_cuentas = 0
@@ -263,8 +351,11 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
         cache_budget = {}
         cache_camp = {}
 
-        for cta in cuentas:
+        for idx, cta in enumerate(cuentas):
+            if idx:
+                _dormir(STAGGER_SEG)  # espaciar cuentas (control de ritmo)
             try:
+                _contar_llamado()
                 ads = AdAccount(cta["act_id"], api=api).get_ads(
                     params={"effective_status": ["ACTIVE", "PAUSED",
                                                  "ADSET_PAUSED", "CAMPAIGN_PAUSED"],
@@ -274,6 +365,10 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                         "campaign{name}", "adset{name}"],
                 )
             except FacebookRequestError as e:
+                if _es_rate_limit(e):
+                    _marcar_throttle(e, cta["name"])
+                    errores.append(f"{con['alias']}/{cta['name']}: límite de Facebook (reintento luego)")
+                    break  # salto el resto de cuentas de esta conexión este ciclo
                 errores.append(f"{con['alias']}/{cta['name']}: {_fmt_fb_error(e)}")
                 continue
             except Exception as e:
@@ -492,7 +587,9 @@ def obtener_insights(date_preset: str = "today", nivel: str = "ad",
         except Exception as e:
             _log(f"Insights: fallo en {con['alias']}: {e}")
             continue
-        for cta in cuentas:
+        for idx, cta in enumerate(cuentas):
+            if idx:
+                _dormir(STAGGER_SEG)  # espaciar cuentas para no golpear el límite
             try:
                 params = {"level": nivel, "limit": 500}
                 if time_range and time_range.get("since") and time_range.get("until"):
@@ -500,11 +597,15 @@ def obtener_insights(date_preset: str = "today", nivel: str = "ad",
                                             "until": time_range["until"]}
                 else:
                     params["date_preset"] = date_preset
+                _contar_llamado()
                 filas = AdAccount(cta["act_id"], api=api).get_insights(
                     params=params,
                     fields=[id_field, "spend", "cpm", "ctr", "impressions",
                             "clicks", "actions", "action_values"])
             except Exception as e:
+                if _es_rate_limit(e):
+                    _marcar_throttle(e, cta["name"])
+                    break  # salto el resto de cuentas de esta conexión este ciclo
                 _log(f"Insights {cta['name']}: {e}")
                 continue
             for row in filas:
@@ -586,7 +687,9 @@ def gasto_por_pais(date_preset: str = "today", time_range: Optional[dict] = None
             cuentas = _descubrir_cuentas(api, con.get("env_account"))
         except Exception:
             continue
-        for cta in cuentas:
+        for idx, cta in enumerate(cuentas):
+            if idx:
+                _dormir(STAGGER_SEG)
             moneda = cta.get("moneda") or "USD"
             try:
                 params = {"level": "account", "breakdowns": ["country"], "limit": 500}
@@ -594,9 +697,13 @@ def gasto_por_pais(date_preset: str = "today", time_range: Optional[dict] = None
                     params["time_range"] = {"since": time_range["since"], "until": time_range["until"]}
                 else:
                     params["date_preset"] = date_preset
+                _contar_llamado()
                 rows = AdAccount(cta["act_id"], api=api).get_insights(
                     params=params, fields=["spend"])
             except Exception as e:
+                if _es_rate_limit(e):
+                    _marcar_throttle(e, cta["name"])
+                    break
                 _log(f"Gasto por país {cta['name']}: {e}")
                 continue
             for r in rows:

@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v33 · 2026-08-21"
+APP_VERSION = "v34 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -728,36 +728,32 @@ def _render_lista_nativa(filas, nivel):
     if _msg:
         (st.success if _msg[0] == "ok" else st.error)(_msg[1])
     primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
-    # Etiquetas cortas (caben en columnas angostas); el nombre completo va en el tooltip.
-    labels = [primera, "Cuenta", "Estado", "Presup.", "Conv.", "C/conv",
+    # Encabezado y datos usan la MISMA rejilla de columnas nativas -> alineación exacta.
+    labels = [primera, "Cuenta", "Presup.", "Gastado", "Conv.", "C/conv",
               "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS"]
-    ayudas = {"Presup.": "Presupuesto diario", "C/conv": "Costo por conversación",
-              "CPM": "CPM / CTR", "C/venta": "Costo por venta", "Ingr.": "Ingresos",
+    keys = ["nombre", "cuenta", "presupuesto", "gasto", "conv", "costo_conv",
+            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas"]
+    GRID_W = [3.0, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6]
+    ayudas = {"Presup.": "Presupuesto diario", "Gastado": "Importe gastado",
+              "C/conv": "Costo por conversación", "CPM": "CPM / CTR",
+              "C/venta": "Costo por venta", "Ingr.": "Ingresos",
               "Util.": "Utilidad (ganancia)", "Conv.": "Conversaciones",
               "ROAS": "Retorno sobre la inversión"}
     st.markdown(
-        f'<style>.gr{{display:grid;grid-template-columns:{_GRID_TMPL};gap:12px;'
-        f'align-items:center;padding:6px 4px;}}'
-        f'.gr .h2{{color:#8fd6db;font-size:11.5px;font-weight:700;text-transform:uppercase;'
-        f'letter-spacing:.04em;}}'
-        f'.meta-mini{{font-size:9.5px;color:#7f8b9c;line-height:1.25;margin-top:1px;}}'
-        f'.meta-mini b{{color:#9fb0c2;font-weight:600;}}'
+        '<style>.meta-mini{font-size:9.5px;color:#7f8b9c;line-height:1.25;margin-top:1px;}'
+        '.meta-mini b{color:#9fb0c2;font-weight:600;}'
         # Botones de encabezado (ordenar) con pinta de título, sin recargar la página.
-        f'.stButton button[kind="tertiary"]{{padding:0 !important;min-height:0 !important;'
-        f'color:#8fd6db !important;letter-spacing:0;line-height:1.1;'
-        f'justify-content:flex-start !important;}}'
-        f'.stButton button[kind="tertiary"] p{{font-size:10px !important;font-weight:700 !important;'
-        f'text-transform:uppercase;margin:0 !important;white-space:nowrap;}}'
-        f'.stButton button[kind="tertiary"]:hover p{{color:#BFF2E2 !important;}}</style>',
+        '.stButton button[kind="tertiary"]{padding:0 !important;min-height:0 !important;'
+        'color:#8fd6db !important;letter-spacing:0;line-height:1.1;'
+        'justify-content:flex-start !important;}'
+        '.stButton button[kind="tertiary"] p{font-size:10px !important;font-weight:700 !important;'
+        'text-transform:uppercase;margin:0 !important;white-space:nowrap;}'
+        '.stButton button[kind="tertiary"]:hover p{color:#BFF2E2 !important;}</style>',
         unsafe_allow_html=True)
 
-    # Encabezados clicables (botones nativos): reordenan SIN recargar la página
-    # (así no se pierde la sesión / no te saca).
+    # Encabezados clicables (botones nativos): reordenan SIN recargar la página.
     sort_c = st.query_params.get("sort", "roas")
     dir_c = st.query_params.get("dir", "desc")
-    keys = ["nombre", "cuenta", None, "presupuesto", "conv", "costo_conv",
-            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas"]
-    GRID_W = [3.2, 0.9, 0.8, 0.9, 0.55, 0.85, 0.8, 0.55, 0.85, 0.95, 0.85, 0.6]
 
     ACC = [0.5, 11.0, 0.55, 0.55, 0.55]
     hc = st.columns(ACC, vertical_alignment="center")
@@ -765,9 +761,6 @@ def _render_lista_nativa(filas, nivel):
     with hc[1]:
         bcols = st.columns(GRID_W, gap="small", vertical_alignment="center")
         for col, label, key in zip(bcols, labels, keys):
-            if not key:
-                col.markdown(f'<div class="h2">{label}</div>', unsafe_allow_html=True)
-                continue
             arrow = (" ▼" if dir_c == "desc" else " ▲") if sort_c == key else ""
             if col.button(f"{label}{arrow}", key=f"sort_{key}", type="tertiary",
                           help=ayudas.get(label), use_container_width=True):
@@ -778,6 +771,7 @@ def _render_lista_nativa(filas, nivel):
     hc[2].markdown('<div class="h2" style="text-align:center">Info</div>', unsafe_allow_html=True)
     hc[3].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
     hc[4].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
+    st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
     for f in filas:
         g = f["ganancia"]
@@ -789,53 +783,64 @@ def _render_lista_nativa(filas, nivel):
                   if f.get("costo_conv") is not None else '<div class="big">—</div>')
         costov = (_money_html(f["costo_venta"], None, "USD")
                   if f.get("costo_venta") else '<div class="big">—</div>')
-        # Alerta: gastando y con ROAS bajo (< 1.5x) -> nombre en rojo difuminado
-        alerta = bool(f["gasto"] and f["gasto"] > 0 and f["roas"] < 1.5)
-        # Info "desde la última modificación de presupuesto": se reparte por columnas
-        # (fechas bajo Cuenta, gasto bajo Presupuesto, facturado bajo Ingresos,
-        #  ROAS bajo ROAS) para que la fila quede más delgada.
+        # Color del nombre según estado: verde=activo, rojo=apagado, amarillo=mixto.
+        a_n, t_n = f["activos"], f["total"]
+        if t_n and a_n == t_n:
+            est_col = "#5ee7a0"
+        elif a_n == 0:
+            est_col = "#ff8b84"
+        else:
+            est_col = "#f5c451"
+        # Datos "desde la última modificación de presupuesto".
         creado = _fecha_corta(f.get("creado"))
         umod = f.get("ult_mod")
         ult_mod = _fecha_corta(umod.isoformat()) if umod else "—"
         rmod = f.get("roas_mod") or 0.0
         rmod_col = _roas_color(rmod)
-        fechas_mini = (f'<div class="meta-mini" title="Fecha de creación">Creado <b>{creado}</b></div>'
-                       f'<div class="meta-mini" title="Última modificación de presupuesto">'
-                       f'Mod. <b>{ult_mod}</b></div>')
+        util_mod = (f.get("ingresos_mod") or 0) - (f.get("gasto_mod") or 0)
+        mod_mini = (f'<div class="meta-mini" title="Última modificación de presupuesto">'
+                    f'Últ. mod. <b>{ult_mod}</b></div>')
+        creado_mini = f'<div class="meta-mini" title="Fecha de creación">Creado <b>{creado}</b></div>'
         gasto_mini = (f'<div class="meta-mini" title="Gastado desde la última modificación">'
                       f'mod. <b>{_usd(f.get("gasto_mod") or 0)}</b></div>')
         fact_mini = (f'<div class="meta-mini" title="Facturado desde la última modificación">'
                      f'mod. <b>{_usd(f.get("ingresos_mod") or 0)}</b></div>')
+        util_mini = (f'<div class="meta-mini" title="Utilidad desde la última modificación">'
+                     f'mod. <b style="color:{"#5ee7a0" if util_mod>=0 else "#ff8b84"}">'
+                     f'{"+" if util_mod>=0 else ""}{_usd(util_mod)}</b></div>')
         roas_mini = (f'<div class="meta-mini" title="ROAS desde la última modificación">'
                      f'mod. <b style="color:{rmod_col}">{rmod:.2f}x</b></div>')
-        nombre_html = (f'<div class="big" style="white-space:normal;word-break:break-word">'
-                       f'{esc(str(f["nombre"]))[:90]}</div>'
-                       f'<div class="sub">{esc(str(f["sub"]))[:22]}</div>')
-        if alerta:
-            nombre_html = f'<div class="name-alert">{nombre_html}</div>'
+        nombre_html = (f'<div class="big" style="color:{est_col};white-space:normal;'
+                       f'word-break:break-word">{esc(str(f["nombre"]))[:90]}</div>'
+                       f'{mod_mini}')
+        gastado_cell = (_money_html(f["gasto"], f["gasto_nat"], f["moneda"])
+                        + ('<div class="sub">est.</div>' if f["spend"] is None else '')
+                        + gasto_mini)
         cells = [
             nombre_html,
             f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>'
-            + fechas_mini,
-            _estado_cell(f, nivel),
-            _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri") + gasto_mini,
+            + creado_mini,
+            _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
+            gastado_cell,
             f'<div class="big">{conv}</div>',
             costoc,
             f'<div class="big">{cpm}</div><div class="sub">{ctr} CTR</div>',
             f'<div class="big">{f["num"]}</div>',
             costov,
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint") + fact_mini,
-            f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
+            f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>' + util_mini,
             f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>'
             + roas_mini,
         ]
-        row_html = '<div class="gr">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
         rc = st.columns(ACC, vertical_alignment="center")
         rc[0].toggle(" ", value=(f["activos"] > 0), key=f"tg_{f['sub']}",
                      on_change=_toggle_estado_cb, args=(f,),
                      label_visibility="collapsed",
                      help="Prender / Apagar en Facebook")
-        rc[1].markdown(row_html, unsafe_allow_html=True)
+        with rc[1]:
+            dcols = st.columns(GRID_W, gap="small", vertical_alignment="center")
+            for col, cell in zip(dcols, cells):
+                col.markdown(cell, unsafe_allow_html=True)
         if rc[2].button("", icon=":material/info:", key=f"info_{f['sub']}",
                         help="Detalle y gráfica de 7 días"):
             st.session_state["info_row"] = f
@@ -853,7 +858,7 @@ def _dialog_info():
     if not f:
         return
     st.markdown(f"#### {f['nombre']}")
-    st.caption(f"{f.get('cuenta','')} · {f.get('sub','')}")
+    st.caption(f"{f.get('cuenta','')} · ID del anuncio: {f.get('sub','')}")
 
     rate = f.get("rate_c") or 1.0
     a = db.obtener_anuncio(f["ad_rep"]) or {}
@@ -2076,7 +2081,18 @@ def _timer_actualizacion():
     cuando = f"{dt.strftime('%d/%m %H:%M')} · {hace}" if dt else hace
     de_noche = ahora.hour >= 23 or ahora.hour < 6
     cad = "cada 1 h (modo noche 11 p.m.–6 a.m.)" if de_noche else "cada 15 min"
-    st.caption(f"🔄 Última actualización: {cuando} · automática {cad}")
+    # Indicador de uso del límite de la API de Facebook.
+    try:
+        est = fb.obtener_estado()
+    except Exception:
+        est = {}
+    extra = ""
+    uso = est.get("uso_api")
+    if uso is not None:
+        extra += f" · Uso API Facebook: {uso}%"
+    if est.get("throttled"):
+        extra += " · ⚠️ Facebook frenó el ritmo; reintentando en el próximo ciclo"
+    st.caption(f"🔄 Última actualización: {cuando} · automática {cad}{extra}")
 
     # Si llegaron datos nuevos desde el último render, refresca toda la vista.
     prev = st.session_state.get("_ult_sync_visto")
