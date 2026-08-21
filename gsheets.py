@@ -74,9 +74,16 @@ def probar() -> dict:
     info = []
     for nombre, dff in hojas.items():
         cols = [str(c).strip() for c in (dff.columns if dff is not None else [])]
+        dfr = dff.rename(columns=lambda c: str(c).strip()) if dff is not None else None
         cmap = watcher.detectar_columnas(cols)
+        muestra_id = None
+        if dfr is not None and cmap["id"] and cmap["id"] in dfr.columns and len(dfr):
+            for v in dfr[cmap["id"]].tolist():
+                if v is not None and str(v).strip().lower() not in ("nan", "none", ""):
+                    muestra_id = str(v).strip()
+                    break
         info.append({"nombre": nombre, "columnas": cols, "detectado": cmap,
-                     "filas": 0 if dff is None else len(dff)})
+                     "muestra_id": muestra_id, "filas": 0 if dff is None else len(dff)})
     return {"ok": True, "hojas": info, "error": None}
 
 

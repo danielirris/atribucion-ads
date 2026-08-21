@@ -54,7 +54,8 @@ COLS = ["ID_Anuncio", "Valor_Venta", "Hora_Venta"]
 
 # Alias aceptados para detectar columnas aunque se llamen distinto.
 _ALIAS_ID = ["id_anuncio", "idanuncio", "id anuncio", "id del anuncio", "ad_id", "adid",
-             "ad id", "id", "anuncio", "id_ad", "id ad"]
+             "ad id", "post id", "post_id", "postid", "id_post", "id del post",
+             "id", "anuncio", "id_ad", "id ad"]
 _ALIAS_VALOR = ["valor_venta", "valor venta", "valor", "monto", "importe", "precio",
                 "total", "venta", "amount", "value", "ingreso", "ingresos"]
 _ALIAS_HORA = ["hora_venta", "hora venta", "hora", "fecha", "fecha_venta", "fecha venta",

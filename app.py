@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v17 · 2026-08-20"
+APP_VERSION = "v18 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -1489,12 +1489,23 @@ def _panel_gsheets():
         r = gs.probar()
         if r["ok"]:
             st.success(f"Conectado. {len(r['hojas'])} pestaña(s):")
+            ejemplos_ad = [a["ad_id"] for a in db.obtener_anuncios()][:3]
             for h in r["hojas"]:
                 det = h["detectado"]
-                ok_id = "✓" if det["id"] else "✗ (sin ID)"
+                sin = "" if det["id"] else "  ← NO detecté columna de ID"
                 st.caption(f"• **{h['nombre']}** ({h['filas']} filas) — ID: {det['id'] or '—'} "
                            f"· valor: {det['valor'] or '—'} · fecha: {det['hora'] or '—'} "
-                           f"· país: {det['pais'] or '—'}  {ok_id}")
+                           f"· país: {det['pais'] or '—'}{sin}")
+                if h.get("muestra_id"):
+                    st.caption(f"   ▸ Ejemplo de ID en tu Sheet: `{h['muestra_id']}`")
+            if ejemplos_ad:
+                st.info("Compara: un **ad_id real** de tus anuncios se ve así: "
+                        + ", ".join(f"`{x}`" for x in ejemplos_ad) +
+                        ". El valor de tu columna debe ser **igual a estos** (el ID del "
+                        "ANUNCIO). Si tu 'post id' es distinto, es el ID del post/creativo y "
+                        "no va a coincidir.")
+            else:
+                st.info("Aún no hay anuncios cargados para comparar. Pulsa **Recargar** primero.")
         else:
             st.error(r["error"])
     if c3.button("Sincronizar ahora", type="primary", use_container_width=True):
