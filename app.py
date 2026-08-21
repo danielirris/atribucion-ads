@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v67 · 2026-08-21"
+APP_VERSION = "v68 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -352,6 +352,34 @@ def _presupuesto_ad(ad_id: str):
     return float(ps[-1]["presupuesto"]) if ps else None
 
 
+def _agregar_insights(ad_ids, insights):
+    """Suma los insights (a nivel anuncio) de un grupo de anuncios; recalcula CPM,
+    CTR y costo por conversación. Devuelve un dict como el de un anuncio."""
+    spend = imp = clk = conv = compras = compras_val = 0.0
+    hay = False
+    for aid in ad_ids:
+        m = insights.get(str(aid))
+        if not m:
+            continue
+        hay = True
+        spend += m.get("spend") or 0.0
+        imp += m.get("impressions") or 0.0
+        clk += m.get("clicks") or 0.0
+        conv += m.get("conversaciones") or 0.0
+        compras += m.get("compras") or 0.0
+        compras_val += m.get("compras_valor") or 0.0
+    if not hay:
+        return {}
+    return {
+        "spend": spend, "impressions": imp, "clicks": clk,
+        "cpm": (spend / imp * 1000) if imp else None,
+        "ctr": (clk / imp * 100) if imp else None,
+        "conversaciones": conv,
+        "costo_conversacion": (spend / conv) if conv else None,
+        "compras": compras, "compras_valor": compras_val,
+    }
+
+
 def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
     # Tipo de cambio a USD (todo se muestra en dólares).
     _rate_cache = {}
@@ -401,7 +429,10 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         moneda_v = moneda_cuenta if moneda_ventas_cfg == "auto" else moneda_ventas_cfg
         rate_v = _rate(moneda_v)
 
-        ins = insights.get(g["ins_key"], {}) if g["ins_key"] else {}
+        # Insights vienen SIEMPRE a nivel anuncio (una sola llamada) y se SUMAN por
+        # grupo (conjunto/campaña) aquí en Python -> cambiar de vista es instantáneo
+        # y no dispara llamados nuevos a Facebook.
+        ins = _agregar_insights([x["ad_id"] for x in ads], insights)
 
         # Fuente de ventas: tus fuentes (ya filtradas en ventas_agg) o Meta (pixel).
         if fuente_ventas == "meta":
@@ -708,7 +739,9 @@ def seccion_vista_general():
                 "para traer los anuncios de Facebook.")
         return
 
-    insights = _insights_cache(date_preset, nivel, since, until)
+    # Insights SIEMPRE a nivel anuncio (una sola llamada, reutilizable en todas las
+    # vistas); se agregan por conjunto/campaña en Python.
+    insights = _insights_cache(date_preset, "ad", since, until)
     fuente = db.get_config("fuente_ventas", "todas")
     ventas_agg = db.ventas_agg_por_ad(cutoff, hasta_dt,
                                       fuente if fuente != "meta" else "todas")
@@ -1948,10 +1981,21 @@ def _login_bg_html() -> str:
             f'<div class="particles">{parts}</div></div>')
 
 
+def _auth_token() -> str:
+    """Token de sesión (hash del usuario+contraseña). NO es la contraseña; sirve para
+    recordar la sesión en la URL y no cerrarla al recargar el navegador."""
+    import hashlib
+    return hashlib.sha256(f"{config.APP_USER}:{config.APP_PASSWORD}".encode()).hexdigest()[:24]
+
+
 def _gate_password():
     if not config.APP_PASSWORD:
         return
     if st.session_state.get("_auth_ok"):
+        return
+    # Sesión recordada en la URL (sobrevive el F5/recarga del navegador).
+    if st.query_params.get("s") == _auth_token():
+        st.session_state["_auth_ok"] = True
         return
 
     st.markdown(_LOGIN_CSS, unsafe_allow_html=True)
@@ -1965,6 +2009,7 @@ def _gate_password():
         if entrar:
             if usuario.strip() == config.APP_USER and pwd == config.APP_PASSWORD:
                 st.session_state["_auth_ok"] = True
+                st.query_params["s"] = _auth_token()  # recuerda la sesión al recargar
                 st.rerun()
             else:
                 st.error("Usuario o contraseña incorrectos.")
