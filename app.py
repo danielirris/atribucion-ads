@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v57 · 2026-08-21"
+APP_VERSION = "v58 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -980,7 +980,7 @@ def _render_lista_nativa(filas, nivel):
         # Color del nombre según estado: verde=activo, rojo=apagado, amarillo=mixto.
         a_n, t_n = f["activos"], f["total"]
         if t_n and a_n == t_n:
-            est_col = "#5ee7a0"
+            est_col = "#34d399"
         elif a_n == 0:
             est_col = "#ff8b84"
         else:
@@ -997,7 +997,7 @@ def _render_lista_nativa(filas, nivel):
         # acento verde a la izquierda si ROAS > 5.
         borde = "border-left:3px solid #10b981;padding-left:8px;" if roas_alto else ""
         nombre_html = (f'<div class="ad-name" style="{borde}color:{est_col};font-weight:700;'
-                       f'font-size:14px;white-space:normal;word-break:break-word">'
+                       f'font-size:16.5px;line-height:1.25;white-space:normal;word-break:break-word">'
                        f'{esc(str(f["nombre"]))[:120]}</div>')
         if muy_mal:
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
@@ -1021,7 +1021,7 @@ def _render_lista_nativa(filas, nivel):
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0),
         ]
-        est_txt = ("Activo" if est_col == "#5ee7a0"
+        est_txt = ("Activo" if est_col == "#34d399"
                    else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
         rc = st.columns(ACC, vertical_alignment="center")
         rc[0].markdown(
@@ -2167,7 +2167,7 @@ def _inject_css():
         background:#374151 !important; transition:background .2s ease, box-shadow .2s ease;
     }
     [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type{
-        background:#10b981 !important; box-shadow:0 0 10px rgba(16,185,129,.55) !important;
+        background:#34d399 !important; box-shadow:0 0 9px rgba(52,211,153,.45) !important;
     }
 
     /* Tabs (Configuración) */
