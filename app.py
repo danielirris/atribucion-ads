@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v22 · 2026-08-21"
+APP_VERSION = "v23 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -201,6 +201,9 @@ def sidebar_filtros():
     business = sorted({_alias_conexion(a.get("conexion_id"), conexiones) for a in todos})
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
+    campanas = sorted({a.get("campaign_nombre") for a in todos if a.get("campaign_nombre")})
+    vd = db.valores_venta_distintos()
+    productos = sorted(set(vd["origenes"]) | set(vd["productos"]))
 
     st.sidebar.text_input("Buscar (anuncio, conjunto o campaña)", key="f_buscar",
                           placeholder="nombre o ID...")
@@ -210,6 +213,14 @@ def sidebar_filtros():
                            placeholder="Todos los Business")
     st.sidebar.multiselect("Cuentas publicitarias", cuentas, key="f_cuenta",
                            placeholder="Todas las cuentas")
+    st.sidebar.multiselect("Campaña", campanas, key="f_campana",
+                           placeholder="Todas las campañas",
+                           help="Elige una campaña y pon 'Ver por: Conjunto de anuncios' "
+                                "para ver sus conjuntos.")
+    if productos:
+        st.sidebar.multiselect("Producto", productos, key="f_producto",
+                               placeholder="Todos los productos",
+                               help="Filtra por producto (según el nombre de la campaña).")
     st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
     st.sidebar.selectbox("Rango de fechas",
                          ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo", "Personalizado"],
@@ -373,6 +384,9 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "num": num, "ingresos": ingresos, "ingresos_nat": ingresos_nat,
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
             "conv": ins.get("conversaciones"),
+            "impresiones": ins.get("impressions"), "clics": ins.get("clicks"),
+            "spend_nat": spend_nat, "compras_meta": ins.get("compras"),
+            "compras_valor_meta": ins.get("compras_valor"),
             "costo_conv": costo_conv, "costo_conv_nat": costo_conv_nat,
             # datos para acciones (modificar presupuesto / duplicar / prender-apagar)
             "ad_rep": rep["ad_id"], "ad_ids": [x["ad_id"] for x in ads],
@@ -529,6 +543,18 @@ def seccion_vista_general():
                     if _alias_conexion(a.get("conexion_id"), conexiones) in business_sel]
     if cuentas_sel:
         anuncios = [a for a in anuncios if (a.get("cuenta_nombre") or "—") in cuentas_sel]
+    campanas_sel = st.session_state.get("f_campana", []) or []
+    if campanas_sel:
+        anuncios = [a for a in anuncios if a.get("campaign_nombre") in campanas_sel]
+    productos_sel = st.session_state.get("f_producto", []) or []
+    if productos_sel:
+        pl = [p.lower() for p in productos_sel]
+
+        def _tiene_producto(a):
+            texto = ((a.get("campaign_nombre") or "") + " " + (a.get("adset_nombre") or "")
+                     + " " + (a.get("nombre") or "")).lower()
+            return any(p in texto for p in pl)
+        anuncios = [a for a in anuncios if _tiene_producto(a)]
     if pais_sel != "Todos":
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
 
@@ -760,6 +786,27 @@ def _dialog_info():
     c1.metric("Creado", creado)
     c2.metric("Última modif. de presupuesto", ult_mod)
     c3.metric("Facturado desde entonces", _usd(fact), f"{fact_n} ventas")
+
+    # Métricas para verificar contra Facebook Ads
+    st.markdown("**Métricas del rango (para verificar con Facebook Ads):**")
+    ver = {
+        "Gasto (USD)": _usd(f["gasto"]),
+        "Gasto (moneda cuenta)": (f"{_num(f.get('spend_nat'))} {f['moneda']}"
+                                  if f.get("spend_nat") is not None else "—"),
+        "Impresiones": (f"{int(f['impresiones']):,}".replace(",", ".")
+                        if f.get("impresiones") is not None else "—"),
+        "Clics": (f"{int(f['clics']):,}".replace(",", ".")
+                  if f.get("clics") is not None else "—"),
+        "CPM (USD)": _usd(f["cpm"]) if f["cpm"] is not None else "—",
+        "CTR": f'{f["ctr"]:.2f}%' if f["ctr"] is not None else "—",
+        "Compras (Meta)": (int(f["compras_meta"]) if f.get("compras_meta") is not None else "—"),
+        "Valor compras (Meta, USD)": (_usd((f.get("compras_valor_meta") or 0) * rate)
+                                      if f.get("compras_valor_meta") is not None else "—"),
+        "Conversaciones": int(f["conv"]) if f["conv"] is not None else "—",
+        "Ventas (tus fuentes)": f["num"],
+        "Ingresos (tus fuentes, USD)": _usd(f["ingresos"]),
+    }
+    st.table(pd.DataFrame(list(ver.items()), columns=["Métrica", "Valor"]))
 
     # Gráfica de los últimos 7 días: gasto (Facebook) e ingresos (tus ventas).
     ahora = db.ahora()

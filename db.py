@@ -496,6 +496,19 @@ def ventas_agg_por_ad(cutoff: Optional[datetime] = None,
                 for r in rows}
 
 
+def valores_venta_distintos() -> dict:
+    """Devuelve {'origenes': [...], 'productos': [...]} para filtros de producto."""
+    with _conn() as conn:
+        orig = [r["hoja_origen"] for r in conn.execute(
+            "SELECT DISTINCT hoja_origen FROM ventas WHERE hoja_origen IS NOT NULL")]
+        prod = [r["producto"] for r in conn.execute(
+            "SELECT DISTINCT producto FROM ventas WHERE producto IS NOT NULL AND producto <> ''")]
+    genericos = {"Manual", "GoogleSheets", "Supabase", "Seed"}
+    origenes = sorted({o for o in orig if o and o not in genericos})
+    productos = sorted({p for p in prod if p})
+    return {"origenes": origenes, "productos": productos}
+
+
 def ventas_suma(ad_ids: list, desde: Optional[datetime] = None) -> dict:
     """Suma de ventas (num, ingreso nativo) de varios anuncios desde una fecha."""
     if not ad_ids:
