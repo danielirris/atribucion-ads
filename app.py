@@ -26,7 +26,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v11 · 2026-08-20"
+APP_VERSION = "v12 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -182,17 +182,31 @@ def sidebar_estado():
     st.sidebar.caption(f"Versión: {APP_VERSION}")
 
 
+def _alias_conexion(conexion_id, conexiones):
+    if conexion_id in (None, 0, "0"):
+        return "ENV (.env)"
+    for c in conexiones:
+        if str(c["id"]) == str(conexion_id):
+            return c.get("alias") or f"Conexión {conexion_id}"
+    return f"Conexión {conexion_id}"
+
+
 def sidebar_filtros():
     """Filtros globales que afectan al Dashboard (se guardan en session_state)."""
     st.sidebar.divider()
     st.sidebar.markdown("### Filtros")
     todos = db.obtener_anuncios(solo_activos=False)
+    conexiones = db.obtener_conexiones()
+    business = sorted({_alias_conexion(a.get("conexion_id"), conexiones) for a in todos})
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
 
     st.sidebar.radio("Estado", ["Activos", "Apagados", "Todos"],
                      horizontal=True, key="f_estado")
-    st.sidebar.selectbox("Cuenta publicitaria", ["Todas"] + cuentas, key="f_cuenta")
+    st.sidebar.multiselect("Business", business, key="f_business",
+                           placeholder="Todos los Business")
+    st.sidebar.multiselect("Cuentas publicitarias", cuentas, key="f_cuenta",
+                           placeholder="Todas las cuentas")
     st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
     st.sidebar.selectbox("Rango de fechas",
                          ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo", "Personalizado"],
@@ -395,7 +409,8 @@ def seccion_vista_general():
 
     filtro = st.session_state.get("f_estado", "Activos")
     rango_lbl = st.session_state.get("f_rango", "Hoy")
-    cuenta_sel = st.session_state.get("f_cuenta", "Todas")
+    cuentas_sel = st.session_state.get("f_cuenta", []) or []
+    business_sel = st.session_state.get("f_business", []) or []
     pais_sel = st.session_state.get("f_pais", "Todos")
 
     since = until = ""
@@ -422,13 +437,19 @@ def seccion_vista_general():
         anuncios = [a for a in todos if not _es_activo(a)]
     else:
         anuncios = todos
-    if cuenta_sel != "Todas":
-        anuncios = [a for a in anuncios if (a.get("cuenta_nombre") or "—") == cuenta_sel]
+    if business_sel:
+        conexiones = db.obtener_conexiones()
+        anuncios = [a for a in anuncios
+                    if _alias_conexion(a.get("conexion_id"), conexiones) in business_sel]
+    if cuentas_sel:
+        anuncios = [a for a in anuncios if (a.get("cuenta_nombre") or "—") in cuentas_sel]
     if pais_sel != "Todos":
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
 
-    st.caption(f"Ver por: {nivel_lbl} · estado: {filtro} · cuenta: {cuenta_sel} · "
-               f"país: {pais_sel} · rango: {rango_lbl} · valores en USD")
+    resumen_cta = "todas" if not cuentas_sel else f"{len(cuentas_sel)} cuenta(s)"
+    resumen_bus = "todos" if not business_sel else f"{len(business_sel)} business"
+    st.caption(f"Ver por: {nivel_lbl} · estado: {filtro} · business: {resumen_bus} · "
+               f"cuentas: {resumen_cta} · país: {pais_sel} · rango: {rango_lbl} · valores en USD")
 
     if not anuncios:
         st.info("No hay datos para este filtro. En la barra lateral (o arriba) pulsa **Recargar** "
@@ -448,44 +469,62 @@ def seccion_vista_general():
     _render_lista_nativa(filas, nivel)
 
 
+_GRID_TMPL = "1.7fr .75fr 1fr 1.05fr 1.05fr .95fr .55fr 1.05fr 1.05fr .55fr .7fr .85fr"
+
+
+def _estado_cell(f, nivel):
+    if f["activos"] and (nivel == "ad" or f["activos"] == f["total"]):
+        return '<span class="pill pill-run">Corriendo</span>'
+    if f["activos"]:
+        return f'<span class="pill pill-run">{f["activos"]}/{f["total"]}</span>'
+    return '<span class="pill pill-off">Pausado</span>'
+
+
 def _render_lista_nativa(filas, nivel):
     esc = _html.escape
-    primera = {"ad": "Anuncio", "adset": "Conjunto de anuncios", "campaign": "Campaña"}[nivel]
-    W = [3, 1.0, 1.7, 1.4, 1.0, 1.4, 0.9, 1.6]
-    labels = [primera, "Estado", "Presupuesto", "Gasto", "Ventas", "Ingresos", "ROAS", "Acciones"]
-    head = st.columns(W)
-    for c, l in zip(head, labels):
-        c.markdown(f'<div class="hcol">{l}</div>', unsafe_allow_html=True)
+    primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
+    labels = [primera, "Estado", "Cuenta", "Presupuesto", "Gasto", "CPM/CTR", "Ventas",
+              "Ingresos", "Ganancia", "ROAS", "Conv.", "Costo/conv"]
+    st.markdown(
+        f'<style>.gr{{display:grid;grid-template-columns:{_GRID_TMPL};gap:10px;align-items:center;}}'
+        f'.gr .h2{{color:#8fd6db;font-size:9.5px;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:.05em;}}</style>', unsafe_allow_html=True)
+
+    hc = st.columns([13, 0.75, 0.75])
+    hc[0].markdown('<div class="gr">' + "".join(f'<div class="h2">{l}</div>' for l in labels)
+                   + '</div>', unsafe_allow_html=True)
+    hc[1].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
+    hc[2].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
 
     for f in filas:
-        cols = st.columns(W, vertical_alignment="center")
-        cols[0].markdown(
-            f'<div class="big">{esc(str(f["nombre"]))[:52]}</div>'
-            f'<div class="sub">{esc(str(f["cuenta"]))} · {esc(str(f["sub"]))[:18]}</div>',
-            unsafe_allow_html=True)
-        if f["activos"] and (nivel == "ad" or f["activos"] == f["total"]):
-            est = '<span class="pill pill-run">Corriendo</span>'
-        elif f["activos"]:
-            est = f'<span class="pill pill-run">{f["activos"]}/{f["total"]}</span>'
-        else:
-            est = '<span class="pill pill-off">Pausado</span>'
-        cols[1].markdown(est, unsafe_allow_html=True)
-        cols[2].markdown(_money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
-                         unsafe_allow_html=True)
-        # Botón modificar presupuesto AL LADO del presupuesto
-        with cols[2].popover("Modificar", use_container_width=True):
+        g = f["ganancia"]
+        gcls = "up" if g >= 0 else "down"
+        cpm = _usd(f["cpm"]) if f["cpm"] is not None else "—"
+        ctr = f'{f["ctr"]:.2f}%' if f["ctr"] is not None else "—"
+        conv = int(f["conv"]) if f["conv"] is not None else "—"
+        costoc = _usd(f["costo_conv"]) if f.get("costo_conv") is not None else "—"
+        cells = [
+            f'<div class="big">{esc(str(f["nombre"]))[:40]}</div>'
+            f'<div class="sub">{esc(str(f["sub"]))[:16]}</div>',
+            _estado_cell(f, nivel),
+            f'<div class="sub">{esc(str(f["cuenta"]))[:16]}</div>',
+            _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
+            _money_html(f["gasto"], f["gasto_nat"], f["moneda"])
+            + ('<div class="sub">est.</div>' if f["spend"] is None else ''),
+            f'<div class="big">{cpm}</div><div class="sub">{ctr} CTR</div>',
+            f'<div class="big">{f["num"]}</div>',
+            _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
+            f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
+            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:14px">{f["roas"]:.2f}x</div>',
+            f'<div class="big">{conv}</div>',
+            f'<div class="big">{costoc}</div>',
+        ]
+        row_html = '<div class="gr">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
+        rc = st.columns([13, 0.75, 0.75], vertical_alignment="center")
+        rc[0].markdown(row_html, unsafe_allow_html=True)
+        with rc[1].popover("", icon=":material/edit:"):
             _pop_presupuesto(f)
-        cols[3].markdown(_money_html(f["gasto"], f["gasto_nat"], f["moneda"]) +
-                         ('<div class="sub">estimado</div>' if f["spend"] is None else ''),
-                         unsafe_allow_html=True)
-        cols[4].markdown(f'<div class="big">{f["num"]}</div>', unsafe_allow_html=True)
-        cols[5].markdown(_money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
-                         unsafe_allow_html=True)
-        cols[6].markdown(
-            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:15px">{f["roas"]:.2f}x</div>',
-            unsafe_allow_html=True)
-        # Botón duplicar al final de la fila
-        with cols[7].popover("Duplicar", use_container_width=True):
+        with rc[2].popover("", icon=":material/content_copy:"):
             _pop_duplicar(f)
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 

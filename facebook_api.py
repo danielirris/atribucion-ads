@@ -316,8 +316,9 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                         budget_nivel = "campaign"
                         budget_obj_id = campaign_id
 
-                # País: el del targeting del conjunto; si no, el de la cuenta.
-                pais = pais_pauta or cta.get("pais")
+                # País donde está PAUTADO (targeting). NO se usa el país de la
+                # cuenta como respaldo porque suele ser el del negocio, no el de la pauta.
+                pais = pais_pauta
 
                 db.upsert_anuncio(
                     ad_id, nombre, adset_id=adset_id, activo=es_activo,
@@ -358,10 +359,71 @@ def cargar_anuncios_activos(abrir_periodos: bool = True) -> dict:
     return {"ok": r["ok"], "anuncios": [], "error": "; ".join(r["errores"]) or None}
 
 
+# Códigos ISO de país -> nombre en español (los más usados en LatAm/mercados).
+PAISES = {
+    "MX": "México", "CO": "Colombia", "US": "Estados Unidos", "AR": "Argentina",
+    "CL": "Chile", "PE": "Perú", "EC": "Ecuador", "GT": "Guatemala", "ES": "España",
+    "BR": "Brasil", "VE": "Venezuela", "BO": "Bolivia", "PY": "Paraguay", "UY": "Uruguay",
+    "CR": "Costa Rica", "PA": "Panamá", "DO": "República Dominicana", "HN": "Honduras",
+    "SV": "El Salvador", "NI": "Nicaragua", "PR": "Puerto Rico", "CA": "Canadá",
+    "GB": "Reino Unido", "FR": "Francia", "DE": "Alemania", "IT": "Italia",
+}
+
+
+def pais_nombre(codigo: str) -> str:
+    if not codigo:
+        return codigo
+    return PAISES.get(str(codigo).upper(), str(codigo).upper())
+
+
+def _a_dict(obj):
+    """Convierte objetos del SDK a dict de forma tolerante."""
+    if isinstance(obj, dict):
+        return obj
+    for m in ("export_all_data", "export_data"):
+        if hasattr(obj, m):
+            try:
+                d = getattr(obj, m)()
+                if isinstance(d, dict):
+                    return d
+            except Exception:
+                pass
+    try:
+        return dict(obj)
+    except Exception:
+        return {}
+
+
+def _paises_de_targeting(tg) -> list:
+    """Extrae códigos de país del targeting: countries, y country de regions/cities."""
+    tg = _a_dict(tg)
+    geo = _a_dict(tg.get("geo_locations"))
+    codigos = []
+    for c in (geo.get("countries") or []):
+        if c:
+            codigos.append(str(c).upper())
+    for clave in ("regions", "cities", "zips", "places"):
+        for item in (geo.get(clave) or []):
+            item = _a_dict(item)
+            c = item.get("country") or item.get("country_code")
+            if c:
+                codigos.append(str(c).upper())
+    for cg in (geo.get("country_groups") or []):
+        if cg:
+            codigos.append(str(cg).upper())
+    # únicos, en orden
+    vistos, out = set(), []
+    for c in codigos:
+        if c not in vistos:
+            vistos.add(c)
+            out.append(c)
+    return out
+
+
 def _leer_adset_info(adset_id: str, api=None) -> dict:
     """
     Lee del conjunto: presupuesto diario (centavos→unidades) y el país donde
-    está pautado (targeting.geo_locations.countries, primer país).
+    está PAUTADO (targeting.geo_locations), con nombre completo.
     Devuelve {"presupuesto": float|None, "pais": str|None}.
     """
     try:
@@ -369,12 +431,8 @@ def _leer_adset_info(adset_id: str, api=None) -> dict:
             fields=[AdSet.Field.daily_budget, "targeting"])
         raw = adset.get(AdSet.Field.daily_budget)
         presupuesto = (float(raw) / 100.0) if raw is not None else None
-        pais = None
-        tg = adset.get("targeting") or {}
-        geo = (tg.get("geo_locations") or {}) if isinstance(tg, dict) else {}
-        paises = geo.get("countries") if isinstance(geo, dict) else None
-        if isinstance(paises, list) and paises:
-            pais = ", ".join(paises[:3])
+        codigos = _paises_de_targeting(adset.get("targeting"))
+        pais = ", ".join(pais_nombre(c) for c in codigos[:3]) if codigos else None
         return {"presupuesto": presupuesto, "pais": pais}
     except Exception:
         return {"presupuesto": None, "pais": None}
