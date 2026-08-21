@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v59 · 2026-08-21"
+APP_VERSION = "v60 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -186,7 +186,24 @@ def _recargar_facebook():
     st.rerun()
 
 
+_BRAND_HTML = """
+<div class="acc-brand">
+  <div class="acc-logo">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" fill="#fff" opacity=".14"/>
+      <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="#fff" stroke-width="1.3"/>
+      <path d="M7 14l3-4 2 2.4L15 8l2 3" stroke="#fff" stroke-width="1.7"
+            stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </div>
+  <div class="acc-name">Ads Command Center<small>ACC · FACEBOOK ADS</small></div>
+</div>
+"""
+
+
 def sidebar_estado(pagina: str = "dashboard"):
+    # Marca arriba a la izquierda (en todas las páginas).
+    st.sidebar.markdown(_BRAND_HTML, unsafe_allow_html=True)
     # Los filtros solo aplican al Dashboard (los botones de datos van arriba a la derecha).
     if pagina == "dashboard":
         sidebar_filtros()
@@ -257,15 +274,6 @@ def sidebar_filtros():
     """Filtros globales que afectan al Dashboard (se guardan en session_state)."""
     st.sidebar.divider()
     st.sidebar.markdown("### Filtros")
-    # Botón explícito para aplicar/refrescar con los filtros de la izquierda.
-    # (Los filtros ya se aplican solos al cambiarlos; este botón fuerza el refresco.)
-    if st.sidebar.button("🔍 Aplicar filtros", use_container_width=True, type="primary",
-                         help="Refresca la tabla y los totales con los filtros elegidos."):
-        try:
-            _insights_cache.clear()
-        except Exception:
-            pass
-        st.rerun()
     todos = db.obtener_anuncios(solo_activos=False)
     conexiones = db.obtener_conexiones()
     business = sorted({_alias_conexion(a.get("conexion_id"), conexiones) for a in todos})
@@ -2078,6 +2086,19 @@ def _inject_css():
     }
     /* Sidebar */
     [data-testid="stSidebar"]{ background:#0a0a16 !important; border-right:1px solid rgba(255,255,255,.05); }
+    /* Marca ACC arriba a la izquierda */
+    .acc-brand{ display:flex; align-items:center; gap:11px; padding:2px 2px 8px; }
+    .acc-logo{ width:42px; height:42px; border-radius:12px; flex:none;
+        background:linear-gradient(150deg,#7c3aed,#2563eb); display:flex; align-items:center;
+        justify-content:center; animation:accGlow 2.8s ease-in-out infinite; }
+    .acc-logo svg{ width:23px; height:23px; }
+    @keyframes accGlow{ 0%,100%{box-shadow:0 0 12px 2px rgba(124,58,237,.35)}
+        50%{box-shadow:0 0 20px 5px rgba(124,58,237,.6)} }
+    .acc-name{ font-family:'Geist',sans-serif; font-weight:800; font-size:15px; line-height:1.08;
+        background:linear-gradient(92deg,#fff 40%,#a78bfa); -webkit-background-clip:text;
+        background-clip:text; -webkit-text-fill-color:transparent; }
+    .acc-name small{ display:block; font-family:'Inter',sans-serif; font-size:8.5px; font-weight:600;
+        letter-spacing:.14em; color:#6b7488; -webkit-text-fill-color:#6b7488; margin-top:3px; }
     [data-testid="stSidebar"] h3{ color:var(--sub); text-transform:uppercase; font-size:12px;
         letter-spacing:.12em; font-weight:600; }
     [data-testid="stStatusWidget"]{ display:none !important; }
