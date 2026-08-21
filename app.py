@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v37 · 2026-08-21"
+APP_VERSION = "v38 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -751,19 +751,20 @@ def _render_lista_nativa(filas, nivel):
     st.markdown(
         '<style>.meta-mini{font-size:9.5px;color:#7f8b9c;line-height:1.25;margin-top:1px;}'
         '.meta-mini b{color:#9fb0c2;font-weight:600;}'
-        # Botones de encabezado (ordenar) con pinta de título, alineados a la
-        # izquierda igual que los datos, y SIN recuadro de foco.
+        # Datos centrados en cada columna (igual que sus títulos).
+        '.gcell,.gcell .big,.gcell .sub,.gcell .meta-mini{text-align:center !important;}'
+        # Botones de encabezado (ordenar) CENTRADOS, igual que los valores, sin recuadro.
         '.stButton button[kind="tertiary"]{padding:0 !important;min-height:0 !important;'
         'color:#8fd6db !important;letter-spacing:0;line-height:1.1;'
-        'justify-content:flex-start !important;text-align:left !important;'
+        'justify-content:center !important;text-align:center !important;'
         'border:none !important;box-shadow:none !important;background:transparent !important;}'
         '.stButton button[kind="tertiary"]:focus,.stButton button[kind="tertiary"]:active,'
         '.stButton button[kind="tertiary"]:focus-visible{box-shadow:none !important;'
         'outline:none !important;border:none !important;color:#8fd6db !important;}'
         '.stButton button[kind="tertiary"] div[data-testid="stMarkdownContainer"]'
-        '{width:100% !important;text-align:left !important;}'
+        '{width:100% !important;text-align:center !important;}'
         '.stButton button[kind="tertiary"] p{font-size:10px !important;font-weight:700 !important;'
-        'text-transform:uppercase;margin:0 !important;white-space:nowrap;text-align:left !important;}'
+        'text-transform:uppercase;margin:0 !important;white-space:nowrap;text-align:center !important;}'
         '.stButton button[kind="tertiary"]:hover p{color:#BFF2E2 !important;}</style>',
         unsafe_allow_html=True)
 
@@ -868,7 +869,7 @@ def _render_lista_nativa(filas, nivel):
         with rc[1]:
             dcols = st.columns(GRID_W, gap="small", vertical_alignment="center")
             for col, cell in zip(dcols, cells):
-                col.markdown(cell, unsafe_allow_html=True)
+                col.markdown(f'<div class="gcell">{cell}</div>', unsafe_allow_html=True)
         if rc[2].button("", icon=":material/info:", key=f"info_{f['sub']}",
                         help="Detalle y gráfica de 7 días"):
             st.session_state["info_row"] = f
