@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v48 · 2026-08-21"
+APP_VERSION = "v49 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -1620,7 +1620,7 @@ _LOGIN_CSS = """
 [data-testid="stAppViewContainer"], .stApp{ background:#080810 !important; overflow:hidden; }
 /* Centrado perfecto: una sola columna en el centro exacto */
 [data-testid="stMain"]{ display:flex !important; align-items:center !important; justify-content:center !important; min-height:100vh; }
-[data-testid="stMainBlockContainer"], .block-container{ max-width:440px !important; width:100%;
+[data-testid="stMainBlockContainer"], .block-container{ max-width:420px !important; width:100%;
     padding:2.5vh 1.1rem !important; position:relative; z-index:2; }
 
 /* ---------- Fondo animado (aurora + grid + blobs + partículas) ---------- */
