@@ -92,23 +92,32 @@ def sincronizar() -> dict:
 
     deteccion = db.ahora()
     insertadas, sin_periodo = 0, 0
+    detalle = []
     for nombre_hoja, dff in hojas.items():
         if dff is None or dff.empty:
+            detalle.append({"hoja": nombre_hoja, "leidas": 0, "insertadas": 0,
+                            "motivo": "hoja vacía"})
             continue
         dff = dff.rename(columns=lambda c: str(c).strip())
         cmap = watcher.detectar_columnas(list(dff.columns))
         if not cmap["id"] or not cmap["valor"]:
+            detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": 0,
+                            "motivo": f"no detecté columna de ID y/o valor. Columnas: {list(dff.columns)}"})
             continue
+        ins_hoja, dup, sin_val, sin_id = 0, 0, 0, 0
         for i, (_, fila) in enumerate(dff.iterrows()):
             ext_id = f"{nombre_hoja}#{i}"
             if db.venta_existe(HOJA, ext_id):
+                dup += 1
                 continue
             valor = watcher._parse_valor(fila.get(cmap["valor"]))
             if valor is None:
+                sin_val += 1
                 continue
             ad_id = fila.get(cmap["id"])
             ad_id = str(ad_id).strip() if ad_id is not None else ""
             if not ad_id or ad_id.lower() in ("nan", "none"):
+                sin_id += 1
                 continue
             hora = watcher._parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
             pais = fila.get(cmap["pais"]) if cmap["pais"] else None
@@ -120,4 +129,10 @@ def sincronizar() -> dict:
             db.insertar_venta(ad_id, valor, hora, periodo_id, HOJA,
                               ext_id=ext_id, pais=pais)
             insertadas += 1
-    return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo, "error": None}
+            ins_hoja += 1
+        detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": ins_hoja,
+                        "columnas": cmap,
+                        "motivo": (f"OK · {ins_hoja} nuevas, {dup} ya estaban, "
+                                   f"{sin_val} sin valor, {sin_id} sin ID")})
+    return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo,
+            "detalle": detalle, "error": None}

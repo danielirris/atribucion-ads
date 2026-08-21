@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v16 · 2026-08-20"
+APP_VERSION = "v17 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -577,11 +577,11 @@ def _render_lista_nativa(filas, nivel):
         f'.gr .h2{{color:#8fd6db;font-size:11.5px;font-weight:700;text-transform:uppercase;'
         f'letter-spacing:.04em;}}</style>', unsafe_allow_html=True)
 
-    ACC = [12.2, 0.7, 0.7, 0.7]
+    ACC = [0.6, 11.6, 0.7, 0.7]
     hc = st.columns(ACC)
-    hc[0].markdown('<div class="gr">' + "".join(f'<div class="h2">{l}</div>' for l in labels)
+    hc[0].markdown('<div class="h2" style="text-align:center">On/Off</div>', unsafe_allow_html=True)
+    hc[1].markdown('<div class="gr">' + "".join(f'<div class="h2">{l}</div>' for l in labels)
                    + '</div>', unsafe_allow_html=True)
-    hc[1].markdown('<div class="h2" style="text-align:center">On/Off</div>', unsafe_allow_html=True)
     hc[2].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
     hc[3].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
 
@@ -625,11 +625,11 @@ def _render_lista_nativa(filas, nivel):
         ]
         row_html = '<div class="gr">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
         rc = st.columns(ACC, vertical_alignment="center")
-        rc[0].markdown(row_html, unsafe_allow_html=True)
-        rc[1].toggle(" ", value=(f["activos"] > 0), key=f"tg_{f['sub']}",
+        rc[0].toggle(" ", value=(f["activos"] > 0), key=f"tg_{f['sub']}",
                      on_change=_toggle_estado_cb, args=(f,),
                      label_visibility="collapsed",
                      help="Prender / Apagar en Facebook")
+        rc[1].markdown(row_html, unsafe_allow_html=True)
         with rc[2].popover("", icon=":material/edit:"):
             _pop_presupuesto(f)
         with rc[3].popover("", icon=":material/content_copy:"):
@@ -1505,8 +1505,34 @@ def _panel_gsheets():
             if r["sin_periodo"]:
                 msg += f" ({r['sin_periodo']} sin período/anuncio a esa hora)."
             st.success(msg)
+            for d in r.get("detalle", []):
+                st.caption(f"• **{d['hoja']}**: {d['motivo']}")
         else:
             st.error(r["error"])
+
+    # Diagnóstico: ¿las ventas importadas coinciden con tus anuncios?
+    with st.expander("Diagnóstico de ventas importadas (por qué no aparecen)"):
+        ventas = [v for v in db.obtener_ventas() if v.get("hoja_origen") == gs.HOJA][:20]
+        total_gs = len([v for v in db.obtener_ventas() if v.get("hoja_origen") == gs.HOJA])
+        st.caption(f"Ventas importadas de Google Sheets en la base: **{total_gs}**")
+        if not ventas:
+            st.info("No hay ventas importadas de Google Sheets todavía. Pulsa **Sincronizar "
+                    "ahora**. Si sigue en 0, revisa que el Sheet esté compartido como "
+                    "'Cualquiera con el enlace: Lector' y que haya una columna con el ID del anuncio.")
+        else:
+            ids_anuncios = {a["ad_id"] for a in db.obtener_anuncios()}
+            filas = [{"ad_id": v["ad_id"],
+                      "coincide con anuncio": "Sí" if str(v["ad_id"]) in ids_anuncios else "NO",
+                      "valor": v["valor_venta"], "hora": v["hora_venta"],
+                      "período": v.get("periodo_id") or "—"} for v in ventas]
+            st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
+            n_no = sum(1 for f in filas if f["coincide con anuncio"] == "NO")
+            if n_no:
+                st.warning(f"{n_no} de las últimas {len(filas)} ventas tienen un **ID que NO "
+                           "coincide** con ningún anuncio cargado. Por eso no aparecen en la tabla. "
+                           "Revisa que la columna del Sheet tenga el **ID del anuncio (ad_id)** de "
+                           "Facebook, no el ID de campaña/conjunto ni otro código. Y pulsa "
+                           "**Recargar** para traer los anuncios primero.")
 
 
 def _panel_excel():
