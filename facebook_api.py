@@ -278,10 +278,10 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                 nombre = ad.get(Ad.Field.name) or f"Anuncio {ad_id}"
                 adset_id = ad.get(Ad.Field.adset_id)
                 campaign_id = ad.get("campaign_id")
-                camp = ad.get("campaign") or {}
-                aset = ad.get("adset") or {}
-                campaign_nombre = camp.get("name") if isinstance(camp, dict) else None
-                adset_nombre = aset.get("name") if isinstance(aset, dict) else None
+                camp = _a_dict(ad.get("campaign"))
+                aset = _a_dict(ad.get("adset"))
+                campaign_nombre = camp.get("name")
+                adset_nombre = aset.get("name")
                 estado = ad.get(Ad.Field.effective_status) or ""
                 creado = ad.get(Ad.Field.created_time)
                 es_activo = 1 if estado == "ACTIVE" else 0

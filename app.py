@@ -26,7 +26,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v13 · 2026-08-20"
+APP_VERSION = "v14 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -529,7 +529,7 @@ def seccion_vista_general():
     _render_lista_nativa(filas, nivel)
 
 
-_GRID_TMPL = "1.7fr .75fr 1fr 1.05fr 1.05fr .95fr .55fr 1.05fr 1.05fr .55fr .7fr .85fr"
+_GRID_TMPL = "1.9fr .8fr 1fr 1.05fr 1.05fr .95fr .55fr 1.05fr 1.05fr .6fr .65fr .85fr .45fr"
 
 
 def _estado_cell(f, nivel):
@@ -544,11 +544,12 @@ def _render_lista_nativa(filas, nivel):
     esc = _html.escape
     primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
     labels = [primera, "Estado", "Cuenta", "Presupuesto", "Gasto", "CPM/CTR", "Ventas",
-              "Ingresos", "Ganancia", "ROAS", "Conv.", "Costo/conv"]
+              "Ingresos", "Ganancia", "ROAS", "Conv.", "Costo/conv", "!"]
     st.markdown(
-        f'<style>.gr{{display:grid;grid-template-columns:{_GRID_TMPL};gap:10px;align-items:center;}}'
-        f'.gr .h2{{color:#8fd6db;font-size:9.5px;font-weight:700;text-transform:uppercase;'
-        f'letter-spacing:.05em;}}</style>', unsafe_allow_html=True)
+        f'<style>.gr{{display:grid;grid-template-columns:{_GRID_TMPL};gap:12px;'
+        f'align-items:center;padding:6px 4px;}}'
+        f'.gr .h2{{color:#8fd6db;font-size:11.5px;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:.04em;}}</style>', unsafe_allow_html=True)
 
     hc = st.columns([13, 0.75, 0.75])
     hc[0].markdown('<div class="gr">' + "".join(f'<div class="h2">{l}</div>' for l in labels)
@@ -563,11 +564,21 @@ def _render_lista_nativa(filas, nivel):
         ctr = f'{f["ctr"]:.2f}%' if f["ctr"] is not None else "—"
         conv = int(f["conv"]) if f["conv"] is not None else "—"
         costoc = _usd(f["costo_conv"]) if f.get("costo_conv") is not None else "—"
+        # Alerta: gastando y con ROAS bajo (< 1.5x)
+        alerta = bool(f["gasto"] and f["gasto"] > 0 and f["roas"] < 1.5)
+        if alerta:
+            msg = (f"Alerta: ROAS {f['roas']:.2f}x por debajo de 1.5x. "
+                   f"Gasto {_usd(f['gasto'])}, ingresos {_usd(f['ingresos'])}, "
+                   f"{f['num']} venta(s), presupuesto {_usd(f['presupuesto'])}. "
+                   f"Considera bajar o pausar.")
+            alerta_cell = f'<span class="alert-badge" title="{esc(msg)}">!</span>'
+        else:
+            alerta_cell = '<span class="ok-dot" title="Sin alertas"></span>'
         cells = [
-            f'<div class="big">{esc(str(f["nombre"]))[:40]}</div>'
-            f'<div class="sub">{esc(str(f["sub"]))[:16]}</div>',
+            f'<div class="big">{esc(str(f["nombre"]))[:44]}</div>'
+            f'<div class="sub">{esc(str(f["sub"]))[:18]}</div>',
             _estado_cell(f, nivel),
-            f'<div class="sub">{esc(str(f["cuenta"]))[:16]}</div>',
+            f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>',
             _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
             _money_html(f["gasto"], f["gasto_nat"], f["moneda"])
             + ('<div class="sub">est.</div>' if f["spend"] is None else ''),
@@ -575,11 +586,13 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big">{f["num"]}</div>',
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
             f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
-            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:14px">{f["roas"]:.2f}x</div>',
+            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>',
             f'<div class="big">{conv}</div>',
             f'<div class="big">{costoc}</div>',
+            alerta_cell,
         ]
-        row_html = '<div class="gr">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
+        clase = "gr alerta" if alerta else "gr"
+        row_html = f'<div class="{clase}">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
         rc = st.columns([13, 0.75, 0.75], vertical_alignment="center")
         rc[0].markdown(row_html, unsafe_allow_html=True)
         with rc[1].popover("", icon=":material/edit:"):
@@ -659,9 +672,17 @@ table.ads thead th { text-align:left; font-weight:700; color:#8fd6db; font-size:
     border-bottom:1px solid rgba(140,210,215,.18); }
 table.ads td { padding:11px 12px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:middle; }
 table.ads tbody tr:hover td { background:linear-gradient(90deg, rgba(140,210,215,.07), rgba(199,196,255,.05)); }
-.big { font-size:12.5px; font-weight:600; color:#f2f4f8; }
-.sub { font-size:10.5px; color:#9aa7b6; }
+.big { font-size:15px; font-weight:600; color:#f2f4f8; line-height:1.2; }
+.sub { font-size:12px; color:#9aa7b6; }
 .m-mint{ color:#BFF2E2; } .m-lav{ color:#E6D5FF; } .m-peri{ color:#C7C4FF; }
+/* Alerta por fila */
+.gr.alerta{ background:linear-gradient(90deg, rgba(239,68,68,.12), rgba(239,68,68,.03));
+    border-radius:10px; }
+.alert-badge{ display:inline-flex; align-items:center; justify-content:center;
+    width:20px; height:20px; border-radius:50%; background:#ef4444; color:#fff;
+    font-weight:800; font-size:12px; cursor:help; box-shadow:0 0 10px rgba(239,68,68,.4); }
+.ok-dot{ display:inline-block; width:8px; height:8px; border-radius:50%;
+    background:rgba(94,231,160,.5); }
 .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px;
     border-radius:999px; font-size:10.5px; font-weight:600; }
 .pill-run { background:rgba(74,222,128,.14); color:#7ef0a9; box-shadow:0 0 12px rgba(74,222,128,.15); }
@@ -1569,8 +1590,6 @@ def pagina_dashboard():
     seccion_vista_general()
     st.divider()
     seccion_por_pais()
-    st.divider()
-    seccion_alertas()
     st.divider()
     seccion_venta_manual()
     st.divider()
