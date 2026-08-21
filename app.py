@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v32 · 2026-08-21"
+APP_VERSION = "v33 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -2050,15 +2050,51 @@ def pagina_configuracion():
 # --------------------------------------------------------------------------- #
 #  Página: Dashboard
 # --------------------------------------------------------------------------- #
+def _fmt_hace(dt, ahora):
+    """'hace 3 min' / 'hace 1 h 5 min' a partir de dos datetimes."""
+    if not dt:
+        return "aún sin datos"
+    seg = int((ahora - dt).total_seconds())
+    if seg < 60:
+        return "hace unos segundos"
+    mins = seg // 60
+    if mins < 60:
+        return f"hace {mins} min"
+    h, m = divmod(mins, 60)
+    return f"hace {h} h {m} min" if m else f"hace {h} h"
+
+
+@st.fragment(run_every=30)
+def _timer_actualizacion():
+    """Timer en vivo del último 'arrastre' de anuncios. Se refresca solo cada 30 s
+    (rerun del fragmento, NO recarga de página → no cierra la sesión). Cuando el
+    hilo de fondo trae datos nuevos, dispara un rerun completo para verlos."""
+    ahora = db.ahora()
+    ult = db.get_config("ultima_actualizacion", "") or ""
+    dt = db.a_fecha(ult) if ult else None
+    hace = _fmt_hace(dt, ahora)
+    cuando = f"{dt.strftime('%d/%m %H:%M')} · {hace}" if dt else hace
+    de_noche = ahora.hour >= 23 or ahora.hour < 6
+    cad = "cada 1 h (modo noche 11 p.m.–6 a.m.)" if de_noche else "cada 15 min"
+    st.caption(f"🔄 Última actualización: {cuando} · automática {cad}")
+
+    # Si llegaron datos nuevos desde el último render, refresca toda la vista.
+    prev = st.session_state.get("_ult_sync_visto")
+    st.session_state["_ult_sync_visto"] = ult
+    if prev is not None and prev != ult:
+        st.rerun()  # rerun de app (mantiene sesión), no recarga la página
+
+
 def pagina_dashboard():
     top1, top2 = st.columns([5, 1])
     with top1:
         st.title("Dashboard")
-        st.caption(f"Última actualización: {db.a_texto(db.ahora())}")
+        _timer_actualizacion()
     with top2:
         st.write("")
         st.write("")
-        if st.button("Actualizar", use_container_width=True, type="primary"):
+        if st.button("Actualizar", use_container_width=True, type="primary",
+                     help="Refresca la vista ahora (sin volver a llamar a Facebook)."):
             try:
                 _insights_cache.clear()
             except Exception:
@@ -2076,16 +2112,6 @@ def pagina_dashboard():
     seccion_lote()
     st.divider()
     seccion_manual()
-
-    # Actualización automática de la vista cada 15 minutos.
-    _auto_refresco(900)
-
-
-def _auto_refresco(segundos: int):
-    st.components.v1.html(
-        f"<script>setTimeout(function(){{window.parent.location.reload();}}, {segundos*1000});</script>",
-        height=0,
-    )
 
 
 # --------------------------------------------------------------------------- #

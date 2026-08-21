@@ -353,6 +353,12 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                 num_conexiones=len(cons),
                 ultimo_error=("; ".join(errores)[:400] if errores else None),
                 ultimo_polling=db.ahora())
+    # Marca de tiempo persistente del último "arrastre" completo de anuncios
+    # (la lee la UI para el timer "última actualización hace X min").
+    try:
+        db.set_config("ultima_actualizacion", db.a_texto(db.ahora()))
+    except Exception:
+        pass
     _log(f"Cargados {total_ads} anuncios ({total_activos} activos) de "
          f"{total_cuentas} cuentas en {len(cons)} conexión(es). "
          f"{len(errores)} error(es).")
@@ -783,13 +789,30 @@ def _revisar_cambios_presupuesto() -> None:
         _log(f"Polling: {cambios} cambio(s) de presupuesto aplicados.")
 
 
+# Cadencia de actualización automática (hora de Bogotá vía db.ahora()):
+#   Día  (06:00–23:00): cada 15 minutos.
+#   Noche(23:00–06:00): cada 60 minutos (menos presión sobre la API mientras duermes).
+INTERVALO_DIA_SEG = 15 * 60
+INTERVALO_NOCHE_SEG = 60 * 60
+HORA_INICIO_NOCHE = 23   # 11 PM
+HORA_FIN_NOCHE = 6       # 6 AM
+
+
+def _intervalo_polling() -> int:
+    """Segundos hasta la próxima actualización según la hora local."""
+    h = db.ahora().hour
+    de_noche = h >= HORA_INICIO_NOCHE or h < HORA_FIN_NOCHE
+    return INTERVALO_NOCHE_SEG if de_noche else INTERVALO_DIA_SEG
+
+
 def _loop_polling() -> None:
     _set_estado(polling_activo=True)
     try:
         cargar_todo()
     except Exception as e:
         _log(f"Fallo en carga inicial: {e}")
-    while not _POLLING_STOP.wait(config.POLLING_INTERVAL_SEG):
+    # El intervalo se recalcula en cada vuelta para respetar el horario día/noche.
+    while not _POLLING_STOP.wait(_intervalo_polling()):
         try:
             cargar_todo(abrir_periodos=True)
             _revisar_cambios_presupuesto()
