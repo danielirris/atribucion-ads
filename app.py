@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v55 · 2026-08-21"
+APP_VERSION = "v56 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -1211,19 +1211,33 @@ def _pop_duplicar(f):
                             value=4.0, step=1.0, key=f"dupp_{f['sub']}",
                             help="Por defecto 4 USD por copia.")
     activar = st.toggle("Activar copias de inmediato", value=False, key=f"dupa_{f['sub']}")
+    reutilizar = st.toggle("Conservar interacciones (usar la misma publicación)",
+                           value=True, key=f"dupr_{f['sub']}",
+                           help="Fuerza a las copias a usar el MISMO post del original, así "
+                                "arrastran los likes, comentarios y compartidos (prueba social).")
     if st.button("Duplicar ahora", type="primary", key=f"dupbtn_{f['sub']}",
                  use_container_width=True):
         nativo = presu / (f["rate_c"] or 1)
         with st.spinner("Duplicando en Facebook..."):
             res = fb.duplicar_anuncio(f["ad_rep"], int(n), float(nativo), activar=bool(activar),
                                       conexion_id=f.get("conexion_id"), cuenta_id=f.get("cuenta_id"),
-                                      cuenta_nombre=f.get("cuenta_nombre"))
+                                      cuenta_nombre=f.get("cuenta_nombre"),
+                                      reutilizar_post=bool(reutilizar))
         ok = res.get("exitosas", [])
         fail = res.get("fallidas", [])
         if res.get("error_global"):
             st.error(res["error_global"])
         if ok:
             st.success(f"{len(ok)} copia(s) creada(s).")
+            if reutilizar:
+                nrp = res.get("post_reutilizado", 0)
+                if res.get("post_id") and nrp:
+                    st.info(f"✅ {nrp} copia(s) usan la misma publicación "
+                            f"({res['post_id']}) → conservan likes/comentarios/compartidos.")
+                elif not res.get("post_id"):
+                    st.warning("No pude leer la publicación del original (puede ser un "
+                               "creativo especial), así que las copias quedaron con su propio "
+                               "post. Revisa los mensajes del sistema.")
         for x in fail:
             st.error(f"{x['nombre']}: {x['error']}")
 

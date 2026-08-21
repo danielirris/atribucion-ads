@@ -38,6 +38,7 @@ try:
     from facebook_business.adobjects.ad import Ad
     from facebook_business.adobjects.adset import AdSet
     from facebook_business.adobjects.campaign import Campaign
+    from facebook_business.adobjects.adcreative import AdCreative
     from facebook_business.exceptions import FacebookRequestError
 except Exception as e:  # pragma: no cover
     SDK_DISPONIBLE = False
@@ -804,12 +805,52 @@ def cambiar_estado(obj_id: str, nivel: str, activar: bool,
 # --------------------------------------------------------------------------- #
 #  Duplicación de anuncios
 # --------------------------------------------------------------------------- #
+def _post_id_del_anuncio(ad_id: str, api) -> Optional[str]:
+    """Devuelve el ID de la PUBLICACIÓN real del anuncio (effective_object_story_id),
+    que es lo que comparte likes/comentarios/compartidos. None si no se puede leer."""
+    try:
+        ad = Ad(ad_id, api=api).api_get(fields=["creative"])
+        creative_id = _a_dict(ad.get("creative")).get("id")
+        if not creative_id:
+            return None
+        cr = AdCreative(creative_id, api=api).api_get(
+            fields=["effective_object_story_id", "object_story_id"])
+        return cr.get("effective_object_story_id") or cr.get("object_story_id")
+    except Exception as e:
+        _log(f"No pude leer la publicación del anuncio {ad_id}: {e}")
+        return None
+
+
+def _forzar_post_existente(nuevo_ad_id: str, post_id: str, cuenta_id: Optional[str],
+                           nombre: str, api) -> bool:
+    """Hace que la copia use la MISMA publicación (post_id) para conservar las
+    interacciones: crea un creativo con object_story_id = post_id y apunta el ad a él."""
+    if not (nuevo_ad_id and post_id and cuenta_id):
+        return False
+    act = str(cuenta_id) if str(cuenta_id).startswith("act_") else f"act_{cuenta_id}"
+    creativo = AdAccount(act, api=api).create_ad_creative(params={
+        "name": f"Post existente {post_id} · {nombre}"[:100],
+        "object_story_id": post_id})
+    nuevo_creative_id = creativo.get("id")
+    if not nuevo_creative_id:
+        return False
+    Ad(nuevo_ad_id, api=api).api_update(params={"creative": {"creative_id": nuevo_creative_id}})
+    return True
+
+
 def duplicar_anuncio(ad_id: str, num_copias: int, presupuesto: float,
                      activar: bool = False, conexion_id: Optional[int] = None,
                      cuenta_id: Optional[str] = None,
-                     cuenta_nombre: Optional[str] = None) -> dict:
-    """Duplica un anuncio N veces con deep_copy usando el token de su conexión."""
-    resultado = {"exitosas": [], "fallidas": [], "error_global": None}
+                     cuenta_nombre: Optional[str] = None,
+                     reutilizar_post: bool = True) -> dict:
+    """Duplica un anuncio N veces con deep_copy usando el token de su conexión.
+
+    Si reutilizar_post=True (por defecto), fuerza a cada copia a usar la MISMA
+    publicación del original (effective_object_story_id), de modo que se conserven
+    los likes, comentarios y compartidos (prueba social). Si no se puede, la copia
+    igual se crea con su propio creativo (deep_copy) y se avisa."""
+    resultado = {"exitosas": [], "fallidas": [], "error_global": None,
+                 "post_id": None, "post_reutilizado": 0}
     if not SDK_DISPONIBLE:
         resultado["error_global"] = f"SDK no disponible: {SDK_ERROR_IMPORT}"
         return resultado
@@ -823,6 +864,10 @@ def duplicar_anuncio(ad_id: str, num_copias: int, presupuesto: float,
     nombre_base = original["nombre"] if original else f"Anuncio {ad_id}"
     status_copia = "ACTIVE" if activar else "PAUSED"
 
+    # Post real del original (para arrastrar interacciones).
+    post_id = _post_id_del_anuncio(ad_id, api) if reutilizar_post else None
+    resultado["post_id"] = post_id
+
     for i in range(1, num_copias + 1):
         nombre_copia = f"{nombre_base} - Copia {i}"
         try:
@@ -832,6 +877,17 @@ def duplicar_anuncio(ad_id: str, num_copias: int, presupuesto: float,
             nuevo_adset_id = _resolver_adset_de_copia(copia, nuevo_ad_id, api)
             if not nuevo_ad_id:
                 raise RuntimeError("Facebook no devolvió el ad_id de la copia.")
+
+            # Forzar la MISMA publicación para conservar las interacciones.
+            if post_id:
+                try:
+                    if _forzar_post_existente(nuevo_ad_id, post_id, cuenta_id, nombre_copia, api):
+                        resultado["post_reutilizado"] += 1
+                        _log(f"Copia {nuevo_ad_id}: usa la publicación {post_id} "
+                             f"(conserva interacciones).")
+                except Exception as e:
+                    _log(f"Copia {nuevo_ad_id}: no pude reutilizar la publicación "
+                         f"{post_id} ({e}); queda con su propio creativo.")
 
             if nuevo_adset_id:
                 r = actualizar_presupuesto_facebook(nuevo_adset_id, presupuesto, conexion_id)
