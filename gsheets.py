@@ -12,8 +12,15 @@ Flujo:
 """
 import io
 import re
+import unicodedata
 from datetime import datetime
 from typing import Optional
+
+
+def _norm(s):
+    """minúsculas, sin acentos ni espacios de más (para comparar encabezados)."""
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+    return s.strip().lower()
 
 import requests
 import pandas as pd
@@ -161,13 +168,19 @@ def sincronizar() -> dict:
             detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": 0,
                             "motivo": f"no detecté columna de ID y/o valor. Columnas: {list(dff.columns)}"})
             continue
-        # Columna de ID único (para deduplicar de forma estable).
+        # Columna de ID único (para deduplicar de forma estable). Tolerante a acentos.
         dedup_col = None
         if dedup_cfg:
+            objetivo = _norm(dedup_cfg)
             for c in dff.columns:
-                if str(c).strip().lower() == dedup_cfg:
+                if _norm(c) == objetivo:
                     dedup_col = c
                     break
+            if dedup_col is None:  # fallback: "contiene"
+                for c in dff.columns:
+                    if objetivo in _norm(c):
+                        dedup_col = c
+                        break
         ins_hoja, dup, sin_val, sin_id, ceros = 0, 0, 0, 0, 0
         for i, (_, fila) in enumerate(dff.iterrows()):
             if dedup_col is not None and fila.get(dedup_col) is not None and str(fila.get(dedup_col)).strip():

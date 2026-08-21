@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v25 · 2026-08-21"
+APP_VERSION = "v26 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
