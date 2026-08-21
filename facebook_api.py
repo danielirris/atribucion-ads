@@ -721,10 +721,31 @@ def _loop_polling() -> None:
         try:
             cargar_todo(abrir_periodos=True)
             _revisar_cambios_presupuesto()
+            _sincronizar_fuentes_ventas()
             _set_estado(ultimo_polling=db.ahora())
         except Exception as e:
             _set_estado(ultimo_error=str(e))
             _log(f"Error en polling: {e}\n{traceback.format_exc(limit=1)}")
+
+
+def _sincronizar_fuentes_ventas() -> None:
+    """Auto-sincroniza Google Sheets y Supabase (si están configurados)."""
+    try:
+        import gsheets
+        if gsheets.get_url():
+            r = gsheets.sincronizar()
+            if r.get("insertadas"):
+                _log(f"Google Sheets: {r['insertadas']} venta(s) nueva(s).")
+    except Exception as e:
+        _log(f"Auto-sync Google Sheets: {e}")
+    try:
+        import supabase_source
+        if config.supabase_configurado():
+            r = supabase_source.sincronizar()
+            if r.get("insertadas"):
+                _log(f"Supabase: {r['insertadas']} venta(s) nueva(s).")
+    except Exception as e:
+        _log(f"Auto-sync Supabase: {e}")
     _set_estado(polling_activo=False)
 
 

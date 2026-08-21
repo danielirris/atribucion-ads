@@ -52,6 +52,42 @@ _STOP = threading.Event()
 
 COLS = ["ID_Anuncio", "Valor_Venta", "Hora_Venta"]
 
+# Alias aceptados para detectar columnas aunque se llamen distinto.
+_ALIAS_ID = ["id_anuncio", "idanuncio", "id anuncio", "id del anuncio", "ad_id", "adid",
+             "ad id", "id", "anuncio", "id_ad", "id ad"]
+_ALIAS_VALOR = ["valor_venta", "valor venta", "valor", "monto", "importe", "precio",
+                "total", "venta", "amount", "value", "ingreso", "ingresos"]
+_ALIAS_HORA = ["hora_venta", "hora venta", "hora", "fecha", "fecha_venta", "fecha venta",
+               "fecha y hora", "timestamp", "date", "datetime", "fecha/hora"]
+_ALIAS_PAIS = ["pais", "país", "country", "pais_venta", "país_venta"]
+
+
+def _norm(s):
+    return str(s).strip().lower()
+
+
+def detectar_columnas(columnas):
+    """
+    Detecta las columnas de ID de anuncio, valor, hora y país por nombre (flexible).
+    Devuelve {"id","valor","hora","pais"} con el nombre real de la columna o None.
+    """
+    norm = {_norm(c): c for c in columnas}
+
+    def buscar(aliases):
+        # 1) match exacto por alias
+        for a in aliases:
+            if a in norm:
+                return norm[a]
+        # 2) match por "contiene" (ej. "ID del anuncio (FB)")
+        for a in aliases:
+            for k, real in norm.items():
+                if a in k:
+                    return real
+        return None
+
+    return {"id": buscar(_ALIAS_ID), "valor": buscar(_ALIAS_VALOR),
+            "hora": buscar(_ALIAS_HORA), "pais": buscar(_ALIAS_PAIS)}
+
 
 def _log(msg: str) -> None:
     with _ESTADO_LOCK:
@@ -164,11 +200,12 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
             if dff is None or dff.empty:
                 continue
 
-            # Normalizar nombres de columnas (tolerar variaciones de espacios/caps).
+            # Normalizar nombres y detectar columnas de forma flexible.
             dff = dff.rename(columns=lambda c: str(c).strip())
-            faltan = [c for c in COLS if c not in dff.columns]
-            if faltan:
-                _log(f"Hoja '{nombre_hoja}' ignorada: faltan columnas {faltan}.")
+            cmap = detectar_columnas(list(dff.columns))
+            if not cmap["id"] or not cmap["valor"]:
+                _log(f"Hoja '{nombre_hoja}' ignorada: no encontré columna de ID de anuncio "
+                     f"y/o de valor. Columnas: {list(dff.columns)}")
                 continue
 
             clave = f"{os.path.abspath(path)}::{nombre_hoja}"
@@ -176,19 +213,18 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
             n_filas = len(dff)
 
             if solo_nuevas and n_filas <= vistas:
-                # No hay filas nuevas (o el archivo se acortó: re-sincronizamos).
                 _FILAS_VISTAS[clave] = n_filas
                 continue
 
             nuevas = dff.iloc[vistas:] if solo_nuevas else dff
             for _, fila in nuevas.iterrows():
-                valor = _parse_valor(fila.get("Valor_Venta"))
+                valor = _parse_valor(fila.get(cmap["valor"]))
                 if valor is None:
                     continue
-                hora = _parse_hora(fila.get("Hora_Venta"), deteccion)
-                pais = fila.get("Pais", fila.get("País"))
+                hora = _parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
+                pais = fila.get(cmap["pais"]) if cmap["pais"] else None
                 pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
-                ok = _procesar_fila(fila.get("ID_Anuncio"), valor, hora, nombre_hoja, pais=pais)
+                ok = _procesar_fila(fila.get(cmap["id"]), valor, hora, nombre_hoja, pais=pais)
                 if ok:
                     total += 1
 

@@ -21,12 +21,13 @@ import calculos
 import facebook_api as fb
 import excel_watcher as watcher
 import supabase_source as supa
+import gsheets as gs
 import fx
 
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v14 · 2026-08-20"
+APP_VERSION = "v15 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -1423,10 +1424,47 @@ def _inject_css():
 # --------------------------------------------------------------------------- #
 #  Página: Configuración (Excel + Cuentas + Conexiones + Supabase)
 # --------------------------------------------------------------------------- #
+def _panel_gsheets():
+    st.subheader("Google Sheets")
+    st.caption("Lee TODAS las pestañas de un Google Sheets. Comparte el Sheet como "
+               "**'Cualquiera con el enlace: Lector'** y pega la URL. Detecta la columna del "
+               "ID del anuncio, valor, fecha y país aunque se llamen distinto.")
+    url = st.text_input("URL del Google Sheets", value=gs.get_url(),
+                        placeholder="https://docs.google.com/spreadsheets/d/...")
+    c1, c2, c3 = st.columns(3)
+    if c1.button("Guardar URL", use_container_width=True):
+        gs.set_url(url)
+        st.success("URL guardada.")
+    if c2.button("Probar y ver pestañas", use_container_width=True):
+        gs.set_url(url)
+        r = gs.probar()
+        if r["ok"]:
+            st.success(f"Conectado. {len(r['hojas'])} pestaña(s):")
+            for h in r["hojas"]:
+                det = h["detectado"]
+                ok_id = "✓" if det["id"] else "✗ (sin ID)"
+                st.caption(f"• **{h['nombre']}** ({h['filas']} filas) — ID: {det['id'] or '—'} "
+                           f"· valor: {det['valor'] or '—'} · fecha: {det['hora'] or '—'} "
+                           f"· país: {det['pais'] or '—'}  {ok_id}")
+        else:
+            st.error(r["error"])
+    if c3.button("Sincronizar ahora", type="primary", use_container_width=True):
+        gs.set_url(url)
+        r = gs.sincronizar()
+        if r["ok"]:
+            msg = f"{r['insertadas']} venta(s) importada(s) de Google Sheets."
+            if r["sin_periodo"]:
+                msg += f" ({r['sin_periodo']} sin período/anuncio a esa hora)."
+            st.success(msg)
+        else:
+            st.error(r["error"])
+
+
 def _panel_excel():
     st.subheader("Excel (ventas del socio)")
-    st.caption("Fuente 1: el Excel con columnas ID_Anuncio, Valor_Venta, Hora_Venta. "
-               "Súbelo aquí cada vez que se agreguen ventas; solo se procesan las nuevas.")
+    st.caption("Sube un Excel (.xlsx). Lee **todas las hojas** y detecta la columna del ID del "
+               "anuncio, valor, fecha y país aunque se llamen distinto (ID_Anuncio, Ad ID, id, "
+               "Monto, Fecha, Pais…). Solo procesa las filas nuevas.")
     subido = st.file_uploader("Subir / reemplazar ventas.xlsx", type=["xlsx"], key="up_excel_cfg")
     c1, c2 = st.columns(2)
     if subido is not None and c1.button("Procesar Excel subido", use_container_width=True):
@@ -1556,16 +1594,18 @@ def pagina_configuracion():
     st.title("Configuración")
     st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase), la moneda y "
                "revisa tus cuentas.")
-    tabs = st.tabs(["Conexiones", "Excel", "Supabase", "Moneda", "Cuentas"])
+    tabs = st.tabs(["Conexiones", "Excel", "Google Sheets", "Supabase", "Moneda", "Cuentas"])
     with tabs[0]:
         seccion_conexiones()
     with tabs[1]:
         _panel_excel()
     with tabs[2]:
-        _panel_supabase()
+        _panel_gsheets()
     with tabs[3]:
-        _panel_moneda()
+        _panel_supabase()
     with tabs[4]:
+        _panel_moneda()
+    with tabs[5]:
         _panel_cuentas()
 
 

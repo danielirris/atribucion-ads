@@ -1,0 +1,123 @@
+"""
+gsheets.py
+Lee un Google Sheets (todas sus pestañas) sin credenciales, usando la exportación
+a XLSX. El Sheet debe estar compartido como "Cualquiera con el enlace: Lector".
+
+Flujo:
+  - El usuario pega la URL del Sheet en Configuración.
+  - La app descarga  https://docs.google.com/spreadsheets/d/<ID>/export?format=xlsx
+    (todas las pestañas) y las procesa igual que un Excel, detectando columnas
+    de forma flexible (ID del anuncio, valor, hora, país).
+  - Deduplica por hoja + número de fila para no reimportar.
+"""
+import io
+import re
+from datetime import datetime
+from typing import Optional
+
+import requests
+import pandas as pd
+
+import db
+import excel_watcher as watcher
+
+HOJA = "GoogleSheets"
+K_URL = "gsheet_url"
+
+
+def get_url() -> str:
+    return db.get_config(K_URL, "") or ""
+
+
+def set_url(url: str) -> None:
+    db.set_config(K_URL, (url or "").strip())
+
+
+def _extraer_id(url: str) -> Optional[str]:
+    if not url:
+        return None
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
+    if m:
+        return m.group(1)
+    # por si pegan solo el ID
+    if re.fullmatch(r"[a-zA-Z0-9-_]{20,}", url.strip()):
+        return url.strip()
+    return None
+
+
+def _descargar_xlsx(url: str):
+    sid = _extraer_id(url)
+    if not sid:
+        return None, "No pude extraer el ID del Sheet de esa URL."
+    export = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx"
+    try:
+        r = requests.get(export, timeout=30)
+        if r.status_code == 200 and r.content[:2] == b"PK":  # xlsx = zip (PK)
+            return r.content, None
+        if "text/html" in r.headers.get("content-type", ""):
+            return None, ("No tengo acceso al Sheet. Compártelo como "
+                          "'Cualquiera con el enlace: Lector'.")
+        return None, f"HTTP {r.status_code} al descargar el Sheet."
+    except Exception as e:
+        return None, str(e)
+
+
+def probar() -> dict:
+    """Descarga y lista las pestañas y columnas detectadas. {ok,hojas,error}."""
+    contenido, err = _descargar_xlsx(get_url())
+    if err:
+        return {"ok": False, "hojas": [], "error": err}
+    try:
+        hojas = pd.read_excel(io.BytesIO(contenido), sheet_name=None, engine="openpyxl")
+    except Exception as e:
+        return {"ok": False, "hojas": [], "error": f"No pude leer el Sheet: {e}"}
+    info = []
+    for nombre, dff in hojas.items():
+        cols = [str(c).strip() for c in (dff.columns if dff is not None else [])]
+        cmap = watcher.detectar_columnas(cols)
+        info.append({"nombre": nombre, "columnas": cols, "detectado": cmap,
+                     "filas": 0 if dff is None else len(dff)})
+    return {"ok": True, "hojas": info, "error": None}
+
+
+def sincronizar() -> dict:
+    """Descarga todas las pestañas y las importa (dedup por hoja+fila). {ok,insertadas,sin_periodo,error}."""
+    contenido, err = _descargar_xlsx(get_url())
+    if err:
+        return {"ok": False, "insertadas": 0, "sin_periodo": 0, "error": err}
+    try:
+        hojas = pd.read_excel(io.BytesIO(contenido), sheet_name=None, engine="openpyxl")
+    except Exception as e:
+        return {"ok": False, "insertadas": 0, "sin_periodo": 0, "error": str(e)}
+
+    deteccion = db.ahora()
+    insertadas, sin_periodo = 0, 0
+    for nombre_hoja, dff in hojas.items():
+        if dff is None or dff.empty:
+            continue
+        dff = dff.rename(columns=lambda c: str(c).strip())
+        cmap = watcher.detectar_columnas(list(dff.columns))
+        if not cmap["id"] or not cmap["valor"]:
+            continue
+        for i, (_, fila) in enumerate(dff.iterrows()):
+            ext_id = f"{nombre_hoja}#{i}"
+            if db.venta_existe(HOJA, ext_id):
+                continue
+            valor = watcher._parse_valor(fila.get(cmap["valor"]))
+            if valor is None:
+                continue
+            ad_id = fila.get(cmap["id"])
+            ad_id = str(ad_id).strip() if ad_id is not None else ""
+            if not ad_id or ad_id.lower() in ("nan", "none"):
+                continue
+            hora = watcher._parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
+            pais = fila.get(cmap["pais"]) if cmap["pais"] else None
+            pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
+            periodo = db.periodo_para_hora(ad_id, hora)
+            periodo_id = periodo["id"] if periodo else None
+            if periodo_id is None:
+                sin_periodo += 1
+            db.insertar_venta(ad_id, valor, hora, periodo_id, HOJA,
+                              ext_id=ext_id, pais=pais)
+            insertadas += 1
+    return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo, "error": None}
