@@ -379,7 +379,10 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                             "limit": 500},
                     fields=["id", "name", "adset_id", "campaign_id",
                         "effective_status", "created_time",
-                        "campaign{name}", "adset{name}"],
+                        "campaign{name}",
+                        # Presupuesto y país (targeting) VIENEN aquí mismo, para NO
+                        # hacer un llamado extra por cada conjunto (evita el rate limit).
+                        "adset{name,daily_budget,targeting}"],
                 )
             except FacebookRequestError as e:
                 if _es_rate_limit(e):
@@ -416,7 +419,17 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                     if adset_id in cache_budget:
                         info = cache_budget[adset_id]
                     else:
-                        info = _leer_adset_info(adset_id, api)
+                        # Presupuesto + país SALEN del propio adset (ya vino en get_ads),
+                        # así NO hacemos un llamado extra por conjunto.
+                        raw_b = aset.get("daily_budget")
+                        if raw_b is not None or aset.get("targeting") is not None:
+                            codigos = _paises_de_targeting(aset.get("targeting"))
+                            info = {
+                                "presupuesto": (float(raw_b) / 100.0) if raw_b not in (None, "") else None,
+                                "pais": (", ".join(pais_nombre(c) for c in codigos[:3]) if codigos else None),
+                            }
+                        else:  # respaldo (rara vez): llamado extra
+                            info = _leer_adset_info(adset_id, api)
                         cache_budget[adset_id] = info
                     presupuesto = info.get("presupuesto")
                     pais_pauta = info.get("pais")
@@ -453,10 +466,16 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
 
                 if abrir_periodos and es_activo and presupuesto is not None:
                     # Ancla el período inicial a la fecha de CREACIÓN del anuncio
-                    # (no a la hora de carga), para que un anuncio nunca modificado
-                    # no aparezca como "modificado hoy".
+                    # (no a la hora de carga). Y detecta el cambio de presupuesto AQUÍ
+                    # mismo (con el valor ya traído), sin llamadas extra por conjunto.
                     creado_dt = db.a_fecha(str(creado)[:19].replace("T", " ")) if creado else None
-                    db.asegurar_periodo_inicial(ad_id, presupuesto, creado_dt)
+                    ab = db.periodo_abierto(ad_id)
+                    if ab is None:
+                        db.asegurar_periodo_inicial(ad_id, presupuesto, creado_dt)
+                    elif abs(float(ab["presupuesto"]) - float(presupuesto)) > 0.01:
+                        db.cambiar_periodo(ad_id, presupuesto)
+                        _log(f"Cambio de presupuesto en '{nombre}': "
+                             f"{float(ab['presupuesto']):.2f} → {float(presupuesto):.2f}.")
 
         if con["id"] != ENV_CONEXION_ID:
             db.actualizar_conexion(con["id"], ultimo_error=None)
@@ -1075,8 +1094,10 @@ def _loop_polling() -> None:
     # sin esperar a la carga pesada de Facebook.
     while not _POLLING_STOP.wait(_intervalo_polling()):
         try:
+            # cargar_todo ya trae el presupuesto en el mismo llamado y detecta los
+            # cambios ahí, así que ya NO llamamos _revisar_cambios_presupuesto
+            # (que hacía un llamado extra por cada conjunto y disparaba el límite).
             cargar_todo(abrir_periodos=True)
-            _revisar_cambios_presupuesto()
             _set_estado(ultimo_polling=db.ahora())
         except Exception as e:
             _set_estado(ultimo_error=str(e))
