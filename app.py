@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v58 · 2026-08-21"
+APP_VERSION = "v59 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -127,10 +127,12 @@ def _fecha_corta(iso):
     return f"{d.day:02d} {meses[d.month - 1]} {d.year}"
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _insights_cache(date_preset: str, nivel: str = "ad",
                     since: str = "", until: str = ""):
-    """Cachea los insights de Facebook 2 min (por rango y nivel)."""
+    """Cachea los insights de Facebook 10 min (por rango y nivel).
+    Los datos base ya se refrescan cada 30 min en segundo plano, así que no hace
+    falta llamar cada 2 min mientras miras el Dashboard (evita el rate limit)."""
     tr = {"since": since, "until": until} if (since and until) else None
     return fb.obtener_insights(date_preset, nivel, time_range=tr)
 
@@ -303,20 +305,17 @@ def sidebar_filtros():
 
 
 def _resumen_pais(todos):
-    """Muestra gasto invertido por país (según insights del rango elegido)."""
-    rango_lbl = st.session_state.get("f_rango", "Hoy")
-    preset = {"Hoy": "today", "Últimos 7 días": "last_7d",
-              "Últimos 30 días": "last_30d", "Máximo": "maximum"}.get(rango_lbl, "today")
-    insights = _insights_cache(preset, "ad")
-    if not insights:
+    """Gasto por país en el sidebar. REUSA el mismo caché de 'Rendimiento por país'
+    (mismos argumentos) para no hacer ni un llamado extra a Facebook."""
+    ahora = db.ahora()
+    date_preset, since, until, _c, _h = _rango_actual(ahora)
+    filas = _gasto_pais_cache(date_preset, since, until)
+    if not filas:
         return
     gasto_pais = {}
-    for a in todos:
-        pais = a.get("cuenta_pais") or "—"
-        sp = insights.get(str(a["ad_id"]), {}).get("spend")
-        if sp:
-            sp_usd = sp * fx.tasa_a_usd(a.get("cuenta_moneda") or "USD")  # -> USD
-            gasto_pais[pais] = gasto_pais.get(pais, 0.0) + sp_usd
+    for r in filas:
+        nombre = fb.pais_nombre(r["country"])
+        gasto_pais[nombre] = gasto_pais.get(nombre, 0.0) + r["spend"] * fx.tasa_a_usd(r["moneda"])
     if not gasto_pais:
         return
     st.sidebar.markdown("**Gasto por país (USD)**")
@@ -558,7 +557,7 @@ def _rango_actual(ahora):
     return dp, "", "", cut, None
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _gasto_pais_cache(date_preset: str, since: str = "", until: str = ""):
     tr = {"since": since, "until": until} if (since and until) else None
     return fb.gasto_por_pais(date_preset, tr)
