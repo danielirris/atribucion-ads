@@ -163,25 +163,27 @@ def _descubrir_cuentas(api, env_account: Optional[str] = None) -> list:
     Devuelve [{"act_id","account_id","name"}] accesibles por el token.
     Si env_account está dado (conexión .env), usa solo esa cuenta.
     """
+    campos = ["account_id", "name", "business_country_code"]
     if env_account:
         try:
-            acc = AdAccount(env_account, api=api).api_get(fields=["account_id", "name"])
+            acc = AdAccount(env_account, api=api).api_get(fields=campos)
             return [{"act_id": env_account,
                      "account_id": acc.get("account_id"),
-                     "name": acc.get("name") or env_account}]
+                     "name": acc.get("name") or env_account,
+                     "pais": acc.get("business_country_code")}]
         except Exception:
             return [{"act_id": env_account, "account_id": env_account.replace("act_", ""),
-                     "name": env_account}]
+                     "name": env_account, "pais": None}]
     cuentas = []
-    accts = User(fbid="me", api=api).get_ad_accounts(
-        fields=["account_id", "name"], params={"limit": 200})
+    accts = User(fbid="me", api=api).get_ad_accounts(fields=campos, params={"limit": 200})
     for a in accts:
         acc_id = a.get("account_id")
         act_id = a.get("id") or (f"act_{acc_id}" if acc_id else None)
         if not act_id:
             continue
         cuentas.append({"act_id": act_id, "account_id": acc_id,
-                        "name": a.get("name") or act_id})
+                        "name": a.get("name") or act_id,
+                        "pais": a.get("business_country_code")})
     return cuentas
 
 
@@ -289,7 +291,7 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                     ad_id, nombre, adset_id=adset_id, activo=es_activo,
                     fecha_creacion=creado, effective_status=estado,
                     conexion_id=con["id"], cuenta_id=cta["act_id"],
-                    cuenta_nombre=cta["name"],
+                    cuenta_nombre=cta["name"], cuenta_pais=cta.get("pais"),
                 )
                 ids_vistos.append(ad_id)
 

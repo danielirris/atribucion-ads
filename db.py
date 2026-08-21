@@ -99,7 +99,14 @@ def init_db() -> None:
                 valor_venta   REAL NOT NULL,
                 hora_venta    TEXT NOT NULL,
                 periodo_id    INTEGER,
-                hoja_origen   TEXT
+                hoja_origen   TEXT,
+                ext_id        TEXT,
+                producto      TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS config_kv (
+                clave TEXT PRIMARY KEY,
+                valor TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_periodos_ad   ON periodos(ad_id);
@@ -116,6 +123,9 @@ def init_db() -> None:
     _asegurar_columna("anuncios", "conexion_id", "INTEGER")
     _asegurar_columna("anuncios", "cuenta_id", "TEXT")
     _asegurar_columna("anuncios", "cuenta_nombre", "TEXT")
+    _asegurar_columna("anuncios", "cuenta_pais", "TEXT")
+    _asegurar_columna("ventas", "ext_id", "TEXT")
+    _asegurar_columna("ventas", "producto", "TEXT")
 
 
 def _asegurar_columna(tabla: str, columna: str, tipo: str) -> None:
@@ -133,15 +143,15 @@ def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
                    activo: int = 1, fecha_creacion: Optional[str] = None,
                    effective_status: Optional[str] = None,
                    conexion_id: Optional[int] = None, cuenta_id: Optional[str] = None,
-                   cuenta_nombre: Optional[str] = None) -> None:
+                   cuenta_nombre: Optional[str] = None, cuenta_pais: Optional[str] = None) -> None:
     """Inserta o actualiza un anuncio."""
     with _LOCK, _conn() as conn:
         conn.execute(
             """
             INSERT INTO anuncios
                 (ad_id, nombre, adset_id, activo, fecha_creacion, effective_status,
-                 conexion_id, cuenta_id, cuenta_nombre, ultima_actualizacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 conexion_id, cuenta_id, cuenta_nombre, cuenta_pais, ultima_actualizacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ad_id) DO UPDATE SET
                 nombre               = excluded.nombre,
                 adset_id             = COALESCE(excluded.adset_id, anuncios.adset_id),
@@ -151,10 +161,11 @@ def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
                 conexion_id          = COALESCE(excluded.conexion_id, anuncios.conexion_id),
                 cuenta_id            = COALESCE(excluded.cuenta_id, anuncios.cuenta_id),
                 cuenta_nombre        = COALESCE(excluded.cuenta_nombre, anuncios.cuenta_nombre),
+                cuenta_pais          = COALESCE(excluded.cuenta_pais, anuncios.cuenta_pais),
                 ultima_actualizacion = excluded.ultima_actualizacion
             """,
             (str(ad_id), nombre, adset_id, activo, fecha_creacion, effective_status,
-             conexion_id, cuenta_id, cuenta_nombre, a_texto(ahora())),
+             conexion_id, cuenta_id, cuenta_nombre, cuenta_pais, a_texto(ahora())),
         )
         conn.commit()
 
@@ -351,17 +362,51 @@ def periodo_para_hora(ad_id: str, hora: datetime) -> Optional[dict]:
 #  VENTAS
 # --------------------------------------------------------------------------- #
 def insertar_venta(ad_id: str, valor_venta: float, hora_venta: datetime,
-                   periodo_id: Optional[int], hoja_origen: str) -> int:
+                   periodo_id: Optional[int], hoja_origen: str,
+                   ext_id: Optional[str] = None, producto: Optional[str] = None) -> int:
     with _LOCK, _conn() as conn:
         cur = conn.execute(
             """
-            INSERT INTO ventas (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO ventas
+                (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen, ext_id, producto)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (str(ad_id), float(valor_venta), a_texto(hora_venta), periodo_id, hoja_origen),
+            (str(ad_id), float(valor_venta), a_texto(hora_venta), periodo_id,
+             hoja_origen, ext_id, producto),
         )
         conn.commit()
         return cur.lastrowid
+
+
+def venta_existe(hoja_origen: str, ext_id: str) -> bool:
+    """True si ya se importó una venta con ese ext_id desde esa fuente (dedup)."""
+    if not ext_id:
+        return False
+    with _conn() as conn:
+        r = conn.execute(
+            "SELECT 1 FROM ventas WHERE hoja_origen = ? AND ext_id = ? LIMIT 1",
+            (hoja_origen, str(ext_id)),
+        ).fetchone()
+        return r is not None
+
+
+# --------------------------------------------------------------------------- #
+#  Configuración clave-valor (mapeos de Supabase/Excel, etc.)
+# --------------------------------------------------------------------------- #
+def get_config(clave: str, defecto: Optional[str] = None) -> Optional[str]:
+    with _conn() as conn:
+        r = conn.execute("SELECT valor FROM config_kv WHERE clave = ?", (clave,)).fetchone()
+        return r["valor"] if r else defecto
+
+
+def set_config(clave: str, valor: str) -> None:
+    with _LOCK, _conn() as conn:
+        conn.execute(
+            """INSERT INTO config_kv (clave, valor) VALUES (?, ?)
+               ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor""",
+            (clave, valor),
+        )
+        conn.commit()
 
 
 def resumen_ventas_periodo(periodo_id: int) -> dict:

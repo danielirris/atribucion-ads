@@ -20,11 +20,12 @@ import db
 import calculos
 import facebook_api as fb
 import excel_watcher as watcher
+import supabase_source as supa
 
 st.set_page_config(page_title="Atribución Facebook Ads", page_icon="📊", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v3 · 2026-08-20 · Conexiones arriba"
+APP_VERSION = "v4 · 2026-08-20 · Config + filtros + Supabase + tema oscuro"
 
 
 # --------------------------------------------------------------------------- #
@@ -178,10 +179,15 @@ def sidebar_estado():
     st.sidebar.caption(f"Ventas procesadas (sesión): {est_wt.get('ventas_procesadas', 0)}")
 
     st.sidebar.divider()
-    if st.sidebar.button("🔄 Actualizar ahora", use_container_width=True):
+    cta, ctb = st.sidebar.columns(2)
+    if cta.button("🔄 Actualizar", use_container_width=True):
+        try:
+            _insights_cache.clear()
+        except Exception:
+            pass
         st.rerun()
-
-    if st.sidebar.button("📥 Recargar anuncios de Facebook", use_container_width=True):
+    if ctb.button("📥 Recargar", use_container_width=True,
+                  help="Trae anuncios de todas las conexiones."):
         with st.spinner("Consultando Facebook (todas las conexiones)..."):
             r = fb.cargar_todo()
             try:
@@ -194,30 +200,52 @@ def sidebar_estado():
             st.sidebar.error("Errores: " + "; ".join(r["errores"])[:300])
         st.rerun()
 
-    if st.sidebar.button("📄 Importar TODO el Excel", use_container_width=True,
-                         help="Reprocesa todas las filas del Excel (útil la primera vez)."):
-        n = watcher.importar_todo()
-        st.sidebar.success(f"{n} ventas importadas.")
-        st.rerun()
-
-    st.sidebar.divider()
-    st.sidebar.subheader("⬆️ Subir ventas.xlsx (modo online)")
-    subido = st.sidebar.file_uploader(
-        "Sube o reemplaza el Excel", type=["xlsx"], key="uploader_excel",
-        help="En la nube no hay un Excel local que vigilar: sube aquí tu archivo "
-             "cada vez que agregues ventas. Solo se procesan las filas nuevas.")
-    if subido is not None:
-        if st.sidebar.button("Procesar Excel subido", use_container_width=True):
-            n = watcher.guardar_excel_subido(subido.getvalue(), reemplazar=True)
-            st.sidebar.success(f"{n} venta(s) nueva(s) procesada(s).")
-            st.rerun()
-
-    with st.sidebar.expander("🔧 Configuración (.env)"):
-        st.json(config.resumen_config())
+    sidebar_filtros()
 
     with st.sidebar.expander("📋 Eventos recientes"):
         for m in (est_fb.get("mensajes", []) + est_wt.get("mensajes", []))[:15]:
             st.caption(m)
+
+
+def sidebar_filtros():
+    """Filtros globales que afectan al Dashboard (se guardan en session_state)."""
+    st.sidebar.divider()
+    st.sidebar.markdown("### 🔎 Filtros")
+    todos = db.obtener_anuncios(solo_activos=False)
+    cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
+    paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
+
+    st.sidebar.radio("Estado", ["Activos", "Apagados", "Todos"],
+                     horizontal=True, key="f_estado")
+    st.sidebar.selectbox("Cuenta publicitaria", ["Todas"] + cuentas, key="f_cuenta")
+    st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
+    st.sidebar.selectbox("Rango (métricas Facebook)",
+                         ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo"],
+                         key="f_rango")
+
+    # Resumen de gasto invertido por país (rango actual).
+    _resumen_pais(todos)
+
+
+def _resumen_pais(todos):
+    """Muestra gasto invertido por país (según insights del rango elegido)."""
+    rango_lbl = st.session_state.get("f_rango", "Hoy")
+    preset = {"Hoy": "today", "Últimos 7 días": "last_7d",
+              "Últimos 30 días": "last_30d", "Máximo": "maximum"}.get(rango_lbl, "today")
+    insights = _insights_cache(preset)
+    if not insights:
+        return
+    gasto_pais = {}
+    for a in todos:
+        pais = a.get("cuenta_pais") or "—"
+        sp = insights.get(str(a["ad_id"]), {}).get("spend")
+        if sp:
+            gasto_pais[pais] = gasto_pais.get(pais, 0.0) + sp
+    if not gasto_pais:
+        return
+    st.sidebar.markdown("**💸 Gasto por país**")
+    for pais, g in sorted(gasto_pais.items(), key=lambda x: -x[1]):
+        st.sidebar.caption(f"{pais}: {_usd(g)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -231,32 +259,24 @@ def _es_activo(a: dict) -> bool:
 
 
 def seccion_vista_general():
-    st.header("1 · Anuncios")
+    st.header("Anuncios")
     ahora = db.ahora()
 
-    # --- Controles: filtro de estado + rango de métricas de Facebook ---
-    c1, c2, c3 = st.columns([3, 2, 2])
-    with c1:
-        filtro = st.radio("Mostrar", ["Activos", "Apagados", "Todos"],
-                          horizontal=True, key="filtro_estado")
-    with c2:
-        rango_lbl = st.selectbox(
-            "Rango (gasto/CPM/CTR/conv. de Facebook)",
-            ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo"], key="rango_ins")
+    # Los filtros viven en la barra lateral (session_state).
+    filtro = st.session_state.get("f_estado", "Activos")
+    rango_lbl = st.session_state.get("f_rango", "Hoy")
+    cuenta_sel = st.session_state.get("f_cuenta", "Todas")
+    pais_sel = st.session_state.get("f_pais", "Todos")
+
     RANGO = {
         "Hoy": ("today", ahora.replace(hour=0, minute=0, second=0, microsecond=0)),
         "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
         "Últimos 30 días": ("last_30d", ahora - timedelta(days=30)),
         "Máximo": ("maximum", None),
     }
-    date_preset, cutoff = RANGO[rango_lbl]
+    date_preset, cutoff = RANGO.get(rango_lbl, RANGO["Hoy"])
 
     todos = db.obtener_anuncios(solo_activos=False)
-    cuentas_disp = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
-    with c3:
-        cuenta_sel = st.selectbox("Cuenta / Business",
-                                  ["Todas"] + cuentas_disp, key="cuenta_sel")
-
     if filtro == "Activos":
         anuncios = [a for a in todos if _es_activo(a)]
     elif filtro == "Apagados":
@@ -265,9 +285,11 @@ def seccion_vista_general():
         anuncios = todos
     if cuenta_sel != "Todas":
         anuncios = [a for a in anuncios if (a.get("cuenta_nombre") or "—") == cuenta_sel]
+    if pais_sel != "Todos":
+        anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
 
-    st.caption(f"Ordenado por ROAS ↓ · rango: {rango_lbl} · "
-               f"{len(cuentas_disp)} cuenta(s) · mostrando {len(anuncios)} anuncio(s)")
+    st.caption(f"Ordenado por ROAS ↓ · estado: {filtro} · cuenta: {cuenta_sel} · "
+               f"país: {pais_sel} · rango: {rango_lbl} · {len(anuncios)} anuncio(s)")
 
     if not anuncios:
         st.info("No hay anuncios para este filtro. Usa **📥 Recargar anuncios de Facebook** "
@@ -881,28 +903,188 @@ def seccion_conexiones():
 # --------------------------------------------------------------------------- #
 #  Layout principal
 # --------------------------------------------------------------------------- #
-def main():
-    _gate_password()
+# --------------------------------------------------------------------------- #
+#  Tema visual (modo oscuro pulido)
+# --------------------------------------------------------------------------- #
+def _inject_css():
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+    :root{
+        --bg:#111319; --surface:#1d1f26; --surface2:#282a30; --stroke:rgba(255,255,255,.06);
+        --tint:#8cd2d7; --mint:#BFF2E2; --lav:#E6D5FF; --peri:#C7C4FF; --txt:#e2e2ea; --sub:#bec8c9;
+    }
+    html, body, [data-testid="stAppViewContainer"]{
+        background:
+          radial-gradient(1200px 500px at 100% -10%, rgba(191,242,226,.06), transparent 60%),
+          radial-gradient(900px 500px at -10% 10%, rgba(230,213,255,.05), transparent 55%),
+          var(--bg) !important;
+        color:var(--txt);
+    }
+    /* Tipografía de texto (sin tocar los iconos, para no romperlos) */
+    body, .stMarkdown, p, label, input, textarea, button, li, td, th{
+        font-family:'Inter',sans-serif;
+    }
+    h1,h2,h3,h4,.stMarkdown h1,.stMarkdown h2,.stMarkdown h3{
+        font-family:'Geist',sans-serif !important; letter-spacing:-.01em; color:var(--txt);
+    }
+    /* Restaurar la fuente de iconos de Material (Streamlit los usa en nav, botones, etc.) */
+    [class*="material-symbols"], [class*="material-icons"], .material-icons,
+    span[data-testid="stIconMaterial"], [data-testid="stIconMaterial"]{
+        font-family:'Material Symbols Outlined','Material Symbols Rounded','Material Icons' !important;
+    }
+    [data-testid="stSidebar"]{
+        background:linear-gradient(180deg,#15171d,#0f1115); border-right:1px solid var(--stroke);
+    }
+    /* Botones */
+    .stButton>button, .stDownloadButton>button, .stFormSubmitButton>button{
+        border-radius:12px; border:1px solid var(--stroke); font-weight:600;
+        background:var(--surface); color:var(--txt); transition:all .15s ease;
+    }
+    .stButton>button:hover{ border-color:var(--tint); color:var(--mint); }
+    .stButton>button[kind="primary"], .stFormSubmitButton>button[kind="primary"]{
+        background:linear-gradient(180deg,#a2e9ee,#8cd2d7); color:#00373a; border:none;
+        box-shadow:0 4px 18px rgba(140,210,215,.18);
+    }
+    /* Inputs */
+    [data-baseweb="input"] input, [data-baseweb="textarea"] textarea, .stTextInput input,
+    .stNumberInput input, [data-baseweb="select"]>div{
+        border-radius:10px !important;
+    }
+    /* Tarjetas / contenedores con borde y expanders */
+    [data-testid="stExpander"], div[data-testid="stVerticalBlockBorderWrapper"]{
+        background:rgba(29,31,38,.55); backdrop-filter:blur(14px);
+        border:1px solid var(--stroke) !important; border-radius:16px;
+    }
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"]{ gap:6px; }
+    .stTabs [data-baseweb="tab"]{ border-radius:10px 10px 0 0; }
+    /* Métricas */
+    [data-testid="stMetricValue"]{ font-family:'Geist',sans-serif; color:var(--mint); }
+    /* Dividers más sutiles */
+    hr{ border-color:var(--stroke) !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
+#  Página: Configuración (Excel + Cuentas + Conexiones + Supabase)
+# --------------------------------------------------------------------------- #
+def _panel_excel():
+    st.subheader("📄 Excel (ventas del socio)")
+    st.caption("Fuente 1: el Excel con columnas ID_Anuncio, Valor_Venta, Hora_Venta. "
+               "Súbelo aquí cada vez que se agreguen ventas; solo se procesan las nuevas.")
+    subido = st.file_uploader("Subir / reemplazar ventas.xlsx", type=["xlsx"], key="up_excel_cfg")
+    c1, c2 = st.columns(2)
+    if subido is not None and c1.button("Procesar Excel subido", use_container_width=True):
+        n = watcher.guardar_excel_subido(subido.getvalue(), reemplazar=True)
+        st.success(f"{n} venta(s) nueva(s) procesada(s).")
+    if c2.button("📄 Reimportar TODO el Excel", use_container_width=True,
+                 help="Reprocesa todas las filas (útil la primera vez)."):
+        n = watcher.importar_todo()
+        st.success(f"{n} ventas importadas.")
+
+
+def _panel_supabase():
+    st.subheader("🟩 Supabase (tus ventas)")
+    st.caption("Fuente 2: una tabla de Supabase con tus ventas. Se une con el Excel en la "
+               "misma tabla de ventas. Las credenciales van en variables de entorno "
+               "(SUPABASE_URL / SUPABASE_KEY).")
+    if not config.supabase_configurado():
+        st.warning("Faltan **SUPABASE_URL** y **SUPABASE_KEY** en las variables de entorno "
+                   "de EasyPanel. Agrégalas y redespliega.")
+    else:
+        st.success("Credenciales de Supabase detectadas ✅")
+
+    m = supa.get_mapeo()
+    with st.form("form_supabase"):
+        tabla = st.text_input("Nombre de la tabla", value=m[supa.K_TABLA])
+        c1, c2, c3 = st.columns(3)
+        col_ad = c1.text_input("Columna ID del anuncio", value=m[supa.K_ADID])
+        col_val = c2.text_input("Columna valor de venta", value=m[supa.K_VALOR])
+        col_hora = c3.text_input("Columna fecha/hora", value=m[supa.K_HORA])
+        c4, c5 = st.columns(2)
+        col_prod = c4.text_input("Columna producto (opcional)", value=m[supa.K_PRODUCTO])
+        col_id = c5.text_input("Columna id único (dedup)", value=m[supa.K_ID])
+        gcol1, gcol2 = st.columns(2)
+        probar = gcol1.form_submit_button("🔎 Probar y ver columnas")
+        guardar = gcol2.form_submit_button("💾 Guardar mapeo", type="primary")
+
+    if guardar:
+        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id)
+        st.success("Mapeo guardado.")
+    if probar:
+        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id)
+        r = supa.probar_conexion()
+        if r["ok"]:
+            st.success(f"Conectado ✅ Columnas de tu tabla: {', '.join(r['columnas'])}")
+            if r["muestra"]:
+                st.dataframe(pd.DataFrame(r["muestra"]), use_container_width=True, hide_index=True)
+        else:
+            st.error(f"❌ {r['error']}")
+
+    if st.button("🔄 Sincronizar ventas de Supabase ahora", type="primary"):
+        r = supa.sincronizar()
+        if r["ok"]:
+            msg = f"✅ {r['insertadas']} venta(s) importada(s) de Supabase."
+            if r["sin_periodo"]:
+                msg += f" ({r['sin_periodo']} sin período/anuncio activo a esa hora)."
+            st.success(msg)
+        else:
+            st.error(f"❌ {r['error']}")
+
+
+def _panel_cuentas():
+    st.subheader("🗂️ Cuentas publicitarias detectadas")
+    todos = db.obtener_anuncios(solo_activos=False)
+    if not todos:
+        st.info("Aún no hay cuentas. Agrega una conexión y pulsa **Recargar** en la barra lateral.")
+        return
+    filas = {}
+    for a in todos:
+        c = a.get("cuenta_nombre") or "—"
+        if c not in filas:
+            filas[c] = {"Cuenta": c, "País": a.get("cuenta_pais") or "—",
+                        "Anuncios": 0, "Activos": 0}
+        filas[c]["Anuncios"] += 1
+        if _es_activo(a):
+            filas[c]["Activos"] += 1
+    st.dataframe(pd.DataFrame(list(filas.values())),
+                 use_container_width=True, hide_index=True)
+
+
+def pagina_configuracion():
+    st.title("⚙️ Configuración")
+    st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase) y revisa "
+               "tus cuentas.")
+    tabs = st.tabs(["🔌 Conexiones", "📄 Excel", "🟩 Supabase", "🗂️ Cuentas"])
+    with tabs[0]:
+        seccion_conexiones()
+    with tabs[1]:
+        _panel_excel()
+    with tabs[2]:
+        _panel_supabase()
+    with tabs[3]:
+        _panel_cuentas()
+
+
+# --------------------------------------------------------------------------- #
+#  Página: Dashboard
+# --------------------------------------------------------------------------- #
+def pagina_dashboard():
     top1, top2 = st.columns([5, 1])
     with top1:
-        st.title("📊 Atribución de ventas · Facebook Ads")
+        st.title("📊 Dashboard")
         st.caption(f"Última actualización: {db.a_texto(db.ahora())}")
     with top2:
         st.write("")
         st.write("")
-        if st.button("🔄 Actualizar", use_container_width=True, type="primary",
-                     help="Refresca la vista y las métricas de Facebook cuando tú quieras."):
+        if st.button("🔄 Actualizar", use_container_width=True, type="primary"):
             try:
                 _insights_cache.clear()
             except Exception:
                 pass
             st.rerun()
-
-    sidebar_estado()
-
-    # Conexiones al inicio (es el primer paso de configuración).
-    seccion_conexiones()
-    st.divider()
 
     seccion_vista_general()
     st.divider()
@@ -917,5 +1099,18 @@ def main():
     seccion_manual()
 
 
-if __name__ == "__main__":
-    main()
+# --------------------------------------------------------------------------- #
+#  Entrada principal (navegación por páginas)
+# --------------------------------------------------------------------------- #
+def main():
+    _gate_password()
+    _inject_css()
+    sidebar_estado()
+    nav = st.navigation([
+        st.Page(pagina_dashboard, title="Dashboard", icon=":material/dashboard:", default=True),
+        st.Page(pagina_configuracion, title="Configuración", icon=":material/settings:"),
+    ])
+    nav.run()
+
+
+main()

@@ -5,3 +5,4 @@ watchdog>=3.0
 facebook-business>=19.0
 plotly>=5.18
 python-dotenv>=1.0
+requests>=2.31

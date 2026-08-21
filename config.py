@@ -47,6 +47,16 @@ POLLING_INTERVAL_SEG = int(os.getenv("POLLING_INTERVAL_SEG", "300"))
 # recomendado en un dominio público, ya que puede mover presupuestos reales).
 APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
 
+# --- Supabase (2ª fuente de ventas) ---
+# La URL del proyecto y la API key van como env vars (secretas). La tabla y el
+# mapeo de columnas se configuran dentro de la app (Configuración → Supabase).
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+
+
+def supabase_configurado() -> bool:
+    return bool(SUPABASE_URL and SUPABASE_KEY)
+
 # Minutos en un día (para el cálculo de gasto estimado)
 MINUTOS_POR_DIA = 1440
 
