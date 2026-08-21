@@ -252,6 +252,20 @@ def marcar_inactivos(ids_activos: list) -> None:
         conn.commit()
 
 
+def set_estado_ads(ad_ids: list, activar: bool) -> None:
+    """Marca varios anuncios como ACTIVE/PAUSED localmente (tras cambiarlos en FB)."""
+    if not ad_ids:
+        return
+    estado = "ACTIVE" if activar else "PAUSED"
+    activo = 1 if activar else 0
+    with _LOCK, _conn() as conn:
+        ph = ",".join("?" for _ in ad_ids)
+        conn.execute(
+            f"UPDATE anuncios SET activo = ?, effective_status = ? WHERE ad_id IN ({ph})",
+            [activo, estado, *[str(a) for a in ad_ids]])
+        conn.commit()
+
+
 def obtener_anuncios(solo_activos: bool = False) -> list:
     with _conn() as conn:
         q = "SELECT * FROM anuncios"

@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v15 · 2026-08-20"
+APP_VERSION = "v16 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -276,6 +276,8 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
 
     # Moneda en la que vienen las ventas (Excel/Supabase): 'auto' = la de la cuenta.
     moneda_ventas_cfg = db.get_config("moneda_ventas", "auto")
+    # Fuente de ventas del dashboard: 'propias' (Excel/Supabase/Sheets) o 'meta' (pixel).
+    origen_ventas = db.get_config("origen_ventas", "propias")
 
     grupos = {}
     for a in anuncios:
@@ -305,9 +307,17 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         moneda_v = moneda_cuenta if moneda_ventas_cfg == "auto" else moneda_ventas_cfg
         rate_v = _rate(moneda_v)
 
-        num = sum(ventas_agg.get(x["ad_id"], {}).get("num_ventas", 0) for x in ads)
-        ingresos_nat = sum(ventas_agg.get(x["ad_id"], {}).get("ingreso_total", 0.0) for x in ads)
-        ingresos = ingresos_nat * rate_v  # -> USD
+        ins = insights.get(g["ins_key"], {}) if g["ins_key"] else {}
+
+        # Fuente de ventas: propias (Excel/Supabase/Sheets) o Meta (compras del pixel).
+        if origen_ventas == "meta":
+            num = int(ins.get("compras") or 0)
+            ingresos_nat = float(ins.get("compras_valor") or 0.0)
+            ingresos = ingresos_nat * rate_c  # compras de Meta vienen en moneda de la cuenta
+        else:
+            num = sum(ventas_agg.get(x["ad_id"], {}).get("num_ventas", 0) for x in ads)
+            ingresos_nat = sum(ventas_agg.get(x["ad_id"], {}).get("ingreso_total", 0.0) for x in ads)
+            ingresos = ingresos_nat * rate_v  # -> USD
 
         if nivel == "campaign":
             vistos, presup_nat, hay = set(), 0.0, False
@@ -325,7 +335,6 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             presup_nat = _presupuesto_ad(ads[0]["ad_id"])
         presupuesto = (presup_nat * rate_c) if presup_nat is not None else None
 
-        ins = insights.get(g["ins_key"], {}) if g["ins_key"] else {}
         spend_nat = ins.get("spend")
         spend = (spend_nat * rate_c) if spend_nat is not None else None
         if spend_nat is not None:
@@ -336,11 +345,19 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         gasto = gasto_nat * rate_c
 
         cpm = (ins.get("cpm") * rate_c) if ins.get("cpm") is not None else None
-        costo_conv = (ins.get("costo_conversacion") * rate_c) if ins.get("costo_conversacion") is not None else None
+        costo_conv_nat = ins.get("costo_conversacion")
+        costo_conv = (costo_conv_nat * rate_c) if costo_conv_nat is not None else None
 
         roas = (ingresos / gasto) if gasto and gasto > 0 else 0.0
         activos = sum(1 for x in ads if _es_activo(x))
         rep = ads[0]
+        # Objeto a prender/apagar según el nivel de la vista.
+        if nivel == "campaign":
+            status_obj = rep.get("campaign_id")
+        elif nivel == "adset":
+            status_obj = rep.get("adset_id")
+        else:
+            status_obj = rep["ad_id"]
         filas.append({
             "nombre": g["nombre"], "sub": g["sub"], "cuenta": g["cuenta"],
             "moneda": moneda_cuenta, "rate_c": rate_c,
@@ -351,14 +368,16 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "cpm": cpm, "ctr": ins.get("ctr"),
             "num": num, "ingresos": ingresos, "ingresos_nat": ingresos_nat,
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
-            "conv": ins.get("conversaciones"), "costo_conv": costo_conv,
-            # datos para acciones (modificar presupuesto / duplicar)
+            "conv": ins.get("conversaciones"),
+            "costo_conv": costo_conv, "costo_conv_nat": costo_conv_nat,
+            # datos para acciones (modificar presupuesto / duplicar / prender-apagar)
             "ad_rep": rep["ad_id"], "ad_ids": [x["ad_id"] for x in ads],
             "adset_rep": rep.get("adset_id"),
             "conexion_id": rep.get("conexion_id"),
             "budget_obj_id": rep.get("budget_obj_id") or rep.get("adset_id"),
             "budget_nivel": rep.get("budget_nivel") or "adset",
             "cuenta_id": rep.get("cuenta_id"), "cuenta_nombre": rep.get("cuenta_nombre"),
+            "status_obj_id": status_obj, "status_nivel": nivel,
         })
     filas.sort(key=lambda f: f["roas"], reverse=True)
     return filas
@@ -509,8 +528,11 @@ def seccion_vista_general():
 
     resumen_cta = "todas" if not cuentas_sel else f"{len(cuentas_sel)} cuenta(s)"
     resumen_bus = "todos" if not business_sel else f"{len(business_sel)} business"
+    origen = db.get_config("origen_ventas", "propias")
+    origen_lbl = "Meta (pixel)" if origen == "meta" else "tus ventas"
     st.caption(f"Ver por: {nivel_lbl} · estado: {filtro} · business: {resumen_bus} · "
-               f"cuentas: {resumen_cta} · país: {pais_sel} · rango: {rango_lbl} · valores en USD")
+               f"cuentas: {resumen_cta} · país: {pais_sel} · rango: {rango_lbl} · "
+               f"ventas: {origen_lbl} · valores en USD")
 
     if not anuncios:
         st.info("No hay datos para este filtro. En la barra lateral (o arriba) pulsa **Recargar** "
@@ -543,6 +565,9 @@ def _estado_cell(f, nivel):
 
 def _render_lista_nativa(filas, nivel):
     esc = _html.escape
+    _msg = st.session_state.pop("_estado_msg", None)
+    if _msg:
+        (st.success if _msg[0] == "ok" else st.error)(_msg[1])
     primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
     labels = [primera, "Estado", "Cuenta", "Presupuesto", "Gasto", "CPM/CTR", "Ventas",
               "Ingresos", "Ganancia", "ROAS", "Conv.", "Costo/conv", "!"]
@@ -552,11 +577,13 @@ def _render_lista_nativa(filas, nivel):
         f'.gr .h2{{color:#8fd6db;font-size:11.5px;font-weight:700;text-transform:uppercase;'
         f'letter-spacing:.04em;}}</style>', unsafe_allow_html=True)
 
-    hc = st.columns([13, 0.75, 0.75])
+    ACC = [12.2, 0.7, 0.7, 0.7]
+    hc = st.columns(ACC)
     hc[0].markdown('<div class="gr">' + "".join(f'<div class="h2">{l}</div>' for l in labels)
                    + '</div>', unsafe_allow_html=True)
-    hc[1].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
-    hc[2].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
+    hc[1].markdown('<div class="h2" style="text-align:center">On/Off</div>', unsafe_allow_html=True)
+    hc[2].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
+    hc[3].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
 
     for f in filas:
         g = f["ganancia"]
@@ -564,7 +591,8 @@ def _render_lista_nativa(filas, nivel):
         cpm = _usd(f["cpm"]) if f["cpm"] is not None else "—"
         ctr = f'{f["ctr"]:.2f}%' if f["ctr"] is not None else "—"
         conv = int(f["conv"]) if f["conv"] is not None else "—"
-        costoc = _usd(f["costo_conv"]) if f.get("costo_conv") is not None else "—"
+        costoc = (_money_html(f["costo_conv"], f.get("costo_conv_nat"), f["moneda"])
+                  if f.get("costo_conv") is not None else '<div class="big">—</div>')
         # Alerta: gastando y con ROAS bajo (< 1.5x)
         alerta = bool(f["gasto"] and f["gasto"] > 0 and f["roas"] < 1.5)
         if alerta:
@@ -575,9 +603,12 @@ def _render_lista_nativa(filas, nivel):
             alerta_cell = f'<span class="alert-badge" title="{esc(msg)}">!</span>'
         else:
             alerta_cell = '<span class="ok-dot" title="Sin alertas"></span>'
+        nombre_html = (f'<div class="big">{esc(str(f["nombre"]))[:44]}</div>'
+                       f'<div class="sub">{esc(str(f["sub"]))[:18]}</div>')
+        if alerta:
+            nombre_html = f'<div class="name-alert">{nombre_html}</div>'
         cells = [
-            f'<div class="big">{esc(str(f["nombre"]))[:44]}</div>'
-            f'<div class="sub">{esc(str(f["sub"]))[:18]}</div>',
+            nombre_html,
             _estado_cell(f, nivel),
             f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>',
             _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
@@ -589,18 +620,36 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
             f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>',
             f'<div class="big">{conv}</div>',
-            f'<div class="big">{costoc}</div>',
+            costoc,
             alerta_cell,
         ]
-        clase = "gr alerta" if alerta else "gr"
-        row_html = f'<div class="{clase}">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
-        rc = st.columns([13, 0.75, 0.75], vertical_alignment="center")
+        row_html = '<div class="gr">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
+        rc = st.columns(ACC, vertical_alignment="center")
         rc[0].markdown(row_html, unsafe_allow_html=True)
-        with rc[1].popover("", icon=":material/edit:"):
+        rc[1].toggle(" ", value=(f["activos"] > 0), key=f"tg_{f['sub']}",
+                     on_change=_toggle_estado_cb, args=(f,),
+                     label_visibility="collapsed",
+                     help="Prender / Apagar en Facebook")
+        with rc[2].popover("", icon=":material/edit:"):
             _pop_presupuesto(f)
-        with rc[2].popover("", icon=":material/content_copy:"):
+        with rc[3].popover("", icon=":material/content_copy:"):
             _pop_duplicar(f)
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
+
+
+def _toggle_estado_cb(f):
+    """Prende/apaga en Facebook al mover el toggle."""
+    key = f"tg_{f['sub']}"
+    activar = bool(st.session_state.get(key))
+    r = fb.cambiar_estado(f["status_obj_id"], f.get("status_nivel", "ad"),
+                          activar, f.get("conexion_id"))
+    if r["ok"]:
+        db.set_estado_ads(f["ad_ids"], activar)
+        st.session_state["_estado_msg"] = ("ok",
+            f"{f['nombre']}: {'activado' if activar else 'pausado'} en Facebook.")
+    else:
+        st.session_state[key] = not activar  # revertir el toggle
+        st.session_state["_estado_msg"] = ("err", f"No se pudo cambiar el estado: {r['error']}")
 
 
 def _pop_presupuesto(f):
@@ -676,9 +725,9 @@ table.ads tbody tr:hover td { background:linear-gradient(90deg, rgba(140,210,215
 .big { font-size:15px; font-weight:600; color:#f2f4f8; line-height:1.2; }
 .sub { font-size:12px; color:#9aa7b6; }
 .m-mint{ color:#BFF2E2; } .m-lav{ color:#E6D5FF; } .m-peri{ color:#C7C4FF; }
-/* Alerta por fila */
-.gr.alerta{ background:linear-gradient(90deg, rgba(239,68,68,.12), rgba(239,68,68,.03));
-    border-radius:10px; }
+/* Alerta: solo el nombre, con difuminado rojo hacia la derecha */
+.name-alert{ background:linear-gradient(90deg, rgba(239,68,68,.30), rgba(239,68,68,0) 88%);
+    border-radius:8px; padding:3px 10px; margin:-3px -10px; }
 .alert-badge{ display:inline-flex; align-items:center; justify-content:center;
     width:20px; height:20px; border-radius:50%; background:#ef4444; color:#fff;
     font-weight:800; font-size:12px; cursor:help; box-shadow:0 0 10px rgba(239,68,68,.4); }
@@ -1561,6 +1610,19 @@ def _panel_moneda():
     else:
         st.info("Aún no se detecta la moneda de tus cuentas. Pulsa **Recargar** en la barra "
                 "lateral para traerla de Facebook.")
+
+    st.divider()
+    st.markdown("**Fuente de las ventas del dashboard**")
+    st.caption("De dónde salen las columnas Ventas e Ingresos: tus ventas (Excel/Supabase/"
+               "Google Sheets) o las **compras que reporta Meta** (pixel).")
+    origen_actual = db.get_config("origen_ventas", "propias")
+    op = {"propias": "Mis ventas (Excel/Supabase/Sheets)", "meta": "Meta (compras del pixel)"}
+    sel_o = st.radio("Fuente de ventas", list(op.keys()),
+                     index=list(op.keys()).index(origen_actual) if origen_actual in op else 0,
+                     format_func=lambda k: op[k], horizontal=True, key="sel_origen")
+    if st.button("Guardar fuente de ventas", type="primary"):
+        db.set_config("origen_ventas", sel_o)
+        st.success("Guardado.")
 
     st.divider()
     st.markdown("**Moneda de las ventas (Excel/Supabase)**")

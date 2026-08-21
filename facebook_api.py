@@ -57,6 +57,13 @@ MSG_ACTION_TYPES = [t.strip() for t in
                     os.getenv("MSG_ACTION_TYPES", ",".join(_MSG_DEFAULT)).split(",")
                     if t.strip()]
 
+# Tipos de acción que cuentan como COMPRA (para las ventas/ingresos de Meta).
+PURCHASE_ACTION_TYPES = {
+    "purchase", "omni_purchase", "offsite_conversion.fb_pixel_purchase",
+    "onsite_web_purchase", "onsite_conversion.purchase",
+    "web_in_store_purchase", "onsite_web_app_purchase",
+}
+
 # Estado compartido con la UI.
 _ESTADO_LOCK = threading.Lock()
 ESTADO = {
@@ -490,7 +497,7 @@ def obtener_insights(date_preset: str = "today", nivel: str = "ad",
                 filas = AdAccount(cta["act_id"], api=api).get_insights(
                     params=params,
                     fields=[id_field, "spend", "cpm", "ctr", "impressions",
-                            "clicks", "actions"])
+                            "clicks", "actions", "action_values"])
             except Exception as e:
                 _log(f"Insights {cta['name']}: {e}")
                 continue
@@ -500,9 +507,17 @@ def obtener_insights(date_preset: str = "today", nivel: str = "ad",
                     continue
                 spend = _to_float(row.get("spend"))
                 conv = 0.0
+                compras = 0.0
                 for a in (row.get("actions") or []):
-                    if a.get("action_type") in MSG_ACTION_TYPES:
+                    at = a.get("action_type")
+                    if at in MSG_ACTION_TYPES:
                         conv += _to_float(a.get("value"))
+                    if at in PURCHASE_ACTION_TYPES:
+                        compras += _to_float(a.get("value"))
+                compras_valor = 0.0
+                for a in (row.get("action_values") or []):
+                    if a.get("action_type") in PURCHASE_ACTION_TYPES:
+                        compras_valor += _to_float(a.get("value"))
                 resultado[str(ad_id)] = {
                     "spend": spend, "cpm": _to_float(row.get("cpm")),
                     "ctr": _to_float(row.get("ctr")),
@@ -510,6 +525,7 @@ def obtener_insights(date_preset: str = "today", nivel: str = "ad",
                     "clicks": _to_float(row.get("clicks")),
                     "conversaciones": conv,
                     "costo_conversacion": (spend / conv) if conv > 0 else None,
+                    "compras": compras, "compras_valor": compras_valor,
                 }
     return resultado
 
@@ -596,6 +612,35 @@ def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float,
                                     conexion_id: Optional[int] = None) -> dict:
     """Compat: actualiza el presupuesto del conjunto."""
     return actualizar_presupuesto(adset_id, "adset", nuevo_monto, conexion_id)
+
+
+def cambiar_estado(obj_id: str, nivel: str, activar: bool,
+                   conexion_id: Optional[int] = None) -> dict:
+    """
+    Prende (ACTIVE) o apaga (PAUSED) un anuncio / conjunto / campaña en Facebook.
+    Devuelve {"ok": bool, "error": str|None}.
+    """
+    if not SDK_DISPONIBLE:
+        return {"ok": False, "error": f"SDK no disponible: {SDK_ERROR_IMPORT}"}
+    if not obj_id:
+        return {"ok": False, "error": "Falta el identificador del objeto."}
+    api = _api_para_conexion(conexion_id)
+    if api is None:
+        return {"ok": False, "error": "No hay token para la conexión de este anuncio."}
+    estado = "ACTIVE" if activar else "PAUSED"
+    try:
+        if nivel == "campaign":
+            Campaign(obj_id, api=api).api_update(params={"status": estado})
+        elif nivel == "adset":
+            AdSet(obj_id, api=api).api_update(params={"status": estado})
+        else:
+            Ad(obj_id, api=api).api_update(params={"status": estado})
+        _log(f"{nivel} {obj_id} → {estado}.")
+        return {"ok": True, "error": None}
+    except FacebookRequestError as e:
+        return {"ok": False, "error": _fmt_fb_error(e)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 # --------------------------------------------------------------------------- #
