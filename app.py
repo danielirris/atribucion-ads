@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v53 · 2026-08-21"
+APP_VERSION = "v54 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -1020,10 +1020,16 @@ def _render_lista_nativa(filas, nivel):
                         help=_perf_help_text(f, ahora)):
             st.session_state["info_row"] = f
             _dialog_info()
-        with rc[3].popover("", icon=":material/edit:"):
-            _pop_presupuesto(f)
-        with rc[4].popover("", icon=":material/content_copy:"):
-            _pop_duplicar(f)
+        # Presupuesto y Duplicar: botones (no popovers) que abren un diálogo —
+        # los popovers no se renderizaban en columnas angostas.
+        if rc[3].button("", icon=":material/edit:", key=f"presb_{f['sub']}",
+                        help="Modificar presupuesto"):
+            st.session_state["pres_row"] = f
+            _dialog_presupuesto()
+        if rc[4].button("", icon=":material/content_copy:", key=f"dupb_{f['sub']}",
+                        help="Duplicar anuncio"):
+            st.session_state["dup_row"] = f
+            _dialog_duplicar()
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
 
@@ -1112,6 +1118,20 @@ def _dialog_info():
     if not serie:
         st.caption("El gasto por día se llena cuando hay conexión de Facebook. Los ingresos "
                    "salen de tus ventas importadas.")
+
+
+@st.dialog("Modificar presupuesto")
+def _dialog_presupuesto():
+    f = st.session_state.get("pres_row")
+    if f:
+        _pop_presupuesto(f)
+
+
+@st.dialog("Duplicar anuncio")
+def _dialog_duplicar():
+    f = st.session_state.get("dup_row")
+    if f:
+        _pop_duplicar(f)
 
 
 def _toggle_estado_cb(f):
