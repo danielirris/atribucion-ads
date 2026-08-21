@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v29 · 2026-08-21"
+APP_VERSION = "v30 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -207,8 +207,6 @@ def sidebar_filtros():
 
     st.sidebar.text_input("Buscar (anuncio, conjunto o campaña)", key="f_buscar",
                           placeholder="nombre o ID...")
-    st.sidebar.radio("Estado", ["Activos", "Apagados", "Todos"],
-                     horizontal=True, key="f_estado")
     st.sidebar.multiselect("Business", business, key="f_business",
                            placeholder="Todos los Business")
     st.sidebar.multiselect("Cuentas publicitarias", cuentas, key="f_cuenta",
@@ -222,17 +220,6 @@ def sidebar_filtros():
                                placeholder="Todos los productos",
                                help="Filtra por producto (según el nombre de la campaña).")
     st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
-    st.sidebar.selectbox("Rango de fechas",
-                         ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
-                          "Máximo", "Personalizado"],
-                         key="f_rango")
-    if st.session_state.get("f_rango") == "Personalizado":
-        hoy = db.ahora().date()
-        st.sidebar.date_input(
-            "Elige el rango (desde – hasta)",
-            value=(hoy - timedelta(days=7), hoy),
-            format="DD/MM/YYYY", key="f_rango_pers",
-            help="Haz clic para abrir el calendario: elige el día de inicio y luego el de fin.")
 
     _resumen_pais(todos)
 
@@ -365,6 +352,7 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         costo_conv = (costo_conv_nat * rate_c) if costo_conv_nat is not None else None
 
         roas = (ingresos / gasto) if gasto and gasto > 0 else 0.0
+        costo_venta = (gasto / num) if num else 0.0
         activos = sum(1 for x in ads if _es_activo(x))
         rep = ads[0]
         # Objeto a prender/apagar según el nivel de la vista.
@@ -374,6 +362,19 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             status_obj = rep.get("adset_id")
         else:
             status_obj = rep["ad_id"]
+
+        # Datos "desde la última modificación de presupuesto" (período abierto del rep).
+        ab = db.periodo_abierto(rep["ad_id"])
+        ad_ids_grupo = [x["ad_id"] for x in ads]
+        if ab:
+            inicio_mod = db.a_fecha(ab["hora_inicio"])
+            mins = max(0.0, (ahora - inicio_mod).total_seconds() / 60.0) if inicio_mod else 0.0
+            gmod_nat = (float(ab["presupuesto"]) / config.MINUTOS_POR_DIA) * mins
+            imod_nat = db.ventas_suma(ad_ids_grupo, inicio_mod)["ingreso_nat"]
+            roas_mod = (imod_nat / gmod_nat) if gmod_nat > 0 else 0.0
+        else:
+            inicio_mod, gmod_nat, imod_nat, roas_mod = None, 0.0, 0.0, 0.0
+
         filas.append({
             "nombre": g["nombre"], "sub": g["sub"], "cuenta": g["cuenta"],
             "moneda": moneda_cuenta, "rate_c": rate_c,
@@ -381,9 +382,12 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "presupuesto": presupuesto, "presup_nat": presup_nat,
             "spend": spend, "gasto": gasto, "gasto_nat": gasto_nat,
             "pct": (spend / presupuesto * 100) if (spend is not None and presupuesto) else None,
-            "cpm": cpm, "ctr": ins.get("ctr"),
+            "cpm": cpm, "ctr": ins.get("ctr"), "costo_venta": costo_venta,
             "num": num, "ingresos": ingresos, "ingresos_nat": ingresos_nat,
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
+            "creado": rep.get("fecha_creacion"), "ult_mod": inicio_mod,
+            "roas_mod": roas_mod, "ingresos_mod": imod_nat * rate_v,
+            "gasto_mod": gmod_nat * rate_c,
             "conv": ins.get("conversaciones"),
             "impresiones": ins.get("impressions"), "clics": ins.get("clicks"),
             "spend_nat": spend_nat, "compras_meta": ins.get("compras"),
@@ -523,11 +527,23 @@ def seccion_por_pais():
 def seccion_vista_general():
     ahora = db.ahora()
 
-    # Control de nivel ARRIBA, bien visible (por defecto Conjuntos).
-    nivel_lbl = st.segmented_control(
-        "Ver por", ["Campaña", "Conjunto de anuncios", "Anuncio"],
-        default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
-        key="f_nivel", label_visibility="collapsed") or "Conjunto de anuncios"
+    # Controles ARRIBA: nivel, estado y rango de fechas.
+    ct1, ct2, ct3 = st.columns([2.3, 1.7, 1.7])
+    with ct1:
+        nivel_lbl = st.segmented_control(
+            "Ver por", ["Campaña", "Conjunto de anuncios", "Anuncio"],
+            default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
+            key="f_nivel") or "Conjunto de anuncios"
+    with ct2:
+        st.radio("Estado", ["Activos", "Apagados", "Todos"], horizontal=True, key="f_estado")
+    with ct3:
+        st.selectbox("Rango de fechas",
+                     ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
+                      "Máximo", "Personalizado"], key="f_rango")
+    if st.session_state.get("f_rango") == "Personalizado":
+        hoy = db.ahora().date()
+        st.date_input("Rango (desde – hasta)", value=(hoy - timedelta(days=7), hoy),
+                      format="DD/MM/YYYY", key="f_rango_pers")
     nivel = _NIVELES.get(nivel_lbl, "adset")
 
     filtro = st.session_state.get("f_estado", "Activos")
@@ -610,7 +626,7 @@ _COLS_SORT = {
     "gasto": ("gasto", False), "cpm": ("cpm", False), "num": ("num", False),
     "ingresos": ("ingresos", False), "ganancia": ("ganancia", False),
     "roas": ("roas", False), "conv": ("conv", False), "costo_conv": ("costo_conv", False),
-    "cuenta": ("cuenta", True),
+    "costo_venta": ("costo_venta", False), "cuenta": ("cuenta", True),
 }
 
 
@@ -679,11 +695,12 @@ def _render_totales(filas):
         'box-shadow:0 8px 24px rgba(0,0,0,.22);}'
         '.tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#93a4b8;}'
         '.tval{font-family:Geist,sans-serif;font-weight:700;font-size:20px;margin-top:4px;}'
-        '.tnat{font-size:11px;color:#93a4b8;margin-top:2px;}</style>'
+        '.tnat{font-family:Geist,sans-serif;font-size:15px;font-weight:600;'
+        'color:#aeb8c6;margin-top:3px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
 
 
-_GRID_TMPL = "2.9fr .7fr .9fr .95fr .95fr .85fr .5fr .95fr .95fr .55fr .6fr .8fr .4fr"
+_GRID_TMPL = ("3.2fr .9fr .8fr .9fr .55fr .85fr .8fr .55fr .85fr .95fr .85fr .6fr")
 
 
 def _estado_cell(f, nivel):
@@ -700,21 +717,23 @@ def _render_lista_nativa(filas, nivel):
     if _msg:
         (st.success if _msg[0] == "ok" else st.error)(_msg[1])
     primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
-    labels = [primera, "Estado", "Cuenta", "Presupuesto", "Gasto", "CPM/CTR", "Ventas",
-              "Ingresos", "Ganancia", "ROAS", "Conv.", "Costo/conv", "!"]
+    labels = [primera, "Cuenta", "Estado", "Presupuesto", "Conv.", "Costo/conv",
+              "CPM/CTR", "Ventas", "Costo/venta", "Ingresos", "Utilidad", "ROAS"]
     st.markdown(
         f'<style>.gr{{display:grid;grid-template-columns:{_GRID_TMPL};gap:12px;'
         f'align-items:center;padding:6px 4px;}}'
         f'.gr .h2{{color:#8fd6db;font-size:11.5px;font-weight:700;text-transform:uppercase;'
         f'letter-spacing:.04em;}}'
+        f'.meta-mod{{font-size:10.5px;color:#8b97a8;margin-top:2px;line-height:1.35;}}'
+        f'.meta-mod b{{color:#aeb8c6;font-weight:600;}}'
         f'.hlink{{color:#8fd6db!important;text-decoration:none;cursor:pointer;}}'
         f'.hlink:hover{{color:#BFF2E2!important;}}</style>', unsafe_allow_html=True)
 
     # Encabezados clicables para ordenar (usan query params).
     sort_c = st.query_params.get("sort", "roas")
     dir_c = st.query_params.get("dir", "desc")
-    keys = ["nombre", None, "cuenta", "presupuesto", "gasto", "cpm", "num",
-            "ingresos", "ganancia", "roas", "conv", "costo_conv", None]
+    keys = ["nombre", "cuenta", None, "presupuesto", "conv", "costo_conv",
+            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas"]
 
     def _hcell(label, key):
         if not key:
@@ -743,36 +762,41 @@ def _render_lista_nativa(filas, nivel):
         conv = int(f["conv"]) if f["conv"] is not None else "—"
         costoc = (_money_html(f["costo_conv"], f.get("costo_conv_nat"), f["moneda"])
                   if f.get("costo_conv") is not None else '<div class="big">—</div>')
-        # Alerta: gastando y con ROAS bajo (< 1.5x)
+        costov = (_money_html(f["costo_venta"], None, "USD")
+                  if f.get("costo_venta") else '<div class="big">—</div>')
+        # Alerta: gastando y con ROAS bajo (< 1.5x) -> nombre en rojo difuminado
         alerta = bool(f["gasto"] and f["gasto"] > 0 and f["roas"] < 1.5)
-        if alerta:
-            msg = (f"Alerta: ROAS {f['roas']:.2f}x por debajo de 1.5x. "
-                   f"Gasto {_usd(f['gasto'])}, ingresos {_usd(f['ingresos'])}, "
-                   f"{f['num']} venta(s), presupuesto {_usd(f['presupuesto'])}. "
-                   f"Considera bajar o pausar.")
-            alerta_cell = f'<span class="alert-badge" title="{esc(msg)}">!</span>'
-        else:
-            alerta_cell = '<span class="ok-dot" title="Sin alertas"></span>'
+        # Info de fechas y ROAS desde la última modificación de presupuesto.
+        creado = _fecha_corta(f.get("creado"))
+        umod = f.get("ult_mod")
+        ult_mod = _fecha_corta(umod.isoformat()) if umod else "—"
+        rmod = f.get("roas_mod") or 0.0
+        rmod_col = _roas_color(rmod)
+        meta_html = (
+            f'<div class="meta-mod">Creado <b>{creado}</b> · Últ. mod. <b>{ult_mod}</b></div>'
+            f'<div class="meta-mod">Desde mod.: ROAS '
+            f'<b style="color:{rmod_col}">{rmod:.2f}x</b> · '
+            f'fact. <b>{_usd(f.get("ingresos_mod") or 0)}</b> · '
+            f'gast. <b>{_usd(f.get("gasto_mod") or 0)}</b></div>')
         nombre_html = (f'<div class="big" style="white-space:normal;word-break:break-word">'
                        f'{esc(str(f["nombre"]))[:90]}</div>'
-                       f'<div class="sub">{esc(str(f["sub"]))[:22]}</div>')
+                       f'<div class="sub">{esc(str(f["sub"]))[:22]}</div>'
+                       f'{meta_html}')
         if alerta:
             nombre_html = f'<div class="name-alert">{nombre_html}</div>'
         cells = [
             nombre_html,
-            _estado_cell(f, nivel),
             f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>',
+            _estado_cell(f, nivel),
             _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
-            _money_html(f["gasto"], f["gasto_nat"], f["moneda"])
-            + ('<div class="sub">est.</div>' if f["spend"] is None else ''),
+            f'<div class="big">{conv}</div>',
+            costoc,
             f'<div class="big">{cpm}</div><div class="sub">{ctr} CTR</div>',
             f'<div class="big">{f["num"]}</div>',
+            costov,
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
             f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
             f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>',
-            f'<div class="big">{conv}</div>',
-            costoc,
-            alerta_cell,
         ]
         row_html = '<div class="gr">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
         rc = st.columns(ACC, vertical_alignment="center")
