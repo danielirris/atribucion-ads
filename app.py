@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v38 · 2026-08-21"
+APP_VERSION = "v39 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -2121,12 +2121,19 @@ def _timer_actualizacion():
         extra += f" · Uso API Facebook: {uso}%"
     if est.get("throttled"):
         extra += " · ⚠️ Facebook frenó el ritmo; reintentando en el próximo ciclo"
-    st.caption(f"🔄 Última actualización: {cuando} · automática {cad}{extra}")
+    # Sincronización de ventas (Sheets/Supabase): su propio hilo, más frecuente.
+    vent_check = db.get_config("ultima_sync_ventas", "") or ""
+    dtv = db.a_fecha(vent_check) if vent_check else None
+    if dtv:
+        extra += f" · Ventas revisadas {_fmt_hace(dtv, ahora)}"
+    st.caption(f"🔄 Anuncios: {cuando} · automática {cad}{extra}")
 
-    # Si llegaron datos nuevos desde el último render, refresca toda la vista.
+    # Si llegaron datos nuevos (anuncios o ventas) desde el último render, refresca.
+    vent_cambio = db.get_config("ventas_cambio", "") or ""
+    firma = f"{ult}|{vent_cambio}"
     prev = st.session_state.get("_ult_sync_visto")
-    st.session_state["_ult_sync_visto"] = ult
-    if prev is not None and prev != ult:
+    st.session_state["_ult_sync_visto"] = firma
+    if prev is not None and prev != firma:
         st.rerun()  # rerun de app (mantiene sesión), no recarga la página
 
 

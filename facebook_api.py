@@ -919,50 +919,96 @@ def _loop_polling() -> None:
     except Exception as e:
         _log(f"Fallo en carga inicial: {e}")
     # El intervalo se recalcula en cada vuelta para respetar el horario día/noche.
+    # Nota: la sincronización de ventas (Sheets/Supabase) va en su PROPIO hilo
+    # rápido (_loop_ventas), no aquí, para que las ventas se actualicen seguido
+    # sin esperar a la carga pesada de Facebook.
     while not _POLLING_STOP.wait(_intervalo_polling()):
         try:
             cargar_todo(abrir_periodos=True)
             _revisar_cambios_presupuesto()
-            _sincronizar_fuentes_ventas()
             _set_estado(ultimo_polling=db.ahora())
         except Exception as e:
             _set_estado(ultimo_error=str(e))
             _log(f"Error en polling: {e}\n{traceback.format_exc(limit=1)}")
 
 
-def _sincronizar_fuentes_ventas() -> None:
-    """Auto-sincroniza Google Sheets y Supabase (si están configurados)."""
+def _sincronizar_fuentes_ventas() -> int:
+    """Auto-sincroniza Google Sheets y Supabase (si están configurados).
+    Devuelve cuántas ventas nuevas insertó y actualiza marcas de tiempo."""
+    total = 0
     try:
         import gsheets
         if gsheets.get_url():
             r = gsheets.sincronizar()
-            if r.get("insertadas"):
-                _log(f"Google Sheets: {r['insertadas']} venta(s) nueva(s).")
+            n = r.get("insertadas") or 0
+            total += n
+            if n:
+                _log(f"Google Sheets: {n} venta(s) nueva(s).")
     except Exception as e:
         _log(f"Auto-sync Google Sheets: {e}")
     try:
         import supabase_source
         if config.supabase_configurado():
             r = supabase_source.sincronizar()
-            if r.get("insertadas"):
-                _log(f"Supabase: {r['insertadas']} venta(s) nueva(s).")
+            n = r.get("insertadas") or 0
+            total += n
+            if n:
+                _log(f"Supabase: {n} venta(s) nueva(s).")
     except Exception as e:
         _log(f"Auto-sync Supabase: {e}")
-    _set_estado(polling_activo=False)
+    # Marca de "última revisión de ventas" (para el timer); y "hubo cambio" solo
+    # si entraron ventas nuevas (para que la vista se refresque sola).
+    try:
+        db.set_config("ultima_sync_ventas", db.a_texto(db.ahora()))
+        if total:
+            db.set_config("ventas_cambio", db.a_texto(db.ahora()))
+    except Exception:
+        pass
+    return total
+
+
+# --- Hilo dedicado y rápido para las ventas (Sheets / Supabase) ------------ #
+# Cada pocos minutos revisa el Sheet, independiente de la carga de Facebook.
+VENTAS_INTERVAL_DIA = int(os.getenv("FB_VENTAS_INTERVAL", "120"))    # 2 min de día
+VENTAS_INTERVAL_NOCHE = int(os.getenv("FB_VENTAS_INTERVAL_NOCHE", "600"))  # 10 min de noche
+_VENTAS_THREAD = None
+_VENTAS_STOP = threading.Event()
+
+
+def _intervalo_ventas() -> int:
+    h = db.ahora().hour
+    de_noche = h >= HORA_INICIO_NOCHE or h < HORA_FIN_NOCHE
+    return VENTAS_INTERVAL_NOCHE if de_noche else VENTAS_INTERVAL_DIA
+
+
+def _loop_ventas() -> None:
+    # Primera revisión enseguida al arrancar (para que las ventas aparezcan pronto).
+    while True:
+        try:
+            _sincronizar_fuentes_ventas()
+        except Exception as e:
+            _log(f"Sync de ventas: {e}")
+        if _VENTAS_STOP.wait(_intervalo_ventas()):
+            break
 
 
 def iniciar_polling() -> None:
-    global _POLLING_THREAD
-    if _POLLING_THREAD and _POLLING_THREAD.is_alive():
-        return
-    _POLLING_STOP.clear()
-    _POLLING_THREAD = threading.Thread(target=_loop_polling, name="fb-polling", daemon=True)
-    _POLLING_THREAD.start()
-    _log("Hilo de polling de Facebook iniciado.")
+    global _POLLING_THREAD, _VENTAS_THREAD
+    if not (_POLLING_THREAD and _POLLING_THREAD.is_alive()):
+        _POLLING_STOP.clear()
+        _POLLING_THREAD = threading.Thread(target=_loop_polling, name="fb-polling", daemon=True)
+        _POLLING_THREAD.start()
+        _log("Hilo de polling de Facebook iniciado.")
+    if not (_VENTAS_THREAD and _VENTAS_THREAD.is_alive()):
+        _VENTAS_STOP.clear()
+        _VENTAS_THREAD = threading.Thread(target=_loop_ventas, name="ventas-sync", daemon=True)
+        _VENTAS_THREAD.start()
+        _log("Hilo de sincronización de ventas iniciado.")
 
 
 def detener_polling() -> None:
     _POLLING_STOP.set()
+    _VENTAS_STOP.set()
 
 
 # --------------------------------------------------------------------------- #
