@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v54 · 2026-08-21"
+APP_VERSION = "v55 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -169,25 +169,24 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 # --------------------------------------------------------------------------- #
 #  Barra lateral: estado de servicios
 # --------------------------------------------------------------------------- #
-def sidebar_estado(pagina: str = "dashboard"):
-    # Los controles de datos y los filtros solo aplican al Dashboard.
-    if pagina == "dashboard":
-        if st.sidebar.button("🔄 Recargar de Facebook", use_container_width=True, type="primary",
-                             help="Trae datos NUEVOS desde Facebook (anuncios, gasto, CPM). "
-                                  "Es lo más pesado; úsalo de vez en cuando. La app ya lo hace "
-                                  "sola cada 30 min, así que casi nunca lo necesitas."):
-            with st.spinner("Consultando Facebook (todas las conexiones)..."):
-                r = fb.cargar_todo()
-                try:
-                    _insights_cache.clear()
-                except Exception:
-                    pass
-            if r["num_anuncios"]:
-                st.sidebar.success(f"{r['num_anuncios']} anuncios de {r['num_cuentas']} cuenta(s).")
-            if r["errores"]:
-                st.sidebar.error("Errores: " + "; ".join(r["errores"])[:300])
-            st.rerun()
+def _recargar_facebook():
+    """Trae datos nuevos de Facebook (se usa desde el botón del top-right)."""
+    with st.spinner("Consultando Facebook (todas las conexiones)..."):
+        r = fb.cargar_todo()
+        try:
+            _insights_cache.clear()
+        except Exception:
+            pass
+    if r["num_anuncios"]:
+        st.toast(f"{r['num_anuncios']} anuncios de {r['num_cuentas']} cuenta(s).", icon="✅")
+    if r["errores"]:
+        st.error("Errores: " + "; ".join(r["errores"])[:300])
+    st.rerun()
 
+
+def sidebar_estado(pagina: str = "dashboard"):
+    # Los filtros solo aplican al Dashboard (los botones de datos van arriba a la derecha).
+    if pagina == "dashboard":
         sidebar_filtros()
 
 
@@ -256,6 +255,15 @@ def sidebar_filtros():
     """Filtros globales que afectan al Dashboard (se guardan en session_state)."""
     st.sidebar.divider()
     st.sidebar.markdown("### Filtros")
+    # Botón explícito para aplicar/refrescar con los filtros de la izquierda.
+    # (Los filtros ya se aplican solos al cambiarlos; este botón fuerza el refresco.)
+    if st.sidebar.button("🔍 Aplicar filtros", use_container_width=True, type="primary",
+                         help="Refresca la tabla y los totales con los filtros elegidos."):
+        try:
+            _insights_cache.clear()
+        except Exception:
+            pass
+        st.rerun()
     todos = db.obtener_anuncios(solo_activos=False)
     conexiones = db.obtener_conexiones()
     business = sorted({_alias_conexion(a.get("conexion_id"), conexiones) for a in todos})
@@ -636,18 +644,30 @@ def seccion_vista_general():
             f'background:{_bg} !important;border:1px solid {_bd} !important;'
             'color:#fff !important;}</style>', unsafe_allow_html=True)
     with ct3:
-        st.selectbox("Rango de fechas",
-                     ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
-                      "Máximo", "Personalizado"], key="f_rango")
+        rlbl = st.session_state.get("f_rango", "Hoy")
+        st.markdown('<div style="font-size:14px;color:#94a3b8;margin-bottom:1px">'
+                    'Rango de fechas</div>', unsafe_allow_html=True)
+        with st.popover(f"📅  {rlbl}", use_container_width=True):
+            st.caption("Atajos rápidos")
+            _atajos = [("Hoy", "Hoy"), ("Ayer", "Ayer"), ("Últimos 7 días", "7 días"),
+                       ("Este mes", "Este mes"), ("Últimos 30 días", "30 días"),
+                       ("Máximo", "Máximo")]
+            _qc = st.columns(3)
+            for _i, (_val, _lab) in enumerate(_atajos):
+                if _qc[_i % 3].button(_lab, use_container_width=True, key=f"rq_{_val}"):
+                    st.session_state["f_rango"] = _val
+                    st.rerun()
+            st.divider()
+            st.caption("O elige un rango en el calendario:")
+            _hoy = db.ahora().date()
+            _def = st.session_state.get("f_rango_pers") or (_hoy - timedelta(days=7), _hoy)
+            st.date_input("Desde – hasta", value=_def, format="DD/MM/YYYY", key="f_rango_pers")
+            if st.button("Usar este rango del calendario", use_container_width=True,
+                         type="primary", key="rq_custom"):
+                st.session_state["f_rango"] = "Personalizado"
+                st.rerun()
     with ct4:
         st.text_input("Buscar", key="f_buscar", placeholder="nombre o ID…")
-    # El calendario del rango personalizado va DEBAJO (ancho de columna).
-    if st.session_state.get("f_rango") == "Personalizado":
-        cp, _ = st.columns([1.4, 4])
-        with cp:
-            hoy = db.ahora().date()
-            st.date_input("Desde – hasta", value=(hoy - timedelta(days=7), hoy),
-                          format="DD/MM/YYYY", key="f_rango_pers")
     nivel = _NIVELES.get(nivel_lbl, "adset")
 
     filtro = st.session_state.get("f_estado") or "Activos"
@@ -2638,17 +2658,20 @@ def _panel_sync_ventas():
 
 
 def pagina_dashboard():
-    top1, top2 = st.columns([5, 1])
+    top1, top2 = st.columns([3.4, 1.6])
     with top1:
         st.title("Dashboard")
         _timer_actualizacion()
     with top2:
         st.write("")
-        st.write("")
-        if st.button("Actualizar vista", use_container_width=True, type="primary",
-                     help="RÁPIDO: recalcula los números con lo que ya está guardado "
-                          "(no llama a Facebook). Para traer datos NUEVOS de Facebook usa "
-                          "'Recargar de Facebook' en la barra lateral."):
+        # Los DOS botones de datos, arriba a la derecha, mismo estilo (gradiente).
+        b1, b2 = st.columns(2)
+        if b1.button("🔄 Recargar", use_container_width=True, type="primary",
+                     help="Trae datos NUEVOS de Facebook (anuncios, gasto, CPM). Es lo más "
+                          "pesado; la app ya lo hace sola cada 30 min."):
+            _recargar_facebook()
+        if b2.button("↻ Actualizar", use_container_width=True, type="primary",
+                     help="RÁPIDO: recalcula los números con lo ya guardado (no llama a Facebook)."):
             try:
                 _insights_cache.clear()
             except Exception:
