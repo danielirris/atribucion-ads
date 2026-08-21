@@ -12,6 +12,7 @@ Flujo:
 """
 import io
 import re
+import hashlib
 import unicodedata
 from datetime import datetime
 from typing import Optional
@@ -200,11 +201,26 @@ def sincronizar() -> dict:
                         dedup_col = c
                         break
         ins_hoja, dup, sin_val, sin_id, ceros = 0, 0, 0, 0, 0
+        firmas = {}  # contador de ocurrencias por huella de contenido (esta hoja)
+        # Columnas que definen una venta (para la huella de contenido). Se usan los
+        # valores CRUDOS del Sheet (no cambian salvo que edites el dato), así la
+        # huella es estable aunque reordenes filas o el software agregue al final.
+        cols_firma = [c for c in (cmap.get("id"), cmap.get("valor"),
+                                  cmap.get("hora"), cmap.get("pais")) if c]
         for i, (_, fila) in enumerate(dff.iterrows()):
             if dedup_col is not None and fila.get(dedup_col) is not None and str(fila.get(dedup_col)).strip():
+                # 1) Si hay una columna de ID único configurada y con valor, se usa.
                 ext_id = f"{nombre_hoja}:{str(fila.get(dedup_col)).strip()}"
             else:
-                ext_id = f"{nombre_hoja}#{i}"
+                # 2) Sin ID manual: HUELLA POR CONTENIDO + contador de ocurrencias.
+                #    Dos ventas idénticas (mismo anuncio, valor, hora, país) reciben
+                #    índices distintos (:0, :1, :2...), así no se pierden; y como la
+                #    huella no depende de la posición, reordenar/insertar no duplica.
+                partes = [str(fila.get(c)).strip() for c in cols_firma]
+                firma = hashlib.md5("|".join(partes).encode("utf-8")).hexdigest()[:16]
+                n = firmas.get(firma, 0)
+                firmas[firma] = n + 1
+                ext_id = f"{nombre_hoja}:h:{firma}:{n}"
             if ext_id in existentes or ext_id in nuevos:
                 dup += 1
                 continue

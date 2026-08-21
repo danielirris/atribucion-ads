@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v42 · 2026-08-21"
+APP_VERSION = "v43 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -1849,10 +1849,13 @@ def _panel_gsheets():
         o3, o4 = st.columns(2)
         ov_hora = o3.text_input("Columna de fecha/hora", value=ov["hora"], key="gs_ov_hora")
         ov_pais = o4.text_input("Columna de país", value=ov["pais"], key="gs_ov_pais")
-        st.caption("**Para evitar duplicados** (recomendado): escribe el nombre de una columna "
-                   "de tu Sheet con un **ID único por venta** (ej. número de orden). Así, aunque "
-                   "reordenes filas, no se duplica.")
-        ov_dedup = st.text_input("Columna de ID único (dedup)", value=gs.get_dedup(), key="gs_dedup")
+        st.caption("**Antiduplicados:** DÉJALO EN BLANCO y la app usará una **huella por "
+                   "contenido** (anuncio + valor + fecha + país) con contador de repetidos. "
+                   "No necesitas ningún ID único: aguanta que tu software agregue filas al final, "
+                   "que reordenes y hasta ventas idénticas. Solo escribe una columna aquí si de "
+                   "verdad tienes un ID único por venta y prefieres usarlo.")
+        ov_dedup = st.text_input("Columna de ID único (dedup) — opcional, mejor en blanco",
+                                 value=gs.get_dedup(), key="gs_dedup")
         ig_cero = st.checkbox("Ignorar ventas con valor 0", value=gs.get_ignora_cero(),
                               key="gs_ig_cero")
         if st.button("Guardar columnas manuales"):
