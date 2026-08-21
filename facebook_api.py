@@ -163,17 +163,18 @@ def _descubrir_cuentas(api, env_account: Optional[str] = None) -> list:
     Devuelve [{"act_id","account_id","name"}] accesibles por el token.
     Si env_account está dado (conexión .env), usa solo esa cuenta.
     """
-    campos = ["account_id", "name", "business_country_code"]
+    campos = ["account_id", "name", "business_country_code", "currency"]
     if env_account:
         try:
             acc = AdAccount(env_account, api=api).api_get(fields=campos)
             return [{"act_id": env_account,
                      "account_id": acc.get("account_id"),
                      "name": acc.get("name") or env_account,
-                     "pais": acc.get("business_country_code")}]
+                     "pais": acc.get("business_country_code"),
+                     "moneda": acc.get("currency")}]
         except Exception:
             return [{"act_id": env_account, "account_id": env_account.replace("act_", ""),
-                     "name": env_account, "pais": None}]
+                     "name": env_account, "pais": None, "moneda": None}]
     cuentas = []
     accts = User(fbid="me", api=api).get_ad_accounts(fields=campos, params={"limit": 200})
     for a in accts:
@@ -183,7 +184,8 @@ def _descubrir_cuentas(api, env_account: Optional[str] = None) -> list:
             continue
         cuentas.append({"act_id": act_id, "account_id": acc_id,
                         "name": a.get("name") or act_id,
-                        "pais": a.get("business_country_code")})
+                        "pais": a.get("business_country_code"),
+                        "moneda": a.get("currency")})
     return cuentas
 
 
@@ -286,18 +288,25 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                     total_activos += 1
 
                 presupuesto = None
+                pais_pauta = None
                 if adset_id:
                     if adset_id in cache_budget:
-                        presupuesto = cache_budget[adset_id]
+                        info = cache_budget[adset_id]
                     else:
-                        presupuesto = _leer_daily_budget_adset(adset_id, api)
-                        cache_budget[adset_id] = presupuesto
+                        info = _leer_adset_info(adset_id, api)
+                        cache_budget[adset_id] = info
+                    presupuesto = info.get("presupuesto")
+                    pais_pauta = info.get("pais")
+
+                # País: el del targeting del conjunto; si no, el de la cuenta.
+                pais = pais_pauta or cta.get("pais")
 
                 db.upsert_anuncio(
                     ad_id, nombre, adset_id=adset_id, activo=es_activo,
                     fecha_creacion=creado, effective_status=estado,
                     conexion_id=con["id"], cuenta_id=cta["act_id"],
-                    cuenta_nombre=cta["name"], cuenta_pais=cta.get("pais"),
+                    cuenta_nombre=cta["name"], cuenta_pais=pais,
+                    cuenta_moneda=cta.get("moneda"),
                     campaign_id=campaign_id, campaign_nombre=campaign_nombre,
                     adset_nombre=adset_nombre,
                 )
@@ -330,14 +339,31 @@ def cargar_anuncios_activos(abrir_periodos: bool = True) -> dict:
     return {"ok": r["ok"], "anuncios": [], "error": "; ".join(r["errores"]) or None}
 
 
-def _leer_daily_budget_adset(adset_id: str, api=None) -> Optional[float]:
-    """Lee daily_budget de un adset (centavos → unidades). Requiere api."""
+def _leer_adset_info(adset_id: str, api=None) -> dict:
+    """
+    Lee del conjunto: presupuesto diario (centavos→unidades) y el país donde
+    está pautado (targeting.geo_locations.countries, primer país).
+    Devuelve {"presupuesto": float|None, "pais": str|None}.
+    """
     try:
-        adset = AdSet(adset_id, api=api).api_get(fields=[AdSet.Field.daily_budget])
+        adset = AdSet(adset_id, api=api).api_get(
+            fields=[AdSet.Field.daily_budget, "targeting"])
         raw = adset.get(AdSet.Field.daily_budget)
-        return (float(raw) / 100.0) if raw is not None else None
+        presupuesto = (float(raw) / 100.0) if raw is not None else None
+        pais = None
+        tg = adset.get("targeting") or {}
+        geo = (tg.get("geo_locations") or {}) if isinstance(tg, dict) else {}
+        paises = geo.get("countries") if isinstance(geo, dict) else None
+        if isinstance(paises, list) and paises:
+            pais = ", ".join(paises[:3])
+        return {"presupuesto": presupuesto, "pais": pais}
     except Exception:
-        return None
+        return {"presupuesto": None, "pais": None}
+
+
+def _leer_daily_budget_adset(adset_id: str, api=None) -> Optional[float]:
+    """Solo el presupuesto (para el polling)."""
+    return _leer_adset_info(adset_id, api).get("presupuesto")
 
 
 # --------------------------------------------------------------------------- #

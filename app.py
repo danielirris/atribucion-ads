@@ -21,11 +21,12 @@ import calculos
 import facebook_api as fb
 import excel_watcher as watcher
 import supabase_source as supa
+import fx
 
-st.set_page_config(page_title="Atribución Facebook Ads", layout="wide")
+st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v6 · 2026-08-20 · Login usuario+contraseña con matriz de puntos"
+APP_VERSION = "v7 · 2026-08-20 · Todo en USD (tipo de cambio diario) + país de pauta"
 
 
 # --------------------------------------------------------------------------- #
@@ -211,10 +212,11 @@ def _resumen_pais(todos):
         pais = a.get("cuenta_pais") or "—"
         sp = insights.get(str(a["ad_id"]), {}).get("spend")
         if sp:
-            gasto_pais[pais] = gasto_pais.get(pais, 0.0) + sp
+            sp_usd = sp * fx.tasa_a_usd(a.get("cuenta_moneda") or "USD")  # -> USD
+            gasto_pais[pais] = gasto_pais.get(pais, 0.0) + sp_usd
     if not gasto_pais:
         return
-    st.sidebar.markdown("**Gasto por país**")
+    st.sidebar.markdown("**Gasto por país (USD)**")
     for pais, g in sorted(gasto_pais.items(), key=lambda x: -x[1]):
         st.sidebar.caption(f"{pais}: {_usd(g)}")
 
@@ -241,6 +243,18 @@ def _presupuesto_ad(ad_id: str):
 
 
 def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
+    # Tipo de cambio a USD (todo se muestra en dólares).
+    _rate_cache = {}
+
+    def _rate(moneda):
+        moneda = (moneda or "USD").upper()
+        if moneda not in _rate_cache:
+            _rate_cache[moneda] = fx.tasa_a_usd(moneda)
+        return _rate_cache[moneda]
+
+    # Moneda en la que vienen las ventas (Excel/Supabase): 'auto' = la de la cuenta.
+    moneda_ventas_cfg = db.get_config("moneda_ventas", "auto")
+
     grupos = {}
     for a in anuncios:
         if nivel == "adset":
@@ -263,8 +277,15 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
     filas = []
     for gkey, g in grupos.items():
         ads = g["ads"]
+        # Moneda de la cuenta del grupo y tipo de cambio a USD.
+        moneda_cuenta = ads[0].get("cuenta_moneda") or "USD"
+        rate_c = _rate(moneda_cuenta)
+        moneda_v = moneda_cuenta if moneda_ventas_cfg == "auto" else moneda_ventas_cfg
+        rate_v = _rate(moneda_v)
+
         num = sum(ventas_agg.get(x["ad_id"], {}).get("num_ventas", 0) for x in ads)
-        ingresos = sum(ventas_agg.get(x["ad_id"], {}).get("ingreso_total", 0.0) for x in ads)
+        ingresos_nat = sum(ventas_agg.get(x["ad_id"], {}).get("ingreso_total", 0.0) for x in ads)
+        ingresos = ingresos_nat * rate_v  # -> USD
 
         if nivel == "campaign":
             vistos, presupuesto, hay = set(), 0.0, False
@@ -277,17 +298,22 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
                 if p is not None:
                     presupuesto += p
                     hay = True
-            presupuesto = presupuesto if hay else None
+            presupuesto = (presupuesto * rate_c) if hay else None
         else:
-            presupuesto = _presupuesto_ad(ads[0]["ad_id"])
+            p = _presupuesto_ad(ads[0]["ad_id"])
+            presupuesto = (p * rate_c) if p is not None else None
 
         ins = insights.get(g["ins_key"], {}) if g["ins_key"] else {}
-        spend = ins.get("spend")
+        spend_nat = ins.get("spend")
+        spend = (spend_nat * rate_c) if spend_nat is not None else None
         if spend is not None:
             gasto = spend
         else:
             gasto = sum((calculos.metricas_periodo_actual(x["ad_id"], ahora) or {}).get(
-                "gasto_estimado", 0.0) for x in ads)
+                "gasto_estimado", 0.0) for x in ads) * rate_c
+
+        cpm = (ins.get("cpm") * rate_c) if ins.get("cpm") is not None else None
+        costo_conv = (ins.get("costo_conversacion") * rate_c) if ins.get("costo_conversacion") is not None else None
 
         roas = (ingresos / gasto) if gasto and gasto > 0 else 0.0
         activos = sum(1 for x in ads if _es_activo(x))
@@ -296,10 +322,10 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "activos": activos, "total": len(ads),
             "presupuesto": presupuesto, "spend": spend, "gasto": gasto,
             "pct": (spend / presupuesto * 100) if (spend is not None and presupuesto) else None,
-            "cpm": ins.get("cpm"), "ctr": ins.get("ctr"),
+            "cpm": cpm, "ctr": ins.get("ctr"),
             "num": num, "ingresos": ingresos,
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
-            "conv": ins.get("conversaciones"), "costo_conv": ins.get("costo_conversacion"),
+            "conv": ins.get("conversaciones"), "costo_conv": costo_conv,
         })
     filas.sort(key=lambda f: f["roas"], reverse=True)
     return filas
@@ -886,8 +912,8 @@ _LOGIN_CSS = """
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 10px 40px rgba(140,210,215,.35), inset 0 1px 0 rgba(255,255,255,.4); }
 .login-logo svg{ width:34px;height:34px; }
-.login-title{ font-family:'Geist',sans-serif;font-weight:700;font-size:30px;
-    letter-spacing:.16em;color:#eafcff;margin:0; }
+.login-title{ font-family:'Geist',sans-serif;font-weight:700;font-size:23px;
+    letter-spacing:.12em;color:#eafcff;margin:0; }
 .login-sub{ font-family:'Inter',sans-serif;color:#9fb2c2;font-size:13.5px;margin-top:6px; }
 /* Tarjeta glass */
 div[data-testid="stVerticalBlockBorderWrapper"]{
@@ -914,7 +940,7 @@ _LOGIN_HEADER = """
             stroke-linecap="round" stroke-linejoin="round" fill="none"/>
     </svg>
   </div>
-  <p class="login-title">ADCOMMAND</p>
+  <p class="login-title">ADS COMMAND CENTER</p>
   <p class="login-sub">Atribución y control de tus anuncios en un solo lugar</p>
 </div>
 """
@@ -1159,7 +1185,8 @@ def _panel_cuentas():
     for a in todos:
         c = a.get("cuenta_nombre") or "—"
         if c not in filas:
-            filas[c] = {"Cuenta": c, "País": a.get("cuenta_pais") or "—",
+            filas[c] = {"Cuenta": c, "País (pauta)": a.get("cuenta_pais") or "—",
+                        "Moneda": a.get("cuenta_moneda") or "—",
                         "Anuncios": 0, "Activos": 0}
         filas[c]["Anuncios"] += 1
         if _es_activo(a):
@@ -1168,11 +1195,54 @@ def _panel_cuentas():
                  use_container_width=True, hide_index=True)
 
 
+def _panel_moneda():
+    st.subheader("Moneda y tipo de cambio")
+    st.caption("Todo se muestra en **USD**. El gasto/presupuesto de Facebook vienen en la "
+               "moneda de cada cuenta y se convierten con el tipo de cambio del día (automático).")
+
+    monedas = sorted({(a.get("cuenta_moneda") or "—") for a in db.obtener_anuncios()} - {"—"})
+    if monedas:
+        st.markdown("**Tipo de cambio de hoy (a USD):**")
+        for m in monedas:
+            info = fx.info_tasa(m)
+            st.caption(f"1 {m} = {info['tasa']:.5f} USD  ·  origen: {info['origen']}")
+    else:
+        st.info("Aún no se detecta la moneda de tus cuentas. Pulsa **Recargar** en la barra "
+                "lateral para traerla de Facebook.")
+
+    st.divider()
+    st.markdown("**Moneda de las ventas (Excel/Supabase)**")
+    st.caption("Si tus ventas ya están en USD, elige USD. Si están en la moneda de la cuenta "
+               "(ej. MXN), deja 'Automático'.")
+    actual = db.get_config("moneda_ventas", "auto")
+    opciones = ["auto", "USD", "MXN", "COP", "EUR", "ARS", "BRL", "CLP", "PEN"]
+    idx = opciones.index(actual) if actual in opciones else 0
+    sel = st.selectbox("Moneda de las ventas", opciones, index=idx,
+                       format_func=lambda x: "Automático (moneda de la cuenta)" if x == "auto" else x)
+    if st.button("Guardar moneda de ventas", type="primary"):
+        db.set_config("moneda_ventas", sel)
+        st.success("Guardado.")
+
+    st.divider()
+    st.markdown("**Tipo de cambio manual (opcional)**")
+    st.caption("Si prefieres fijar tú el tipo de cambio en vez del automático, escríbelo aquí.")
+    c1, c2 = st.columns(2)
+    m_manual = c1.text_input("Moneda (ej. MXN)", value="MXN")
+    t_manual = c2.number_input("1 unidad = X USD", min_value=0.0, value=0.0, step=0.001, format="%.5f")
+    cc1, cc2 = st.columns(2)
+    if cc1.button("Fijar tipo de cambio manual") and m_manual.strip() and t_manual > 0:
+        db.set_config(f"fx_manual_{m_manual.strip().upper()}", str(t_manual))
+        st.success(f"Tipo de cambio manual fijado: 1 {m_manual.strip().upper()} = {t_manual:.5f} USD.")
+    if cc2.button("Quitar manual (volver a automático)") and m_manual.strip():
+        db.set_config(f"fx_manual_{m_manual.strip().upper()}", "")
+        st.success("Se quitó el tipo de cambio manual; vuelve al automático.")
+
+
 def pagina_configuracion():
     st.title("Configuración")
-    st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase) y revisa "
-               "tus cuentas.")
-    tabs = st.tabs(["Conexiones", "Excel", "Supabase", "Cuentas"])
+    st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase), la moneda y "
+               "revisa tus cuentas.")
+    tabs = st.tabs(["Conexiones", "Excel", "Supabase", "Moneda", "Cuentas"])
     with tabs[0]:
         seccion_conexiones()
     with tabs[1]:
@@ -1180,6 +1250,8 @@ def pagina_configuracion():
     with tabs[2]:
         _panel_supabase()
     with tabs[3]:
+        _panel_moneda()
+    with tabs[4]:
         _panel_cuentas()
 
 
