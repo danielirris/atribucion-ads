@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v41 · 2026-08-21"
+APP_VERSION = "v42 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -2168,17 +2168,20 @@ def _panel_sync_ventas():
                 f"⚠️ El dashboard está contando **solo '{fuente}'**, así que NO suma las "
                 "ventas del Google Sheet aunque sí se sincronizan. Ve a **Configuración → "
                 "Moneda → Fuente de las ventas** y elige **'Todas'** o **'Solo Google Sheets'**.")
+        en_curso = fb.sync_ventas_en_curso()
+        if en_curso:
+            st.info("⏳ Sincronizando en segundo plano… el conteo se actualiza solo al terminar. "
+                    "Puedes seguir usando la app.")
         b1, b2 = st.columns(2)
-        if b1.button("🔄 Sincronizar ventas AHORA", type="primary", use_container_width=True):
-            with st.spinner("Descargando el Sheet y sincronizando..."):
-                r = gsheets.sincronizar() if gsheets.get_url() else {"insertadas": 0, "error": "sin URL"}
-                if config.supabase_configurado():
-                    fb.sincronizar_ventas_ahora()
-            if r.get("error"):
-                st.error(f"Error: {r['error']}")
-            st.success(f"Terminado: {r.get('insertadas', 0)} venta(s) nueva(s) insertada(s).")
-            for d in (r.get("detalle") or []):
-                st.caption(f"• **{d.get('hoja')}**: {d.get('motivo')}")
+        if b1.button("🔄 Sincronizar ventas AHORA", type="primary",
+                     use_container_width=True, disabled=en_curso):
+            # NO bloquea la UI: corre en segundo plano y el timer refresca al terminar.
+            if fb.sincronizar_ventas_async():
+                st.success("Sincronización iniciada en segundo plano. El conteo se "
+                           "actualizará solo en cuanto termine (unos segundos).")
+            else:
+                st.info("Ya hay una sincronización en curso.")
+            st.rerun()
         if b2.button("♻️ Reiniciar hilos de fondo", use_container_width=True,
                      help="Vuelve a lanzar los hilos si se detuvieron."):
             fb.iniciar_polling()

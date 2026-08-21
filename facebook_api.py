@@ -936,9 +936,42 @@ def _loop_polling() -> None:
             _log(f"Error en polling: {e}\n{traceback.format_exc(limit=1)}")
 
 
+_VENTAS_SYNC_LOCK = threading.Lock()
+_VENTAS_SYNC_RUNNING = False
+
+
 def _sincronizar_fuentes_ventas() -> int:
     """Auto-sincroniza Google Sheets y Supabase (si están configurados).
-    Devuelve cuántas ventas nuevas insertó y actualiza marcas de tiempo."""
+    Devuelve cuántas ventas nuevas insertó y actualiza marcas de tiempo.
+    Guard: solo una sincronización a la vez (evita solapar manual + periódica)."""
+    global _VENTAS_SYNC_RUNNING
+    with _VENTAS_SYNC_LOCK:
+        if _VENTAS_SYNC_RUNNING:
+            return 0
+        _VENTAS_SYNC_RUNNING = True
+    try:
+        return _sincronizar_fuentes_ventas_impl()
+    finally:
+        with _VENTAS_SYNC_LOCK:
+            _VENTAS_SYNC_RUNNING = False
+
+
+def sync_ventas_en_curso() -> bool:
+    with _VENTAS_SYNC_LOCK:
+        return _VENTAS_SYNC_RUNNING
+
+
+def sincronizar_ventas_async() -> bool:
+    """Lanza la sincronización de ventas en segundo plano (NO bloquea la UI).
+    Devuelve True si la inició, False si ya había una en curso."""
+    if sync_ventas_en_curso():
+        return False
+    threading.Thread(target=_sincronizar_fuentes_ventas,
+                     name="ventas-sync-manual", daemon=True).start()
+    return True
+
+
+def _sincronizar_fuentes_ventas_impl() -> int:
     total = 0
     try:
         import gsheets

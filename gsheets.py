@@ -110,10 +110,14 @@ def _descargar_xlsx(url: str):
     export = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx&_={nonce}"
     ultimo = None
     cab = {"Cache-Control": "no-cache", "Pragma": "no-cache"}
-    # Reintentos con timeout amplio (los Sheets grandes tardan en exportarse).
-    for intento in range(3):
+    # Timeouts CORTOS: preferimos fallar rápido y reintentar en el próximo ciclo
+    # antes que colgar la app minutos. Configurables por si el Sheet crece.
+    import os
+    t_read = int(os.getenv("GSHEET_TIMEOUT", "70"))
+    reintentos = int(os.getenv("GSHEET_RETRIES", "2"))
+    for intento in range(reintentos):
         try:
-            r = requests.get(export, timeout=(15, 180), stream=True, headers=cab)
+            r = requests.get(export, timeout=(10, t_read), stream=True, headers=cab)
             contenido = r.content  # descarga completa
             if r.status_code == 200 and contenido[:2] == b"PK":  # xlsx = zip (PK)
                 return contenido, None
@@ -122,10 +126,9 @@ def _descargar_xlsx(url: str):
                               "'Cualquiera con el enlace: Lector'.")
             ultimo = f"HTTP {r.status_code} al descargar el Sheet."
         except Exception as e:
-            ultimo = (f"{e}. El Sheet puede ser muy grande; reintentando..."
-                      if intento < 2 else
-                      f"{e}. El Sheet es muy grande y la descarga se pasó del tiempo. "
-                      "Prueba de nuevo, o divide el Sheet en menos filas/pestañas.")
+            ultimo = (f"{e}. El Sheet tardó demasiado; se reintentará en el "
+                      "próximo ciclo automático. Si es muy grande, considera "
+                      "dividirlo en menos filas/pestañas o usar la API de Google.")
     return None, ultimo
 
 
