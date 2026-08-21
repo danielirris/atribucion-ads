@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v50 · 2026-08-21"
+APP_VERSION = "v51 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -79,6 +79,21 @@ def _roas_color(r):
     if r >= 1:
         return "#eab308"
     return "#ef4444"
+
+
+def _roas_pill(r):
+    """Badge tipo pill para el ROAS: verde alto (brillo extra si >5x), amarillo, rojo."""
+    r = r or 0.0
+    if r >= 5:
+        bg, c, glow = "rgba(16,185,129,.18)", "#34f5b0", ";box-shadow:0 0 12px rgba(16,185,129,.45)"
+    elif r > 2:
+        bg, c, glow = "rgba(16,185,129,.15)", "#10b981", ""
+    elif r >= 1:
+        bg, c, glow = "rgba(245,196,81,.15)", "#f5c451", ""
+    else:
+        bg, c, glow = "rgba(239,68,68,.15)", "#ff8b84", ""
+    return (f'<span style="display:inline-block;padding:3px 9px;border-radius:8px;'
+            f'background:{bg};color:{c};font-weight:700;font-size:13px{glow}">{r:.2f}x</span>')
 
 
 def _spark_svg(serie, color="#22c55e", w=78, h=26):
@@ -157,7 +172,7 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 def sidebar_estado(pagina: str = "dashboard"):
     # Los controles de datos y los filtros solo aplican al Dashboard.
     if pagina == "dashboard":
-        if st.sidebar.button("🔄 Recargar de Facebook", use_container_width=True,
+        if st.sidebar.button("🔄 Recargar de Facebook", use_container_width=True, type="primary",
                              help="Trae datos NUEVOS desde Facebook (anuncios, gasto, CPM). "
                                   "Es lo más pesado; úsalo de vez en cuando. La app ya lo hace "
                                   "sola cada 30 min, así que casi nunca lo necesitas."):
@@ -601,15 +616,18 @@ def seccion_vista_general():
         st.segmented_control(
             "Estado", ["Activos", "Apagados", "Todos"],
             default=st.session_state.get("f_estado", "Activos"), key="f_estado")
-        # Color del chip seleccionado según el estado: verde/rojo/gris.
+        # Color del chip seleccionado según el estado: verde/rojo/gris (translúcido).
         _est = st.session_state.get("f_estado") or "Activos"
-        _est_col = {"Activos": "#16a34a", "Apagados": "#dc2626",
-                    "Todos": "#6b7280"}.get(_est, "#6b7280")
+        _bg, _bd = {
+            "Activos": ("rgba(16,185,129,.2)", "rgba(16,185,129,.5)"),
+            "Apagados": ("rgba(239,68,68,.2)", "rgba(239,68,68,.5)"),
+            "Todos": ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"),
+        }.get(_est, ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"))
         st.markdown(
             '<style>[data-testid="stElementContainer"]:has(.estado-anchor) + '
             '[data-testid="stElementContainer"] '
             'button[data-variant="segmented_control"][data-selected="true"]{'
-            f'background:{_est_col} !important;border-color:{_est_col} !important;'
+            f'background:{_bg} !important;border:1px solid {_bd} !important;'
             'color:#fff !important;}</style>', unsafe_allow_html=True)
     with ct3:
         st.selectbox("Rango de fechas",
@@ -766,13 +784,12 @@ def _render_totales(filas):
         for t, v, c in tarjetas)
     st.markdown(
         '<style>.trow{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0 10px;}'
-        '.tcard{flex:1;min-width:120px;background:rgba(23,26,34,.6);backdrop-filter:blur(12px);'
-        'border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px 14px;'
-        'box-shadow:0 8px 24px rgba(0,0,0,.22);}'
-        '.tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#93a4b8;}'
-        '.tval{font-family:Geist,sans-serif;font-weight:700;font-size:20px;margin-top:4px;}'
-        '.tnat{font-family:Geist,sans-serif;font-size:15px;font-weight:600;'
-        'color:#aeb8c6;margin-top:3px;}</style>'
+        '.tcard{flex:1;min-width:120px;background:rgba(255,255,255,.03);backdrop-filter:blur(12px);'
+        'border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:14px 16px 13px;}'
+        '.tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:600;}'
+        '.tval{font-family:Geist,sans-serif;font-weight:800;font-size:28px;margin-top:5px;line-height:1.1;}'
+        '.tnat{font-family:Inter,sans-serif;font-size:12px;font-weight:500;'
+        'color:#475569;margin-top:4px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
 
 
@@ -817,9 +834,11 @@ def _perf_help_text(f, ahora) -> str:
     emoji = "🟢" if roas > 2 else "🟡" if roas >= 1 else "🔴"
     ventas = int(f.get("ventas_mod") or 0)
     ingreso = f.get("ingresos_mod") or 0.0
+    gasto_mod = f.get("gasto_mod") or 0.0
     return (
         f"**Rendimiento desde el último cambio** · {_hace_amigable(umod, ahora)}\n\n"
         f"Ventas: **{ventas}**  \n"
+        f"Gasto publicitario: **{_usd(gasto_mod)}**  \n"
         f"Ingreso: **{_usd(ingreso)}**  \n"
         f"ROAS: **{roas:.2f}x** {emoji}\n\n"
         f"Haz clic para ver el detalle y la gráfica de 7 días.")
@@ -947,8 +966,12 @@ def _render_lista_nativa(filas, nivel):
         # visual); sale en el tooltip del botón ⓘ (abajo) y en la card de detalle.
         # Degradado rojo SOLO para los que van muy mal: gastan y su ROAS < 1 (pierden).
         muy_mal = bool(f["gasto"] and f["gasto"] > 0 and (f["roas"] or 0) < 1.0)
-        nombre_html = (f'<div class="big" style="color:{est_col};white-space:normal;'
-                       f'word-break:break-word">{esc(str(f["nombre"]))[:120]}</div>')
+        roas_alto = bool(f["roas"] and f["roas"] > 5)
+        # Nombre en púrpura claro (premium); acento verde a la izquierda si ROAS > 5.
+        borde = "border-left:3px solid #10b981;padding-left:8px;" if roas_alto else ""
+        nombre_html = (f'<div class="ad-name" style="{borde}color:#a78bfa;font-weight:700;'
+                       f'font-size:14px;white-space:normal;word-break:break-word">'
+                       f'{esc(str(f["nombre"]))[:120]}</div>')
         if muy_mal:
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
                            f'debajo de 1x con gasto. Considera pausar o ajustar.">'
@@ -967,8 +990,9 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big">{f["num"]}</div>',
             costov,
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
-            f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
-            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>',
+            f'<div class="big" style="color:{"#10b981" if g>=0 else "#ff8b84"};font-weight:700">'
+            f'{"+" if g>=0 else ""}{_usd(g)}</div>',
+            _roas_pill(f["roas"] or 0.0),
         ]
         est_txt = ("Activo" if est_col == "#5ee7a0"
                    else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
@@ -1919,89 +1943,146 @@ def seccion_conexiones():
 def _inject_css():
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
     :root{
-        --bg:#0d0f16; --surface:#171a22; --surface2:#20232c; --stroke:rgba(255,255,255,.07);
-        --tint:#8cd2d7; --mint:#BFF2E2; --lav:#E6D5FF; --peri:#C7C4FF; --txt:#e6e7ee; --sub:#aeb8c6;
+        --bg:#080810; --card:rgba(255,255,255,.03); --card-brd:rgba(255,255,255,.07);
+        --txt:#ffffff; --sub:#94a3b8; --ter:#475569;
+        --p1:#7c3aed; --p2:#2563eb; --ok:#10b981; --warn:#ef4444; --plight:#a78bfa;
     }
-    html, body, [data-testid="stAppViewContainer"]{ color:var(--txt); }
-    [data-testid="stAppViewContainer"]{
+    html, body, .stApp, [data-testid="stAppViewContainer"]{ color:var(--txt); background:var(--bg) !important; }
+
+    /* ---------- Fondo premium: aurora (30%) + blobs (10%) + grid ---------- */
+    .app-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:#080810; }
+    .app-bg .aurora{ position:absolute; inset:-40%; opacity:.30;
         background:
-          radial-gradient(1000px 640px at 92% -6%, rgba(140,210,215,.22), transparent 56%),
-          radial-gradient(900px 660px at -10% 6%, rgba(230,213,255,.20), transparent 56%),
-          radial-gradient(760px 760px at 50% 118%, rgba(199,196,255,.17), transparent 56%),
-          radial-gradient(600px 600px at 30% 45%, rgba(191,242,226,.07), transparent 60%),
-          linear-gradient(180deg,#0d0f16,#0b0d13) !important;
-    }
-    /* Matriz de puntos sutil + brillo suave, detrás del contenido */
-    [data-testid="stAppViewContainer"]::before{
-        content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
-        background-image:radial-gradient(rgba(140,210,215,.10) 1px, transparent 1.4px);
-        background-size:30px 30px; opacity:.5; animation:appPulse 8s ease-in-out infinite;
-    }
-    @keyframes appPulse{ 0%,100%{opacity:.30} 50%{opacity:.6} }
+          radial-gradient(42% 42% at 28% 26%, #1a0533 0%, transparent 60%),
+          radial-gradient(38% 38% at 74% 58%, #020818 0%, transparent 60%),
+          radial-gradient(46% 46% at 52% 84%, #14082e 0%, transparent 62%);
+        filter:blur(50px); animation:dashAurora 26s ease-in-out infinite alternate; }
+    .app-bg .grid{ position:absolute; inset:0;
+        background-image:linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+        background-size:48px 48px;
+        -webkit-mask:radial-gradient(circle at 50% 30%, #000, transparent 85%);
+        mask:radial-gradient(circle at 50% 30%, #000, transparent 85%); }
+    .app-bg .blob{ position:absolute; width:460px; height:460px; border-radius:50%;
+        filter:blur(80px); opacity:.10; }
+    .app-bg .b1{ background:#7c3aed; top:-150px; left:-130px; animation:dashBlob1 22s ease-in-out infinite alternate; }
+    .app-bg .b2{ background:#2563eb; bottom:-160px; right:-130px; animation:dashBlob2 28s ease-in-out infinite alternate; }
+    @keyframes dashAurora{ 0%{transform:translate(-3%,-2%) rotate(0) scale(1.1)} 100%{transform:translate(3%,4%) rotate(6deg) scale(1.22)} }
+    @keyframes dashBlob1{ 0%{transform:translate(0,0)} 100%{transform:translate(50px,40px)} }
+    @keyframes dashBlob2{ 0%{transform:translate(0,0)} 100%{transform:translate(-45px,-35px)} }
     [data-testid="stAppViewContainer"] .main .block-container{ position:relative; z-index:1; }
+    [data-testid="stSidebar"]{ position:relative; z-index:1; }
+
+    /* Scrollbar delgado púrpura */
+    ::-webkit-scrollbar{ width:9px; height:9px; }
+    ::-webkit-scrollbar-thumb{ background:rgba(124,58,237,.3); border-radius:8px; }
+    ::-webkit-scrollbar-thumb:hover{ background:rgba(124,58,237,.5); }
+    ::-webkit-scrollbar-track{ background:transparent; }
 
     body, .stMarkdown, p, label, input, textarea, button, li, td, th{ font-family:'Inter',sans-serif; }
-    h1,.stMarkdown h1{ font-family:'Geist',sans-serif !important; letter-spacing:-.02em;
-        background:linear-gradient(100deg,#eafcff,#c7f6ee 40%,#d9cbff);
+    h1,.stMarkdown h1{ font-family:'Geist',sans-serif !important; letter-spacing:-.02em; font-weight:800;
+        background:linear-gradient(92deg,#ffffff 35%,#a78bfa 100%);
         -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
     h2,.stMarkdown h2{ font-family:'Geist',sans-serif !important; letter-spacing:-.01em; color:#eef2f6; }
-    h3,h4,.stMarkdown h3,.stMarkdown h4{ font-family:'Geist',sans-serif !important; color:var(--mint); }
+    h3,h4,.stMarkdown h3,.stMarkdown h4{ font-family:'Geist',sans-serif !important; color:var(--plight); }
     /* Restaurar la fuente de iconos de Material */
     [class*="material-symbols"], [class*="material-icons"], .material-icons,
     span[data-testid="stIconMaterial"], [data-testid="stIconMaterial"]{
         font-family:'Material Symbols Outlined','Material Symbols Rounded','Material Icons' !important;
         -webkit-text-fill-color:initial;
     }
-    /* Sidebar con un toque de color */
-    [data-testid="stSidebar"]{
-        background:linear-gradient(180deg,#14161e,#0e1015);
-        border-right:1px solid var(--stroke);
-        box-shadow:inset -1px 0 0 rgba(140,210,215,.06);
-    }
-    [data-testid="stSidebar"] h3{ color:var(--tint); }
-
-    /* Oculta el indicador de "cargando/ejecutando" de arriba a la derecha
-       (las "ruedas" que confunden, sobre todo en el auto-refresco). */
+    /* Sidebar */
+    [data-testid="stSidebar"]{ background:#0a0a16 !important; border-right:1px solid rgba(255,255,255,.05); }
+    [data-testid="stSidebar"] h3{ color:var(--sub); text-transform:uppercase; font-size:12px;
+        letter-spacing:.12em; font-weight:600; }
     [data-testid="stStatusWidget"]{ display:none !important; }
-    /* Botones con BORDE de color (degradado) */
+
+    /* Botones secundarios (glass con borde púrpura al hover) */
     .stButton>button, .stDownloadButton>button, .stFormSubmitButton>button{
-        border-radius:12px; font-weight:600; color:var(--txt); transition:all .18s ease;
-        border:1px solid transparent;
-        background:linear-gradient(#181b23,#141720) padding-box,
-                  linear-gradient(120deg, rgba(140,210,215,.65), rgba(199,196,255,.65)) border-box;
+        border-radius:10px; font-weight:600; color:#fff; transition:all .18s ease;
+        background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
     }
     .stButton>button:hover, .stDownloadButton>button:hover{
-        color:var(--mint); box-shadow:0 6px 22px rgba(140,210,215,.22);
-        background:linear-gradient(#1c2029,#161a23) padding-box,
-                  linear-gradient(120deg, #8cd2d7, #c7c4ff) border-box;
+        border-color:var(--p1); box-shadow:0 0 18px rgba(124,58,237,.3);
     }
+    /* Botones primarios: gradiente púrpura→azul + shimmer */
     .stButton>button[kind="primary"], .stFormSubmitButton>button[kind="primary"]{
-        background:linear-gradient(180deg,#a8eff4,#8cd2d7) !important; color:#00373a !important;
-        border:none !important; box-shadow:0 8px 26px rgba(140,210,215,.30) !important;
+        background:linear-gradient(90deg,#7c3aed,#2563eb) !important; color:#fff !important;
+        border:none !important; border-radius:10px !important; position:relative; overflow:hidden;
+        box-shadow:0 8px 26px rgba(124,58,237,.35) !important;
     }
-    /* Inputs */
-    [data-baseweb="input"] input, [data-baseweb="textarea"] textarea, .stTextInput input,
-    .stNumberInput input, [data-baseweb="select"]>div{
-        border-radius:11px !important; background:rgba(255,255,255,.03) !important;
+    .stButton>button[kind="primary"]:hover, .stFormSubmitButton>button[kind="primary"]:hover{
+        box-shadow:0 0 30px rgba(124,58,237,.6) !important; transform:translateY(-1px);
     }
-    /* Tarjetas / contenedores / expanders (glass) */
+    .stButton>button[kind="primary"]::after, .stFormSubmitButton>button[kind="primary"]::after{
+        content:""; position:absolute; top:0; left:-70%; width:45%; height:100%;
+        background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent); transform:skewX(-20deg);
+    }
+    .stButton>button[kind="primary"]:hover::after{ animation:dashShimmer .9s ease; }
+    @keyframes dashShimmer{ 0%{left:-70%} 100%{left:150%} }
+
+    /* Inputs y selects */
+    .stTextInput input, .stNumberInput input, [data-baseweb="textarea"] textarea{
+        background:rgba(255,255,255,.04) !important; border:1px solid rgba(255,255,255,.08) !important;
+        border-radius:10px !important; color:#fff !important;
+    }
+    .stTextInput input:focus, .stNumberInput input:focus{
+        border-color:var(--p1) !important;
+        box-shadow:0 0 0 3px rgba(124,58,237,.2), 0 0 16px rgba(124,58,237,.3) !important;
+    }
+    input::placeholder{ color:var(--ter) !important; }
+    [data-baseweb="select"]>div{ background:rgba(255,255,255,.04) !important;
+        border:1px solid rgba(255,255,255,.08) !important; border-radius:10px !important; }
+    [data-baseweb="popover"] li:hover, [role="option"]:hover{ background:rgba(124,58,237,.12) !important; }
+
+    /* Cards / contenedores / expanders (glass) */
     [data-testid="stExpander"], div[data-testid="stVerticalBlockBorderWrapper"]{
-        background:rgba(23,26,34,.55) !important; backdrop-filter:blur(16px);
-        border:1px solid var(--stroke) !important; border-radius:18px;
-        box-shadow:0 10px 30px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.04);
+        background:rgba(255,255,255,.03) !important; backdrop-filter:blur(12px);
+        border:1px solid rgba(255,255,255,.07) !important; border-radius:16px;
+        box-shadow:0 10px 30px rgba(0,0,0,.3); transition:border-color .2s ease;
     }
-    /* Tabs con color activo */
-    .stTabs [data-baseweb="tab-list"]{ gap:6px; border-bottom:1px solid var(--stroke); }
-    .stTabs [data-baseweb="tab"]{ border-radius:12px 12px 0 0; color:var(--sub); }
-    .stTabs [aria-selected="true"]{ color:var(--mint) !important; }
-    .stTabs [data-baseweb="tab-highlight"]{ background:linear-gradient(90deg,#8cd2d7,#c7c4ff) !important; height:3px; }
-    /* Alertas con vidrio */
+    [data-testid="stExpander"]:hover, div[data-testid="stVerticalBlockBorderWrapper"]:hover{
+        border-color:rgba(124,58,237,.4) !important;
+    }
+
+    /* Controles segmentados (Ver por / Estado): grupo glass, activo púrpura */
+    [data-testid="stButtonGroup"]{ background:rgba(255,255,255,.03);
+        border:1px solid rgba(255,255,255,.07); border-radius:10px; padding:3px; }
+    button[data-variant="segmented_control"]{ color:#94a3b8 !important;
+        background:transparent !important; border:1px solid transparent !important; border-radius:8px !important; }
+    button[data-variant="segmented_control"]:hover{ color:#fff !important; background:rgba(124,58,237,.1) !important; }
+    button[data-variant="segmented_control"][data-selected="true"]{
+        background:rgba(124,58,237,.2) !important; border:1px solid rgba(124,58,237,.5) !important;
+        color:#fff !important; }
+
+    /* KPI cards: acento superior + hover glow (clase .tcard de _render_totales) */
+    .tcard{ position:relative; overflow:hidden; transition:border-color .2s ease, box-shadow .2s ease; }
+    .tcard::before{ content:""; position:absolute; top:0; left:0; right:0; height:2px;
+        background:linear-gradient(90deg,#7c3aed,#2563eb); }
+    .tcard:hover{ border-color:rgba(124,58,237,.45) !important; box-shadow:0 10px 30px rgba(124,58,237,.15); }
+
+    /* Toggle On/Off rediseñado: OFF gris, ON verde con glow (transición suave) */
+    [data-testid="stCheckbox"] label > div:first-of-type{
+        background:#374151 !important; transition:background .2s ease, box-shadow .2s ease;
+    }
+    [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type{
+        background:#10b981 !important; box-shadow:0 0 10px rgba(16,185,129,.55) !important;
+    }
+
+    /* Tabs (Configuración) */
+    .stTabs [data-baseweb="tab-list"]{ gap:6px; border-bottom:1px solid rgba(255,255,255,.07); }
+    .stTabs [data-baseweb="tab"]{ border-radius:10px 10px 0 0; color:var(--sub); }
+    .stTabs [aria-selected="true"]{ color:var(--plight) !important; }
+    .stTabs [data-baseweb="tab-highlight"]{ background:linear-gradient(90deg,#7c3aed,#2563eb) !important; height:3px; }
+
     [data-testid="stAlert"]{ border-radius:14px; }
-    [data-testid="stMetricValue"]{ font-family:'Geist',sans-serif; color:var(--mint); }
-    hr{ border-color:var(--stroke) !important; }
+    [data-testid="stMetricValue"]{ font-family:'Geist',sans-serif; color:#fff; }
+    hr{ border-color:rgba(255,255,255,.07) !important; }
     </style>
+    <div class="app-bg"><div class="aurora"></div><div class="grid"></div>
+    <div class="blob b1"></div><div class="blob b2"></div></div>
     """, unsafe_allow_html=True)
 
 
@@ -2420,18 +2501,25 @@ def _timer_actualizacion():
         est = fb.obtener_estado()
     except Exception:
         est = {}
-    extra = ""
+    # Línea de estado como micro-badges (pills) separados por puntos.
+    badges = [f"🔄 Anuncios: {cuando}", f"automática {cad}"]
     uso = est.get("uso_api")
     if uso is not None:
-        extra += f" · Uso API Facebook: {uso}%"
+        badges.append(f"Uso API {uso}%")
     if est.get("throttled"):
-        extra += " · ⚠️ Facebook frenó el ritmo; reintentando en el próximo ciclo"
-    # Sincronización de ventas (Sheets/Supabase): su propio hilo, más frecuente.
+        badges.append("⚠️ Facebook frenó el ritmo")
     vent_check = db.get_config("ultima_sync_ventas", "") or ""
     dtv = db.a_fecha(vent_check) if vent_check else None
     if dtv:
-        extra += f" · Ventas revisadas {_fmt_hace(dtv, ahora)}"
-    st.caption(f"🔄 Anuncios: {cuando} · automática {cad}{extra}")
+        badges.append(f"Ventas {_fmt_hace(dtv, ahora)}")
+    pills = ('<span class="tb-dot">·</span>'.join(
+        f'<span class="tb-pill">{b}</span>' for b in badges))
+    st.markdown(
+        '<style>.tb-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:2px 0 4px;}'
+        '.tb-pill{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);'
+        'border-radius:7px;padding:2px 9px;font-size:11px;color:#94a3b8;font-family:Inter,sans-serif;}'
+        '.tb-dot{color:#475569;margin:0 2px;}</style>'
+        f'<div class="tb-row">{pills}</div>', unsafe_allow_html=True)
 
     # Si llegaron datos nuevos (anuncios o ventas) desde el último render, refresca.
     vent_cambio = db.get_config("ventas_cambio", "") or ""
