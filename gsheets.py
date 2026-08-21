@@ -26,6 +26,24 @@ K_URL = "gsheet_url"
 # Overrides manuales de columnas (si el auto-detector se equivoca).
 K_COL = {"id": "gsheet_col_id", "valor": "gsheet_col_valor",
          "hora": "gsheet_col_hora", "pais": "gsheet_col_pais"}
+K_DEDUP = "gsheet_col_dedup"       # columna de ID único (evita duplicados)
+K_IGNORA_CERO = "gsheet_ignora_cero"  # "1" para ignorar ventas con valor 0
+
+
+def get_dedup() -> str:
+    return db.get_config(K_DEDUP, "") or ""
+
+
+def set_dedup(col: str) -> None:
+    db.set_config(K_DEDUP, (col or "").strip())
+
+
+def get_ignora_cero() -> bool:
+    return db.get_config(K_IGNORA_CERO, "") == "1"
+
+
+def set_ignora_cero(v: bool) -> None:
+    db.set_config(K_IGNORA_CERO, "1" if v else "")
 
 
 def get_url() -> str:
@@ -128,6 +146,8 @@ def sincronizar() -> dict:
         return {"ok": False, "insertadas": 0, "sin_periodo": 0, "error": str(e)}
 
     deteccion = db.ahora()
+    dedup_cfg = get_dedup().strip().lower()
+    ignora_cero = get_ignora_cero()
     insertadas, sin_periodo = 0, 0
     detalle = []
     for nombre_hoja, dff in hojas.items():
@@ -141,15 +161,28 @@ def sincronizar() -> dict:
             detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": 0,
                             "motivo": f"no detecté columna de ID y/o valor. Columnas: {list(dff.columns)}"})
             continue
-        ins_hoja, dup, sin_val, sin_id = 0, 0, 0, 0
+        # Columna de ID único (para deduplicar de forma estable).
+        dedup_col = None
+        if dedup_cfg:
+            for c in dff.columns:
+                if str(c).strip().lower() == dedup_cfg:
+                    dedup_col = c
+                    break
+        ins_hoja, dup, sin_val, sin_id, ceros = 0, 0, 0, 0, 0
         for i, (_, fila) in enumerate(dff.iterrows()):
-            ext_id = f"{nombre_hoja}#{i}"
+            if dedup_col is not None and fila.get(dedup_col) is not None and str(fila.get(dedup_col)).strip():
+                ext_id = f"{nombre_hoja}:{str(fila.get(dedup_col)).strip()}"
+            else:
+                ext_id = f"{nombre_hoja}#{i}"
             if db.venta_existe(HOJA, ext_id):
                 dup += 1
                 continue
             valor = watcher._parse_valor(fila.get(cmap["valor"]))
             if valor is None:
                 sin_val += 1
+                continue
+            if ignora_cero and valor == 0:
+                ceros += 1
                 continue
             ad_id = fila.get(cmap["id"])
             ad_id = str(ad_id).strip() if ad_id is not None else ""
@@ -170,6 +203,7 @@ def sincronizar() -> dict:
         detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": ins_hoja,
                         "columnas": cmap,
                         "motivo": (f"OK · {ins_hoja} nuevas, {dup} ya estaban, "
-                                   f"{sin_val} sin valor, {sin_id} sin ID")})
+                                   f"{sin_val} sin valor, {ceros} con valor 0 ignoradas, "
+                                   f"{sin_id} sin ID")})
     return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo,
             "detalle": detalle, "error": None}

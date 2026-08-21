@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v23 · 2026-08-21"
+APP_VERSION = "v24 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -223,7 +223,8 @@ def sidebar_filtros():
                                help="Filtra por producto (según el nombre de la campaña).")
     st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
     st.sidebar.selectbox("Rango de fechas",
-                         ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo", "Personalizado"],
+                         ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Máximo",
+                          "Personalizado"],
                          key="f_rango")
     if st.session_state.get("f_rango") == "Personalizado":
         hoy = db.ahora().date()
@@ -445,8 +446,13 @@ def _rango_actual(ahora):
             return ("today", d.strftime("%Y-%m-%d"), h.strftime("%Y-%m-%d"),
                     datetime.combine(d, datetime.min.time()),
                     datetime.combine(h, datetime.min.time()) + timedelta(days=1))
+    medianoche = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+    if rango_lbl == "Ayer":
+        # cutoff = ayer 00:00, hasta = hoy 00:00; date_preset 'yesterday' usa la zona
+        # horaria de la cuenta en Facebook (gasto más exacto).
+        return "yesterday", "", "", medianoche - timedelta(days=1), medianoche
     RANGO = {
-        "Hoy": ("today", ahora.replace(hour=0, minute=0, second=0, microsecond=0)),
+        "Hoy": ("today", medianoche),
         "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
         "Últimos 30 días": ("last_30d", ahora - timedelta(days=30)),
         "Máximo": ("maximum", None),
@@ -1729,9 +1735,40 @@ def _panel_gsheets():
         o3, o4 = st.columns(2)
         ov_hora = o3.text_input("Columna de fecha/hora", value=ov["hora"], key="gs_ov_hora")
         ov_pais = o4.text_input("Columna de país", value=ov["pais"], key="gs_ov_pais")
+        st.caption("**Para evitar duplicados** (recomendado): escribe el nombre de una columna "
+                   "de tu Sheet con un **ID único por venta** (ej. número de orden). Así, aunque "
+                   "reordenes filas, no se duplica.")
+        ov_dedup = st.text_input("Columna de ID único (dedup)", value=gs.get_dedup(), key="gs_dedup")
+        ig_cero = st.checkbox("Ignorar ventas con valor 0", value=gs.get_ignora_cero(),
+                              key="gs_ig_cero")
         if st.button("Guardar columnas manuales"):
             gs.set_overrides(ov_id, ov_val, ov_hora, ov_pais)
-            st.success("Guardado. Vuelve a Sincronizar.")
+            gs.set_dedup(ov_dedup)
+            gs.set_ignora_cero(ig_cero)
+            st.success("Guardado. Usa 'Borrar e importar de nuevo' para aplicar limpio.")
+        st.divider()
+        st.caption("Si ya tienes duplicados, borra las ventas de Google Sheets y vuelve a "
+                   "importarlas limpio con la configuración actual:")
+        if st.button("Borrar ventas de Google Sheets y re-importar", type="primary"):
+            n = db.borrar_ventas(gs.HOJA)
+            r = gs.sincronizar()
+            if r["ok"]:
+                st.success(f"Borradas {n}. Re-importadas {r['insertadas']} venta(s) limpias.")
+            else:
+                st.error(r["error"])
+
+    # Reconciliación: cuadra con tu Sheet
+    with st.expander("Reconciliación (cuadrar con tu Sheet)"):
+        res = db.resumen_ventas_fuente(gs.HOJA)
+        cc1, cc2 = st.columns(2)
+        cc1.metric("Ventas importadas (total)", f"{res['num']:,}".replace(",", "."))
+        cc2.metric("Ingreso total importado", _num(res["ingreso"]))
+        st.caption("Ingreso en la MONEDA de tu Sheet (sin convertir), para comparar directo con tu cálculo.")
+        if res["por_dia"]:
+            st.markdown("**Por día (últimos 14):**")
+            st.dataframe(pd.DataFrame([{"Día": d["dia"], "Ventas": d["num"],
+                                        "Ingreso": round(d["ingreso"], 2)} for d in res["por_dia"]]),
+                         use_container_width=True, hide_index=True)
 
     # Diagnóstico: ¿las ventas importadas coinciden con tus anuncios?
     with st.expander("Diagnóstico de ventas importadas (por qué no aparecen)"):

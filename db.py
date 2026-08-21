@@ -496,6 +496,28 @@ def ventas_agg_por_ad(cutoff: Optional[datetime] = None,
                 for r in rows}
 
 
+def borrar_ventas(hoja_origen: str) -> int:
+    """Borra todas las ventas de una fuente (ej. 'GoogleSheets'). Devuelve cuántas borró."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute("DELETE FROM ventas WHERE hoja_origen = ?", (hoja_origen,))
+        conn.commit()
+        return cur.rowcount
+
+
+def resumen_ventas_fuente(hoja_origen: str) -> dict:
+    """Total de ventas e ingresos de una fuente + desglose por día."""
+    with _conn() as conn:
+        tot = conn.execute(
+            "SELECT COUNT(*) n, COALESCE(SUM(valor_venta),0) t FROM ventas WHERE hoja_origen=?",
+            (hoja_origen,)).fetchone()
+        dias = conn.execute(
+            """SELECT substr(hora_venta,1,10) dia, COUNT(*) n, COALESCE(SUM(valor_venta),0) t
+               FROM ventas WHERE hoja_origen=? GROUP BY dia ORDER BY dia DESC LIMIT 14""",
+            (hoja_origen,))
+        return {"num": tot["n"], "ingreso": float(tot["t"]),
+                "por_dia": [{"dia": r["dia"], "num": r["n"], "ingreso": float(r["t"])} for r in dias]}
+
+
 def valores_venta_distintos() -> dict:
     """Devuelve {'origenes': [...], 'productos': [...]} para filtros de producto."""
     with _conn() as conn:
