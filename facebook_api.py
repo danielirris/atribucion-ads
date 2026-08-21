@@ -1011,6 +1011,20 @@ def detener_polling() -> None:
     _VENTAS_STOP.set()
 
 
+def sincronizar_ventas_ahora() -> int:
+    """Fuerza una sincronización de ventas (Sheets/Supabase) en primer plano.
+    Devuelve cuántas ventas nuevas insertó."""
+    return _sincronizar_fuentes_ventas()
+
+
+def estado_hilos() -> dict:
+    """Estado de los hilos de segundo plano (para el diagnóstico en la UI)."""
+    return {
+        "fb_vivo": bool(_POLLING_THREAD and _POLLING_THREAD.is_alive()),
+        "ventas_vivo": bool(_VENTAS_THREAD and _VENTAS_THREAD.is_alive()),
+    }
+
+
 # --------------------------------------------------------------------------- #
 #  Utilidades
 # --------------------------------------------------------------------------- #

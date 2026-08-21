@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v39 · 2026-08-21"
+APP_VERSION = "v40 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -2137,6 +2137,59 @@ def _timer_actualizacion():
         st.rerun()  # rerun de app (mantiene sesión), no recarga la página
 
 
+def _panel_sync_ventas():
+    """Diagnóstico y sincronización manual de ventas (Sheets/Supabase)."""
+    import gsheets
+    hilos = fb.estado_hilos()
+    est = fb.obtener_estado()
+    ahora = db.ahora()
+    vs = db.get_config("ultima_sync_ventas", "")
+    dtv = db.a_fecha(vs) if vs else None
+    titulo = ("✅ Ventas al día" if hilos.get("ventas_vivo")
+              else "⚠️ Sincronización de ventas detenida")
+    with st.expander(f"{titulo} · diagnóstico y sincronización manual", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Hilo de ventas", "Activo" if hilos.get("ventas_vivo") else "Detenido")
+        c2.metric("Última revisión", _fmt_hace(dtv, ahora) if dtv else "—")
+        c3.metric("Sheet configurado", "Sí" if gsheets.get_url() else "No")
+        if not gsheets.get_url():
+            st.warning("No hay URL del Google Sheet. Pégala en **Configuración → "
+                       "Google Sheets** y compártelo como 'Cualquiera con el enlace: Lector'.")
+        # CAUSA FRECUENTE: el dashboard filtra por fuente y oculta las del Sheet.
+        fuente = db.get_config("fuente_ventas", "todas")
+        try:
+            en_db = db.resumen_ventas_fuente(gsheets.HOJA).get("num", 0)
+        except Exception:
+            en_db = "?"
+        st.caption(f"Ventas del Google Sheet guardadas en la base: **{en_db}** · "
+                   f"Fuente del dashboard: **{fuente}**")
+        if fuente not in ("todas", "gsheets"):
+            st.error(
+                f"⚠️ El dashboard está contando **solo '{fuente}'**, así que NO suma las "
+                "ventas del Google Sheet aunque sí se sincronizan. Ve a **Configuración → "
+                "Moneda → Fuente de las ventas** y elige **'Todas'** o **'Solo Google Sheets'**.")
+        b1, b2 = st.columns(2)
+        if b1.button("🔄 Sincronizar ventas AHORA", type="primary", use_container_width=True):
+            with st.spinner("Descargando el Sheet y sincronizando..."):
+                r = gsheets.sincronizar() if gsheets.get_url() else {"insertadas": 0, "error": "sin URL"}
+                if config.supabase_configurado():
+                    fb.sincronizar_ventas_ahora()
+            if r.get("error"):
+                st.error(f"Error: {r['error']}")
+            st.success(f"Terminado: {r.get('insertadas', 0)} venta(s) nueva(s) insertada(s).")
+            for d in (r.get("detalle") or []):
+                st.caption(f"• **{d.get('hoja')}**: {d.get('motivo')}")
+        if b2.button("♻️ Reiniciar hilos de fondo", use_container_width=True,
+                     help="Vuelve a lanzar los hilos si se detuvieron."):
+            fb.iniciar_polling()
+            st.success("Hilos reiniciados.")
+            st.rerun()
+        msgs = est.get("mensajes", [])
+        if msgs:
+            st.caption("Últimos mensajes del sistema (errores de sync, etc.):")
+            st.code("\n".join(msgs[:12]))
+
+
 def pagina_dashboard():
     top1, top2 = st.columns([5, 1])
     with top1:
@@ -2153,6 +2206,7 @@ def pagina_dashboard():
                 pass
             st.rerun()
 
+    _panel_sync_ventas()
     seccion_vista_general()
     st.divider()
     seccion_por_pais()
