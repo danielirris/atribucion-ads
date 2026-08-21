@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v27 · 2026-08-21"
+APP_VERSION = "v28 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -1785,9 +1785,17 @@ def _panel_gsheets():
     # Reconciliación: cuadra con tu Sheet
     with st.expander("Reconciliación (cuadrar con tu Sheet)"):
         res = db.resumen_ventas_fuente(gs.HOJA)
-        cc1, cc2 = st.columns(2)
+        hoy = db.a_texto(db.ahora())[:10]
+        hoy_row = next((d for d in res["por_dia"] if d["dia"] == hoy), None)
+        cc1, cc2, cc3 = st.columns(3)
         cc1.metric("Ventas importadas (total)", f"{res['num']:,}".replace(",", "."))
         cc2.metric("Ingreso total importado", _num(res["ingreso"]))
+        cc3.metric(f"Ventas de HOY ({hoy})", hoy_row["num"] if hoy_row else 0)
+        if not hoy_row:
+            st.warning("No hay ventas de hoy importadas. Causas comunes: (1) Google todavía "
+                       "servía una copia en caché — vuelve a **Sincronizar**; (2) las filas de "
+                       "hoy en tu Sheet aún no tienen **valor** o **ID del anuncio**; (3) la "
+                       "columna de **fecha** de esas filas está vacía o en otro formato.")
         st.caption("Ingreso en la MONEDA de tu Sheet (sin convertir), para comparar directo con tu cálculo.")
         if res["por_dia"]:
             st.markdown("**Por día (últimos 14):**")

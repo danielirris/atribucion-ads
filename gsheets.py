@@ -104,12 +104,16 @@ def _descargar_xlsx(url: str):
     sid = _extraer_id(url)
     if not sid:
         return None, "No pude extraer el ID del Sheet de esa URL."
-    export = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx"
+    # Nonce anti-caché: Google a veces sirve una exportación cacheada sin las
+    # filas más recientes; cambiar la URL fuerza una versión fresca.
+    nonce = db.a_texto(db.ahora()).replace(":", "").replace("-", "").replace("T", "")
+    export = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx&_={nonce}"
     ultimo = None
+    cab = {"Cache-Control": "no-cache", "Pragma": "no-cache"}
     # Reintentos con timeout amplio (los Sheets grandes tardan en exportarse).
     for intento in range(3):
         try:
-            r = requests.get(export, timeout=(15, 180), stream=True)
+            r = requests.get(export, timeout=(15, 180), stream=True, headers=cab)
             contenido = r.content  # descarga completa
             if r.status_code == 200 and contenido[:2] == b"PK":  # xlsx = zip (PK)
                 return contenido, None
