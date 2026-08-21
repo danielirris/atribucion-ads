@@ -115,7 +115,8 @@ def _parse_valor(valor) -> Optional[float]:
         return None
 
 
-def _procesar_fila(ad_id: str, valor: float, hora: datetime, hoja: str) -> bool:
+def _procesar_fila(ad_id: str, valor: float, hora: datetime, hoja: str,
+                   pais: Optional[str] = None) -> bool:
     """Atribuye y guarda una venta. Devuelve True si se insertó."""
     ad_id = str(ad_id).strip()
     if not ad_id or ad_id.lower() in ("nan", "none"):
@@ -124,7 +125,7 @@ def _procesar_fila(ad_id: str, valor: float, hora: datetime, hoja: str) -> bool:
     periodo = db.periodo_para_hora(ad_id, hora)
     periodo_id = periodo["id"] if periodo else None
 
-    db.insertar_venta(ad_id, valor, hora, periodo_id, hoja)
+    db.insertar_venta(ad_id, valor, hora, periodo_id, hoja, pais=pais)
     if periodo_id is None:
         _log(f"Venta de {ad_id} (${valor:.2f}) guardada SIN período "
              f"(no había período de presupuesto para esa hora).")
@@ -185,7 +186,9 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
                 if valor is None:
                     continue
                 hora = _parse_hora(fila.get("Hora_Venta"), deteccion)
-                ok = _procesar_fila(fila.get("ID_Anuncio"), valor, hora, nombre_hoja)
+                pais = fila.get("Pais", fila.get("País"))
+                pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
+                ok = _procesar_fila(fila.get("ID_Anuncio"), valor, hora, nombre_hoja, pais=pais)
                 if ok:
                     total += 1
 

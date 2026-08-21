@@ -26,7 +26,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v12 · 2026-08-20"
+APP_VERSION = "v13 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -397,6 +397,81 @@ def _aplicar_presupuesto_grupo(fila, nuevo_usd):
     return {"ok": True, "solo_local": True, "nativo": nativo}
 
 
+def _rango_actual(ahora):
+    """Devuelve (date_preset, since, until, cutoff, hasta) según el filtro de rango."""
+    rango_lbl = st.session_state.get("f_rango", "Hoy")
+    if rango_lbl == "Personalizado" and st.session_state.get("f_desde") and st.session_state.get("f_hasta"):
+        d, h = st.session_state["f_desde"], st.session_state["f_hasta"]
+        return ("today", d.strftime("%Y-%m-%d"), h.strftime("%Y-%m-%d"),
+                datetime.combine(d, datetime.min.time()),
+                datetime.combine(h, datetime.min.time()) + timedelta(days=1))
+    RANGO = {
+        "Hoy": ("today", ahora.replace(hour=0, minute=0, second=0, microsecond=0)),
+        "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
+        "Últimos 30 días": ("last_30d", ahora - timedelta(days=30)),
+        "Máximo": ("maximum", None),
+    }
+    dp, cut = RANGO.get(rango_lbl, RANGO["Hoy"])
+    return dp, "", "", cut, None
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _gasto_pais_cache(date_preset: str, since: str = "", until: str = ""):
+    tr = {"since": since, "until": until} if (since and until) else None
+    return fb.gasto_por_pais(date_preset, tr)
+
+
+def seccion_por_pais():
+    """Gasto (de Facebook) y facturación (si las ventas traen país) por país."""
+    ahora = db.ahora()
+    date_preset, since, until, cutoff, hasta = _rango_actual(ahora)
+
+    # Gasto por país (breakdown de Facebook) -> USD
+    gasto = {}
+    for r in _gasto_pais_cache(date_preset, since, until):
+        nombre = fb.pais_nombre(r["country"])
+        gasto[nombre] = gasto.get(nombre, 0.0) + r["spend"] * fx.tasa_a_usd(r["moneda"])
+
+    # Facturación por país (solo ventas que traen país) -> USD
+    mv = db.get_config("moneda_ventas", "auto")
+    if mv == "auto":
+        monedas = [a.get("cuenta_moneda") for a in db.obtener_anuncios() if a.get("cuenta_moneda")]
+        mv = max(set(monedas), key=monedas.count) if monedas else "USD"
+    rate_v = fx.tasa_a_usd(mv)
+    ingresos, ventas_n = {}, {}
+    for pais_raw, d in db.ventas_por_pais(cutoff, hasta).items():
+        nombre = fb.pais_nombre(pais_raw) if len(str(pais_raw)) <= 3 else str(pais_raw).strip().title()
+        ingresos[nombre] = ingresos.get(nombre, 0.0) + d["ingreso_nat"] * rate_v
+        ventas_n[nombre] = ventas_n.get(nombre, 0) + d["num"]
+
+    st.subheader("Rendimiento por país")
+    paises = sorted(set(gasto) | set(ingresos))
+    if not paises:
+        st.caption("El **gasto por país** aparece al conectar Facebook y pulsar Recargar. "
+                   "La **facturación por país** aparece si tus ventas traen una columna de país "
+                   "(configúrala en Configuración → Supabase, o agrega una columna 'Pais' al Excel).")
+        return
+    filas = []
+    for p in paises:
+        g = gasto.get(p, 0.0)
+        ing = ingresos.get(p, 0.0)
+        filas.append({"País": p, "Gasto (USD)": round(g, 2),
+                      "Facturación (USD)": round(ing, 2),
+                      "Ventas": ventas_n.get(p, 0),
+                      "ROAS": round((ing / g), 2) if g > 0 else 0.0,
+                      "Ganancia (USD)": round(ing - g, 2)})
+    df = pd.DataFrame(filas).sort_values("Gasto (USD)", ascending=False)
+    st.dataframe(df, use_container_width=True, hide_index=True, column_config={
+        "Gasto (USD)": st.column_config.NumberColumn(format="$%.2f"),
+        "Facturación (USD)": st.column_config.NumberColumn(format="$%.2f"),
+        "Ganancia (USD)": st.column_config.NumberColumn(format="$%.2f"),
+        "ROAS": st.column_config.NumberColumn(format="%.2f x"),
+    })
+    if not ingresos:
+        st.caption("Solo se ve el gasto por país. Para ver la **facturación por país**, agrega el "
+                   "país a tus ventas (columna 'Pais' en el Excel o mapea la columna en Supabase).")
+
+
 def seccion_vista_general():
     ahora = db.ahora()
 
@@ -413,22 +488,7 @@ def seccion_vista_general():
     business_sel = st.session_state.get("f_business", []) or []
     pais_sel = st.session_state.get("f_pais", "Todos")
 
-    since = until = ""
-    hasta_dt = None
-    if rango_lbl == "Personalizado" and st.session_state.get("f_desde") and st.session_state.get("f_hasta"):
-        d, h = st.session_state["f_desde"], st.session_state["f_hasta"]
-        since, until = d.strftime("%Y-%m-%d"), h.strftime("%Y-%m-%d")
-        cutoff = datetime.combine(d, datetime.min.time())
-        hasta_dt = datetime.combine(h, datetime.min.time()) + timedelta(days=1)
-        date_preset = "today"
-    else:
-        RANGO = {
-            "Hoy": ("today", ahora.replace(hour=0, minute=0, second=0, microsecond=0)),
-            "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
-            "Últimos 30 días": ("last_30d", ahora - timedelta(days=30)),
-            "Máximo": ("maximum", None),
-        }
-        date_preset, cutoff = RANGO.get(rango_lbl, RANGO["Hoy"])
+    date_preset, since, until, cutoff, hasta_dt = _rango_actual(ahora)
 
     todos = db.obtener_anuncios(solo_activos=False)
     if filtro == "Activos":
@@ -1375,18 +1435,20 @@ def _panel_supabase():
         col_ad = c1.text_input("Columna ID del anuncio", value=m[supa.K_ADID])
         col_val = c2.text_input("Columna valor de venta", value=m[supa.K_VALOR])
         col_hora = c3.text_input("Columna fecha/hora", value=m[supa.K_HORA])
-        c4, c5 = st.columns(2)
+        c4, c5, c6 = st.columns(3)
         col_prod = c4.text_input("Columna producto (opcional)", value=m[supa.K_PRODUCTO])
         col_id = c5.text_input("Columna id único (dedup)", value=m[supa.K_ID])
+        col_pais = c6.text_input("Columna país (opcional)", value=m.get(supa.K_PAIS, ""),
+                                 help="Para ver la facturación por país.")
         gcol1, gcol2 = st.columns(2)
         probar = gcol1.form_submit_button("Probar y ver columnas")
         guardar = gcol2.form_submit_button("Guardar mapeo", type="primary")
 
     if guardar:
-        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id)
+        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id, col_pais)
         st.success("Mapeo guardado.")
     if probar:
-        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id)
+        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id, col_pais)
         r = supa.probar_conexion()
         if r["ok"]:
             st.success(f"Conectado Columnas de tu tabla: {', '.join(r['columnas'])}")
@@ -1505,6 +1567,8 @@ def pagina_dashboard():
             st.rerun()
 
     seccion_vista_general()
+    st.divider()
+    seccion_por_pais()
     st.divider()
     seccion_alertas()
     st.divider()

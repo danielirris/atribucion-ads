@@ -132,6 +132,7 @@ def init_db() -> None:
     _asegurar_columna("anuncios", "budget_obj_id", "TEXT")
     _asegurar_columna("ventas", "ext_id", "TEXT")
     _asegurar_columna("ventas", "producto", "TEXT")
+    _asegurar_columna("ventas", "pais", "TEXT")
 
 
 def _asegurar_columna(tabla: str, columna: str, tipo: str) -> None:
@@ -382,19 +383,37 @@ def periodo_para_hora(ad_id: str, hora: datetime) -> Optional[dict]:
 # --------------------------------------------------------------------------- #
 def insertar_venta(ad_id: str, valor_venta: float, hora_venta: datetime,
                    periodo_id: Optional[int], hoja_origen: str,
-                   ext_id: Optional[str] = None, producto: Optional[str] = None) -> int:
+                   ext_id: Optional[str] = None, producto: Optional[str] = None,
+                   pais: Optional[str] = None) -> int:
     with _LOCK, _conn() as conn:
         cur = conn.execute(
             """
             INSERT INTO ventas
-                (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen, ext_id, producto)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen, ext_id, producto, pais)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (str(ad_id), float(valor_venta), a_texto(hora_venta), periodo_id,
-             hoja_origen, ext_id, producto),
+             hoja_origen, ext_id, producto, pais),
         )
         conn.commit()
         return cur.lastrowid
+
+
+def ventas_por_pais(cutoff: Optional[datetime] = None,
+                    hasta: Optional[datetime] = None) -> dict:
+    """Ingresos y # de ventas por país (solo ventas que traen país)."""
+    cond = ["pais IS NOT NULL", "pais <> ''"]
+    args = []
+    if cutoff is not None:
+        cond.append("hora_venta >= ?"); args.append(a_texto(cutoff))
+    if hasta is not None:
+        cond.append("hora_venta < ?"); args.append(a_texto(hasta))
+    where = " WHERE " + " AND ".join(cond)
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT pais, COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
+                FROM ventas{where} GROUP BY pais""", args)
+        return {r["pais"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
 
 
 def venta_existe(hoja_origen: str, ext_id: str) -> bool:

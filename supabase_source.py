@@ -26,6 +26,7 @@ K_VALOR = "sb_col_valor"
 K_HORA = "sb_col_hora"
 K_PRODUCTO = "sb_col_producto"
 K_ID = "sb_col_id"
+K_PAIS = "sb_col_pais"
 
 DEFAULTS = {
     K_TABLA: "ventas",
@@ -34,20 +35,27 @@ DEFAULTS = {
     K_HORA: "hora_venta",
     K_PRODUCTO: "producto",
     K_ID: "id",
+    K_PAIS: "",
 }
 
 
 def get_mapeo() -> dict:
-    return {k: (db.get_config(k) or v) for k, v in DEFAULTS.items()}
+    out = {}
+    for k, v in DEFAULTS.items():
+        val = db.get_config(k)
+        out[k] = val if val is not None else v
+    return out
 
 
-def guardar_mapeo(tabla, col_ad_id, col_valor, col_hora, col_producto, col_id) -> None:
+def guardar_mapeo(tabla, col_ad_id, col_valor, col_hora, col_producto, col_id,
+                  col_pais="") -> None:
     db.set_config(K_TABLA, tabla or DEFAULTS[K_TABLA])
     db.set_config(K_ADID, col_ad_id or DEFAULTS[K_ADID])
     db.set_config(K_VALOR, col_valor or DEFAULTS[K_VALOR])
     db.set_config(K_HORA, col_hora or DEFAULTS[K_HORA])
     db.set_config(K_PRODUCTO, col_producto or "")
     db.set_config(K_ID, col_id or DEFAULTS[K_ID])
+    db.set_config(K_PAIS, col_pais or "")
 
 
 def _headers() -> dict:
@@ -134,6 +142,10 @@ def sincronizar() -> dict:
         ad_id = str(ad_id).strip() if ad_id is not None else ""
         hora = _parse_hora(fila.get(m[K_HORA]), deteccion)
         producto = str(fila.get(col_prod)) if col_prod and fila.get(col_prod) is not None else None
+        col_pais = m.get(K_PAIS)
+        pais = str(fila.get(col_pais)).strip() if col_pais and fila.get(col_pais) is not None else None
+        if pais and pais.lower() in ("nan", "none", ""):
+            pais = None
 
         periodo = db.periodo_para_hora(ad_id, hora) if ad_id else None
         periodo_id = periodo["id"] if periodo else None
@@ -141,7 +153,7 @@ def sincronizar() -> dict:
             sin_periodo += 1
 
         db.insertar_venta(ad_id or "(sin anuncio)", valor, hora, periodo_id,
-                          HOJA, ext_id=ext_id, producto=producto)
+                          HOJA, ext_id=ext_id, producto=producto, pais=pais)
         insertadas += 1
 
     return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo, "error": None}

@@ -521,6 +521,44 @@ def _to_float(v) -> float:
         return 0.0
 
 
+def gasto_por_pais(date_preset: str = "today", time_range: Optional[dict] = None) -> list:
+    """
+    Gasto REAL por país usando el desglose (breakdown) de Facebook, a nivel de
+    cuenta. Devuelve [{"country": code, "spend": nativo, "moneda": cur}, ...]
+    agregando todas las conexiones/cuentas. Nunca lanza.
+    """
+    if not SDK_DISPONIBLE:
+        return []
+    cons = _conexiones_efectivas()
+    filas = []
+    for con in cons:
+        try:
+            api = _api_desde(con["token"], con["app_id"], con["app_secret"])
+            cuentas = _descubrir_cuentas(api, con.get("env_account"))
+        except Exception:
+            continue
+        for cta in cuentas:
+            moneda = cta.get("moneda") or "USD"
+            try:
+                params = {"level": "account", "breakdowns": ["country"], "limit": 500}
+                if time_range and time_range.get("since") and time_range.get("until"):
+                    params["time_range"] = {"since": time_range["since"], "until": time_range["until"]}
+                else:
+                    params["date_preset"] = date_preset
+                rows = AdAccount(cta["act_id"], api=api).get_insights(
+                    params=params, fields=["spend"])
+            except Exception as e:
+                _log(f"Gasto por país {cta['name']}: {e}")
+                continue
+            for r in rows:
+                pais = r.get("country")
+                if not pais:
+                    continue
+                filas.append({"country": str(pais).upper(),
+                              "spend": _to_float(r.get("spend")), "moneda": moneda})
+    return filas
+
+
 # --------------------------------------------------------------------------- #
 #  Modificación de presupuesto (usa el token de la conexión del anuncio)
 # --------------------------------------------------------------------------- #
