@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v34 · 2026-08-21"
+APP_VERSION = "v35 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -832,7 +832,13 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>'
             + roas_mini,
         ]
+        est_txt = ("Activo" if est_col == "#5ee7a0"
+                   else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
         rc = st.columns(ACC, vertical_alignment="center")
+        rc[0].markdown(
+            f'<div title="{est_txt}" style="text-align:center;color:{est_col};'
+            f'font-size:15px;line-height:1;margin-bottom:-6px">●</div>',
+            unsafe_allow_html=True)
         rc[0].toggle(" ", value=(f["activos"] > 0), key=f"tg_{f['sub']}",
                      on_change=_toggle_estado_cb, args=(f,),
                      label_visibility="collapsed",
