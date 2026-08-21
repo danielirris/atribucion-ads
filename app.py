@@ -26,7 +26,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v8 · 2026-08-20 · Tema con más color + tabla en sintonía"
+APP_VERSION = "v9 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -888,7 +888,11 @@ _LOGIN_CSS = """
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="collapsedControl"], header[data-testid="stHeader"]{ display:none !important; }
 [data-testid="stAppViewContainer"]{ background:#0a0d13 !important; overflow:hidden; }
-[data-testid="stAppViewContainer"] .main .block-container{ max-width:520px; padding-top:5vh; }
+[data-testid="stAppViewContainer"] .main .block-container{ max-width:380px; padding-top:7vh; }
+.login-foot{ position:fixed; left:0; right:0; bottom:16px; text-align:center;
+    font-family:'Inter',sans-serif; color:#7c8a99; font-size:12px; z-index:3; line-height:1.7; }
+.login-foot .ver{ color:#5f6b7a; font-size:11px; }
+.login-foot .hp{ color:#ff7a90; }
 /* Matriz de puntos animada */
 [data-testid="stAppViewContainer"]::before{
     content:""; position:fixed; inset:-25%;
@@ -968,6 +972,11 @@ def _gate_password():
                 st.rerun()
             else:
                 st.error("Usuario o contraseña incorrectos.")
+
+    st.markdown(
+        f'<div class="login-foot"><span class="ver">{_html.escape(APP_VERSION)}</span><br>'
+        f'Hecho con <span class="hp">&#10084;</span> por Daniel M</div>',
+        unsafe_allow_html=True)
     st.stop()
 
 
