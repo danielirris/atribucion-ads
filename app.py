@@ -26,7 +26,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v9 · 2026-08-20"
+APP_VERSION = "v10 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -888,7 +888,20 @@ _LOGIN_CSS = """
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="collapsedControl"], header[data-testid="stHeader"]{ display:none !important; }
 [data-testid="stAppViewContainer"]{ background:#0a0d13 !important; overflow:hidden; }
-[data-testid="stAppViewContainer"] .main .block-container{ max-width:380px; padding-top:7vh; }
+[data-testid="stAppViewContainer"] .main .block-container{ max-width:940px; padding-top:13vh; }
+/* Marca a un costado (tipo Facebook) */
+.login-side .login-logo{ margin:0 0 18px; }
+.login-title-side{ font-family:'Geist',sans-serif;font-weight:700;font-size:32px;line-height:1.12;
+    background:linear-gradient(100deg,#eafcff,#c7f6ee 45%,#d9cbff);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;margin:0; }
+.login-sub-side{ font-family:'Inter',sans-serif;color:#a7b6c4;font-size:14.5px;
+    margin:12px 0 18px;max-width:380px;line-height:1.55; }
+.login-feats{ list-style:none;padding:0;margin:0; }
+.login-feats li{ font-family:'Inter',sans-serif;color:#c3ccd6;font-size:13.5px;
+    margin:9px 0;padding-left:24px;position:relative; }
+.login-feats li::before{ content:"";position:absolute;left:0;top:5px;width:12px;height:12px;
+    border-radius:50%;background:linear-gradient(135deg,#8cd2d7,#c7c4ff);
+    box-shadow:0 0 10px rgba(140,210,215,.5); }
 .login-foot{ position:fixed; left:0; right:0; bottom:16px; text-align:center;
     font-family:'Inter',sans-serif; color:#7c8a99; font-size:12px; z-index:3; line-height:1.7; }
 .login-foot .ver{ color:#5f6b7a; font-size:11px; }
@@ -936,8 +949,8 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
 </style>
 """
 
-_LOGIN_HEADER = """
-<div class="login-brand">
+_LOGIN_HEADER_SIDE = """
+<div class="login-side">
   <div class="login-logo">
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" fill="#00373a" opacity=".18"/>
@@ -946,8 +959,14 @@ _LOGIN_HEADER = """
             stroke-linecap="round" stroke-linejoin="round" fill="none"/>
     </svg>
   </div>
-  <p class="login-title">ADS COMMAND CENTER</p>
-  <p class="login-sub">Atribución y control de tus anuncios en un solo lugar</p>
+  <h1 class="login-title-side">Ads Command Center</h1>
+  <p class="login-sub-side">Atribución de ventas y control de tus anuncios de Facebook.
+     Todo en dólares, en un solo lugar.</p>
+  <ul class="login-feats">
+    <li>Campañas, conjuntos y anuncios en una sola vista</li>
+    <li>ROAS, gasto y presupuesto de hoy</li>
+    <li>Excel + Supabase unidos automáticamente</li>
+  </ul>
 </div>
 """
 
@@ -959,19 +978,21 @@ def _gate_password():
         return
 
     st.markdown(_LOGIN_CSS, unsafe_allow_html=True)
-    st.markdown(_LOGIN_HEADER, unsafe_allow_html=True)
-
-    with st.container(border=True):
-        st.markdown("#### Iniciar sesión")
-        usuario = st.text_input("Usuario", key="_user", placeholder="usuario")
-        pwd = st.text_input("Contraseña", type="password", key="_pwd", placeholder="••••••••")
-        entrar = st.button("Entrar", use_container_width=True, type="primary")
-        if entrar:
-            if usuario.strip() == config.APP_USER and pwd == config.APP_PASSWORD:
-                st.session_state["_auth_ok"] = True
-                st.rerun()
-            else:
-                st.error("Usuario o contraseña incorrectos.")
+    colL, colR = st.columns([1.1, 0.9], gap="large", vertical_alignment="center")
+    with colL:
+        st.markdown(_LOGIN_HEADER_SIDE, unsafe_allow_html=True)
+    with colR:
+        with st.container(border=True):
+            st.markdown("#### Iniciar sesión")
+            usuario = st.text_input("Usuario", key="_user", placeholder="usuario")
+            pwd = st.text_input("Contraseña", type="password", key="_pwd", placeholder="••••••••")
+            entrar = st.button("Entrar", use_container_width=True, type="primary")
+            if entrar:
+                if usuario.strip() == config.APP_USER and pwd == config.APP_PASSWORD:
+                    st.session_state["_auth_ok"] = True
+                    st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos.")
 
     st.markdown(
         f'<div class="login-foot"><span class="ver">{_html.escape(APP_VERSION)}</span><br>'
