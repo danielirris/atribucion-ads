@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v44 · 2026-08-21"
+APP_VERSION = "v45 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -154,32 +154,50 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 # --------------------------------------------------------------------------- #
 #  Barra lateral: estado de servicios
 # --------------------------------------------------------------------------- #
-def sidebar_estado():
-    cta, ctb = st.sidebar.columns(2)
-    if cta.button("Actualizar", use_container_width=True):
-        try:
-            _insights_cache.clear()
-        except Exception:
-            pass
-        st.rerun()
-    if ctb.button("Recargar", use_container_width=True,
-                  help="Trae los anuncios de todas las conexiones de Facebook."):
-        with st.spinner("Consultando Facebook (todas las conexiones)..."):
-            r = fb.cargar_todo()
+def sidebar_estado(pagina: str = "dashboard"):
+    # Los controles de datos y los filtros solo aplican al Dashboard.
+    if pagina == "dashboard":
+        cta, ctb = st.sidebar.columns(2)
+        if cta.button("Actualizar", use_container_width=True):
             try:
                 _insights_cache.clear()
             except Exception:
                 pass
-        if r["num_anuncios"]:
-            st.sidebar.success(f"{r['num_anuncios']} anuncios de {r['num_cuentas']} cuenta(s).")
-        if r["errores"]:
-            st.sidebar.error("Errores: " + "; ".join(r["errores"])[:300])
-        st.rerun()
+            st.rerun()
+        if ctb.button("Recargar", use_container_width=True,
+                      help="Trae los anuncios de todas las conexiones de Facebook."):
+            with st.spinner("Consultando Facebook (todas las conexiones)..."):
+                r = fb.cargar_todo()
+                try:
+                    _insights_cache.clear()
+                except Exception:
+                    pass
+            if r["num_anuncios"]:
+                st.sidebar.success(f"{r['num_anuncios']} anuncios de {r['num_cuentas']} cuenta(s).")
+            if r["errores"]:
+                st.sidebar.error("Errores: " + "; ".join(r["errores"])[:300])
+            st.rerun()
 
-    sidebar_filtros()
+        sidebar_filtros()
 
-    # Versión discreta al final (para confirmar el despliegue).
+
+# Páginas de la app (para la navegación propia en el pie de la barra lateral).
+_PAGINAS = {
+    "dashboard": ("Dashboard", ":material/dashboard:"),
+    "tutoriales": ("Tutoriales", ":material/school:"),
+    "configuracion": ("Configuración", ":material/settings:"),
+}
+
+
+def _sidebar_nav(pagina: str):
+    """Navegación al PIE de la barra lateral (Configuración abajo, como se pidió)."""
     st.sidebar.divider()
+    for key, (label, icon) in _PAGINAS.items():
+        if st.sidebar.button(label, icon=icon, use_container_width=True,
+                             type="primary" if key == pagina else "secondary",
+                             key=f"nav_{key}"):
+            st.session_state["_pagina"] = key
+            st.rerun()
     st.sidebar.caption(f"Versión: {APP_VERSION}")
 
 
@@ -192,6 +210,38 @@ def _alias_conexion(conexion_id, conexiones):
     return f"Conexión {conexion_id}"
 
 
+# Palabras que NO son producto (estructura de la campaña, formatos, países...).
+_PROD_STOP = {
+    "CP", "CONJUNTO", "CONJUNTOS", "AD", "ADS", "ADSET", "CAMPANA", "CAMPAÑA", "CBO",
+    "ABO", "RETARGETING", "COMPRADORES", "COMPRADOR", "VIDEO", "VIDEOS", "UGC",
+    "TESTIMONIO", "LARGO", "CORTO", "INTERESES", "INTERES", "LOOKALIKE", "LAL",
+    "ABIERTO", "ADVANTAGE", "COPY", "NUEVO", "NUEVA", "TEST", "PRUEBA", "IMAGEN",
+    "CARRUSEL", "ANUNCIO", "ANUNCIOS", "FRIO", "FRÍO", "CALIENTE", "REMARKETING",
+    "DIA", "DÍA", "DIAS", "DÍAS", "NUEVOS", "NUEVAS", "PROSPECTING",
+}
+_PROD_PAISES = {"BR", "MX", "CO", "AR", "CL", "PE", "US", "USA", "EC", "VE", "BO",
+                "PY", "UY", "GT", "DO", "PA", "CR", "HN", "SV", "NI", "ES"}
+
+
+def _extraer_productos(campanas) -> list:
+    """Saca nombres de PRODUCTO de los nombres de campaña.
+    Separa por | - / y descarta números, países y palabras de estructura."""
+    import re
+    cand = {}
+    for nombre in campanas:
+        for parte in re.split(r"[|/\-–—]", str(nombre)):
+            parte = re.sub(r"#\s*[\d.]+", " ", parte)   # quita "#2", "AD6.1"
+            parte = re.sub(r"[\d.]+", " ", parte)         # quita números sueltos
+            palabras = [w for w in parte.strip().split()
+                        if len(w) >= 3 and w.upper() not in _PROD_STOP
+                        and w.upper() not in _PROD_PAISES]
+            if palabras:
+                clave = " ".join(palabras).strip().title()
+                cand[clave] = cand.get(clave, 0) + 1
+    # ordenados por frecuencia (los productos más usados primero)
+    return [k for k, _ in sorted(cand.items(), key=lambda x: (-x[1], x[0]))]
+
+
 def sidebar_filtros():
     """Filtros globales que afectan al Dashboard (se guardan en session_state)."""
     st.sidebar.divider()
@@ -202,11 +252,14 @@ def sidebar_filtros():
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
     campanas = sorted({a.get("campaign_nombre") for a in todos if a.get("campaign_nombre")})
+    # Productos: se extraen del NOMBRE de las campañas (más los de las ventas).
     vd = db.valores_venta_distintos()
-    productos = sorted(set(vd["origenes"]) | set(vd["productos"]))
+    productos = _extraer_productos(campanas)
+    extra = [p for p in (set(vd["origenes"]) | set(vd["productos"])) if p]
+    for p in sorted(extra):
+        if p.upper() not in {x.upper() for x in productos}:
+            productos.append(p)
 
-    st.sidebar.text_input("Buscar (anuncio, conjunto o campaña)", key="f_buscar",
-                          placeholder="nombre o ID...")
     st.sidebar.multiselect("Business", business, key="f_business",
                            placeholder="Todos los Business")
     st.sidebar.multiselect("Cuentas publicitarias", cuentas, key="f_cuenta",
@@ -218,7 +271,8 @@ def sidebar_filtros():
     if productos:
         st.sidebar.multiselect("Producto", productos, key="f_producto",
                                placeholder="Todos los productos",
-                               help="Filtra por producto (según el nombre de la campaña).")
+                               help="Se saca del nombre de la campaña (p. ej. BOLIS, "
+                                    "LAVADORAS). Filtra campañas/conjuntos que lo contengan.")
     st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
 
     _resumen_pais(todos)
@@ -538,8 +592,8 @@ def seccion_por_pais():
 def seccion_vista_general():
     ahora = db.ahora()
 
-    # Controles ARRIBA: nivel, estado y rango de fechas.
-    ct1, ct2, ct3 = st.columns([2.3, 1.7, 1.7])
+    # Controles ARRIBA: nivel, estado, rango de fechas y búsqueda.
+    ct1, ct2, ct3, ct4 = st.columns([2.0, 1.5, 1.4, 1.6])
     with ct1:
         nivel_lbl = st.segmented_control(
             "Ver por", ["Campaña", "Conjunto de anuncios", "Anuncio"],
@@ -553,9 +607,12 @@ def seccion_vista_general():
         st.selectbox("Rango de fechas",
                      ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
                       "Máximo", "Personalizado"], key="f_rango")
-        # El calendario del rango personalizado va DEBAJO del selector (ancho de
-        # columna, no de toda la pantalla).
-        if st.session_state.get("f_rango") == "Personalizado":
+    with ct4:
+        st.text_input("Buscar", key="f_buscar", placeholder="nombre o ID…")
+    # El calendario del rango personalizado va DEBAJO (ancho de columna).
+    if st.session_state.get("f_rango") == "Personalizado":
+        cp, _ = st.columns([1.4, 4])
+        with cp:
             hoy = db.ahora().date()
             st.date_input("Desde – hasta", value=(hoy - timedelta(days=7), hoy),
                           format="DD/MM/YYYY", key="f_rango_pers")
@@ -2074,6 +2131,91 @@ def _panel_moneda():
         st.success("Se quitó el tipo de cambio manual; vuelve al automático.")
 
 
+def pagina_tutoriales():
+    st.title("Tutoriales")
+    st.caption("Guías paso a paso para conectar Facebook (Business + cuentas publicitarias) "
+               "y Supabase. Cualquier duda, sígueme preguntando.")
+
+    with st.expander("① Conectar un Business de Facebook (token de Usuario del Sistema)",
+                     expanded=True):
+        st.markdown("""
+Para leer tus anuncios, la app necesita un **token de Usuario del Sistema** de cada Business.
+Es la forma segura y permanente (no caduca como los tokens normales).
+
+**Paso a paso:**
+
+1. Entra a **[business.facebook.com](https://business.facebook.com)** con el perfil dueño del Business.
+2. Arriba a la derecha, abre **Configuración del negocio** (el ⚙️).
+3. En el menú izquierdo: **Usuarios → Usuarios del sistema**.
+4. Pulsa **Agregar**, ponle un nombre (ej. *"Reporte Ads"*) y rol **Administrador**. Crear.
+5. Con el usuario del sistema seleccionado, pulsa **Asignar activos** →
+   **Cuentas publicitarias** → marca **todas las cuentas** que quieras ver →
+   dale permiso de **Administrar campañas** (control total). Guardar.
+6. Ahora pulsa **Generar nuevo token**.
+   - **App:** elige tu app (si no tienes, créala en el paso ②).
+   - **Permisos (scopes):** marca **`ads_read`** y **`ads_management`**
+     (y `business_management` si aparece).
+   - Genera y **copia el token** (es largo).
+7. Ve a esta app → **Configuración → Conexiones → Agregar conexión**, pégalo y guarda.
+8. Vuelve al **Dashboard** y pulsa **Recargar**. Deberían aparecer tus anuncios.
+
+> 🔁 **Repite** los pasos 3–7 **por cada Business** que tengas. Cada Business = una conexión.
+> No importa que las cuentas estén en perfiles distintos: lo que manda es el Business.
+        """)
+
+    with st.expander("② ¿No tienes App de Facebook? Créala una vez (App ID y secreto)"):
+        st.markdown("""
+La **App** es solo el "contenedor" técnico que autoriza los llamados. Se crea **una vez** y
+sirve para todos tus Business.
+
+1. Entra a **[developers.facebook.com/apps](https://developers.facebook.com/apps)**.
+2. **Crear app** → tipo **Negocio/Business** → ponle nombre → crear.
+3. En **Configuración → Información básica** copia el **Identificador de la app (App ID)**
+   y la **Clave secreta (App Secret)**.
+4. En el producto **Marketing API** (Agregar producto) quedará habilitado el acceso a anuncios.
+5. En esta app puedes poner ese App ID / App Secret al **agregar la conexión** (o dejar los
+   del sistema si ya están configurados). El token del paso ① es lo esencial.
+
+> Con **modo de desarrollo** basta para leer TUS propias cuentas. No necesitas revisión de
+> Facebook mientras solo consultes tus anuncios (no publicas nada de cara a terceros).
+        """)
+
+    with st.expander("③ Conectar Supabase (segunda fuente de ventas)"):
+        st.markdown("""
+Si tú registras ventas en **Supabase** (y por ejemplo un socio las deja en Excel/Sheets),
+la app une **todas** las fuentes en un mismo lugar.
+
+1. Entra a tu proyecto en **[supabase.com](https://supabase.com)**.
+2. **Project Settings (⚙️) → API**. Copia:
+   - **Project URL** (algo como `https://xxxx.supabase.co`).
+   - Una **API key**: usa la **`service_role`** (o una key con permiso de lectura de tu tabla).
+3. Esas dos van como **variables de entorno** en EasyPanel del servicio:
+   - `SUPABASE_URL` = tu Project URL
+   - `SUPABASE_KEY` = la key
+   Guarda y **redespliega**.
+4. En esta app → **Configuración → Supabase**: escribe el **nombre de la tabla** y **mapea las
+   columnas** (id del anuncio, valor de la venta, fecha/hora, y opcional producto/país e id único).
+5. Pulsa **Probar conexión** para ver una muestra, y luego **Sincronizar**.
+
+> Las ventas de Supabase se deduplican por su **id** de fila, así que no se repiten.
+> En **Configuración → Moneda → Fuente de las ventas** puedes elegir contar *Todas* las
+> fuentes o solo una (para no contar doble si la misma venta está en dos lados).
+        """)
+
+    with st.expander("④ Ver la facturación por país (campañas en varios países)"):
+        st.markdown("""
+La app saca el **país de cada anuncio del *targeting*** del conjunto (a quién se lo estás
+mostrando), no del país de la cuenta. Así, si lanzas campañas a **otros países**, cada una
+queda etiquetada con su país real.
+
+- El **gasto por país** aparece solo con la conexión de Facebook activa (viene del desglose de Meta).
+- La **facturación por país** aparece si tus **ventas traen el país**:
+  - En **Excel/Sheets**: agrega una columna **`Pais`** (o `País`) en tus ventas.
+  - En **Supabase**: mapea la **columna de país** en Configuración → Supabase.
+- Míralo en el **Dashboard → sección "Rendimiento por país"** (gasto, facturación, ventas y ROAS por país).
+        """)
+
+
 def pagina_configuracion():
     st.title("Configuración")
     st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase), la moneda y "
@@ -2240,12 +2382,17 @@ def pagina_dashboard():
 def main():
     _gate_password()
     _inject_css()
-    sidebar_estado()
-    nav = st.navigation([
-        st.Page(pagina_dashboard, title="Dashboard", icon=":material/dashboard:", default=True),
-        st.Page(pagina_configuracion, title="Configuración", icon=":material/settings:"),
-    ])
-    nav.run()
+    pagina = st.session_state.get("_pagina", "dashboard")
+    if pagina not in _PAGINAS:
+        pagina = "dashboard"
+    sidebar_estado(pagina)
+    _sidebar_nav(pagina)
+    if pagina == "configuracion":
+        pagina_configuracion()
+    elif pagina == "tutoriales":
+        pagina_tutoriales()
+    else:
+        pagina_dashboard()
 
 
 main()
