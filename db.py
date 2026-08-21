@@ -128,6 +128,8 @@ def init_db() -> None:
     _asegurar_columna("anuncios", "campaign_id", "TEXT")
     _asegurar_columna("anuncios", "campaign_nombre", "TEXT")
     _asegurar_columna("anuncios", "adset_nombre", "TEXT")
+    _asegurar_columna("anuncios", "budget_nivel", "TEXT")
+    _asegurar_columna("anuncios", "budget_obj_id", "TEXT")
     _asegurar_columna("ventas", "ext_id", "TEXT")
     _asegurar_columna("ventas", "producto", "TEXT")
 
@@ -149,7 +151,8 @@ def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
                    conexion_id: Optional[int] = None, cuenta_id: Optional[str] = None,
                    cuenta_nombre: Optional[str] = None, cuenta_pais: Optional[str] = None,
                    campaign_id: Optional[str] = None, campaign_nombre: Optional[str] = None,
-                   adset_nombre: Optional[str] = None, cuenta_moneda: Optional[str] = None) -> None:
+                   adset_nombre: Optional[str] = None, cuenta_moneda: Optional[str] = None,
+                   budget_nivel: Optional[str] = None, budget_obj_id: Optional[str] = None) -> None:
     """Inserta o actualiza un anuncio."""
     with _LOCK, _conn() as conn:
         conn.execute(
@@ -157,8 +160,9 @@ def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
             INSERT INTO anuncios
                 (ad_id, nombre, adset_id, activo, fecha_creacion, effective_status,
                  conexion_id, cuenta_id, cuenta_nombre, cuenta_pais, cuenta_moneda,
-                 campaign_id, campaign_nombre, adset_nombre, ultima_actualizacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 campaign_id, campaign_nombre, adset_nombre, budget_nivel, budget_obj_id,
+                 ultima_actualizacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ad_id) DO UPDATE SET
                 nombre               = excluded.nombre,
                 adset_id             = COALESCE(excluded.adset_id, anuncios.adset_id),
@@ -173,11 +177,14 @@ def upsert_anuncio(ad_id: str, nombre: str, adset_id: Optional[str] = None,
                 campaign_id          = COALESCE(excluded.campaign_id, anuncios.campaign_id),
                 campaign_nombre      = COALESCE(excluded.campaign_nombre, anuncios.campaign_nombre),
                 adset_nombre         = COALESCE(excluded.adset_nombre, anuncios.adset_nombre),
+                budget_nivel         = COALESCE(excluded.budget_nivel, anuncios.budget_nivel),
+                budget_obj_id        = COALESCE(excluded.budget_obj_id, anuncios.budget_obj_id),
                 ultima_actualizacion = excluded.ultima_actualizacion
             """,
             (str(ad_id), nombre, adset_id, activo, fecha_creacion, effective_status,
              conexion_id, cuenta_id, cuenta_nombre, cuenta_pais, cuenta_moneda,
-             campaign_id, campaign_nombre, adset_nombre, a_texto(ahora())),
+             campaign_id, campaign_nombre, adset_nombre, budget_nivel, budget_obj_id,
+             a_texto(ahora())),
         )
         conn.commit()
 
@@ -434,27 +441,24 @@ def resumen_ventas_periodo(periodo_id: int) -> dict:
         return {"num_ventas": r["num"], "ingreso_total": r["total"]}
 
 
-def ventas_agg_por_ad(cutoff: Optional[datetime] = None) -> dict:
+def ventas_agg_por_ad(cutoff: Optional[datetime] = None,
+                      hasta: Optional[datetime] = None) -> dict:
     """
     Agrega ventas por anuncio: {ad_id: {"num_ventas": n, "ingreso_total": x}}.
-    Si se pasa `cutoff`, solo cuenta ventas con hora_venta >= cutoff.
+    `cutoff` = fecha inicial (hora_venta >= cutoff); `hasta` = fecha final (< hasta).
     """
+    cond, args = [], []
+    if cutoff is not None:
+        cond.append("hora_venta >= ?")
+        args.append(a_texto(cutoff))
+    if hasta is not None:
+        cond.append("hora_venta < ?")
+        args.append(a_texto(hasta))
+    where = (" WHERE " + " AND ".join(cond)) if cond else ""
     with _conn() as conn:
-        if cutoff is not None:
-            rows = conn.execute(
-                """
-                SELECT ad_id, COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
-                FROM ventas WHERE hora_venta >= ? GROUP BY ad_id
-                """,
-                (a_texto(cutoff),),
-            )
-        else:
-            rows = conn.execute(
-                """
-                SELECT ad_id, COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
-                FROM ventas GROUP BY ad_id
-                """
-            )
+        rows = conn.execute(
+            f"""SELECT ad_id, COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
+                FROM ventas{where} GROUP BY ad_id""", args)
         return {r["ad_id"]: {"num_ventas": r["num"], "ingreso_total": float(r["total"])}
                 for r in rows}
 

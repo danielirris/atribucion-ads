@@ -26,7 +26,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v10 · 2026-08-20"
+APP_VERSION = "v11 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -112,9 +112,11 @@ def _fecha_corta(iso):
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _insights_cache(date_preset: str, nivel: str = "ad"):
+def _insights_cache(date_preset: str, nivel: str = "ad",
+                    since: str = "", until: str = ""):
     """Cachea los insights de Facebook 2 min (por rango y nivel)."""
-    return fb.obtener_insights(date_preset, nivel)
+    tr = {"since": since, "until": until} if (since and until) else None
+    return fb.obtener_insights(date_preset, nivel, time_range=tr)
 
 
 def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
@@ -127,13 +129,15 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
     if not anuncio:
         return {"ok": False, "error": "Anuncio no encontrado.", "solo_local": False}
 
-    adset_id = anuncio.get("adset_id")
     conexion_id = anuncio.get("conexion_id")
+    # El presupuesto puede vivir en el conjunto (adset) o en la campaña (CBO).
+    obj_id = anuncio.get("budget_obj_id") or anuncio.get("adset_id")
+    nivel = anuncio.get("budget_nivel") or "adset"
     hay_conexion = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
 
     # Si hay API/conexión disponible, intentamos el cambio en Facebook.
-    if fb.SDK_DISPONIBLE and hay_conexion and adset_id:
-        r = fb.actualizar_presupuesto_facebook(adset_id, nuevo_monto, conexion_id)
+    if fb.SDK_DISPONIBLE and hay_conexion and obj_id:
+        r = fb.actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id)
         if not r["ok"]:
             # NO cerramos el período en SQLite.
             return {"ok": False, "error": r["error"], "solo_local": False}
@@ -142,7 +146,7 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 
     # Sin API disponible: registro local solamente (advertencia).
     db.cambiar_periodo(ad_id, nuevo_monto)
-    motivo = "sin adset_id" if not adset_id else "Facebook no disponible"
+    motivo = "sin conjunto/campaña" if not obj_id else "Facebook no disponible"
     return {"ok": True, "error": None, "solo_local": True, "motivo": motivo}
 
 
@@ -186,15 +190,18 @@ def sidebar_filtros():
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
 
-    st.sidebar.selectbox("Ver por", ["Anuncio", "Conjunto de anuncios", "Campaña"],
-                         key="f_nivel")
     st.sidebar.radio("Estado", ["Activos", "Apagados", "Todos"],
                      horizontal=True, key="f_estado")
     st.sidebar.selectbox("Cuenta publicitaria", ["Todas"] + cuentas, key="f_cuenta")
     st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
-    st.sidebar.selectbox("Rango (métricas Facebook)",
-                         ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo"],
+    st.sidebar.selectbox("Rango de fechas",
+                         ["Hoy", "Últimos 7 días", "Últimos 30 días", "Máximo", "Personalizado"],
                          key="f_rango")
+    if st.session_state.get("f_rango") == "Personalizado":
+        hoy = db.ahora().date()
+        c1, c2 = st.sidebar.columns(2)
+        c1.date_input("Desde", value=hoy - timedelta(days=7), key="f_desde")
+        c2.date_input("Hasta", value=hoy, key="f_hasta")
 
     _resumen_pais(todos)
 
@@ -288,7 +295,7 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         ingresos = ingresos_nat * rate_v  # -> USD
 
         if nivel == "campaign":
-            vistos, presupuesto, hay = set(), 0.0, False
+            vistos, presup_nat, hay = set(), 0.0, False
             for x in ads:
                 asid = x.get("adset_id")
                 if asid in vistos:
@@ -296,59 +303,117 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
                 vistos.add(asid)
                 p = _presupuesto_ad(x["ad_id"])
                 if p is not None:
-                    presupuesto += p
+                    presup_nat += p
                     hay = True
-            presupuesto = (presupuesto * rate_c) if hay else None
+            presup_nat = presup_nat if hay else None
         else:
-            p = _presupuesto_ad(ads[0]["ad_id"])
-            presupuesto = (p * rate_c) if p is not None else None
+            presup_nat = _presupuesto_ad(ads[0]["ad_id"])
+        presupuesto = (presup_nat * rate_c) if presup_nat is not None else None
 
         ins = insights.get(g["ins_key"], {}) if g["ins_key"] else {}
         spend_nat = ins.get("spend")
         spend = (spend_nat * rate_c) if spend_nat is not None else None
-        if spend is not None:
-            gasto = spend
+        if spend_nat is not None:
+            gasto_nat = spend_nat
         else:
-            gasto = sum((calculos.metricas_periodo_actual(x["ad_id"], ahora) or {}).get(
-                "gasto_estimado", 0.0) for x in ads) * rate_c
+            gasto_nat = sum((calculos.metricas_periodo_actual(x["ad_id"], ahora) or {}).get(
+                "gasto_estimado", 0.0) for x in ads)
+        gasto = gasto_nat * rate_c
 
         cpm = (ins.get("cpm") * rate_c) if ins.get("cpm") is not None else None
         costo_conv = (ins.get("costo_conversacion") * rate_c) if ins.get("costo_conversacion") is not None else None
 
         roas = (ingresos / gasto) if gasto and gasto > 0 else 0.0
         activos = sum(1 for x in ads if _es_activo(x))
+        rep = ads[0]
         filas.append({
             "nombre": g["nombre"], "sub": g["sub"], "cuenta": g["cuenta"],
+            "moneda": moneda_cuenta, "rate_c": rate_c,
             "activos": activos, "total": len(ads),
-            "presupuesto": presupuesto, "spend": spend, "gasto": gasto,
+            "presupuesto": presupuesto, "presup_nat": presup_nat,
+            "spend": spend, "gasto": gasto, "gasto_nat": gasto_nat,
             "pct": (spend / presupuesto * 100) if (spend is not None and presupuesto) else None,
             "cpm": cpm, "ctr": ins.get("ctr"),
-            "num": num, "ingresos": ingresos,
+            "num": num, "ingresos": ingresos, "ingresos_nat": ingresos_nat,
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
             "conv": ins.get("conversaciones"), "costo_conv": costo_conv,
+            # datos para acciones (modificar presupuesto / duplicar)
+            "ad_rep": rep["ad_id"], "ad_ids": [x["ad_id"] for x in ads],
+            "adset_rep": rep.get("adset_id"),
+            "conexion_id": rep.get("conexion_id"),
+            "budget_obj_id": rep.get("budget_obj_id") or rep.get("adset_id"),
+            "budget_nivel": rep.get("budget_nivel") or "adset",
+            "cuenta_id": rep.get("cuenta_id"), "cuenta_nombre": rep.get("cuenta_nombre"),
         })
     filas.sort(key=lambda f: f["roas"], reverse=True)
     return filas
 
 
+def _num(v):
+    """Número con coma decimal, sin símbolo (para la moneda original)."""
+    try:
+        return f"{float(v):,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
+    except Exception:
+        return "—"
+
+
+def _money_html(usd, nat, moneda, cls=""):
+    """USD grande + moneda original pequeña abajo."""
+    big = f'<div class="big {cls}">{_usd(usd)}</div>'
+    if nat is not None and (moneda or "USD").upper() != "USD":
+        return big + f'<div class="sub">{_num(nat)} {moneda}</div>'
+    return big
+
+
+def _aplicar_presupuesto_grupo(fila, nuevo_usd):
+    """Cambia el presupuesto (en USD, se convierte a la moneda de la cuenta)."""
+    rate = fila.get("rate_c") or 1.0
+    nativo = (nuevo_usd / rate) if rate else nuevo_usd
+    hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
+    if fb.SDK_DISPONIBLE and hay and fila.get("budget_obj_id"):
+        r = fb.actualizar_presupuesto(fila["budget_obj_id"], fila.get("budget_nivel", "adset"),
+                                      nativo, fila.get("conexion_id"))
+        if not r["ok"]:
+            return {"ok": False, "error": r["error"]}
+        for aid in fila["ad_ids"]:
+            db.cambiar_periodo(aid, nativo)
+        return {"ok": True, "solo_local": False, "nativo": nativo}
+    for aid in fila["ad_ids"]:
+        db.cambiar_periodo(aid, nativo)
+    return {"ok": True, "solo_local": True, "nativo": nativo}
+
+
 def seccion_vista_general():
     ahora = db.ahora()
-    nivel_lbl = st.session_state.get("f_nivel", "Anuncio")
-    nivel = _NIVELES.get(nivel_lbl, "ad")
-    st.header(nivel_lbl + "s" if nivel_lbl == "Anuncio" else nivel_lbl)
+
+    # Control de nivel ARRIBA, bien visible (por defecto Conjuntos).
+    nivel_lbl = st.segmented_control(
+        "Ver por", ["Campaña", "Conjunto de anuncios", "Anuncio"],
+        default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
+        key="f_nivel", label_visibility="collapsed") or "Conjunto de anuncios"
+    nivel = _NIVELES.get(nivel_lbl, "adset")
 
     filtro = st.session_state.get("f_estado", "Activos")
     rango_lbl = st.session_state.get("f_rango", "Hoy")
     cuenta_sel = st.session_state.get("f_cuenta", "Todas")
     pais_sel = st.session_state.get("f_pais", "Todos")
 
-    RANGO = {
-        "Hoy": ("today", ahora.replace(hour=0, minute=0, second=0, microsecond=0)),
-        "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
-        "Últimos 30 días": ("last_30d", ahora - timedelta(days=30)),
-        "Máximo": ("maximum", None),
-    }
-    date_preset, cutoff = RANGO.get(rango_lbl, RANGO["Hoy"])
+    since = until = ""
+    hasta_dt = None
+    if rango_lbl == "Personalizado" and st.session_state.get("f_desde") and st.session_state.get("f_hasta"):
+        d, h = st.session_state["f_desde"], st.session_state["f_hasta"]
+        since, until = d.strftime("%Y-%m-%d"), h.strftime("%Y-%m-%d")
+        cutoff = datetime.combine(d, datetime.min.time())
+        hasta_dt = datetime.combine(h, datetime.min.time()) + timedelta(days=1)
+        date_preset = "today"
+    else:
+        RANGO = {
+            "Hoy": ("today", ahora.replace(hour=0, minute=0, second=0, microsecond=0)),
+            "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
+            "Últimos 30 días": ("last_30d", ahora - timedelta(days=30)),
+            "Máximo": ("maximum", None),
+        }
+        date_preset, cutoff = RANGO.get(rango_lbl, RANGO["Hoy"])
 
     todos = db.obtener_anuncios(solo_activos=False)
     if filtro == "Activos":
@@ -363,58 +428,120 @@ def seccion_vista_general():
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
 
     st.caption(f"Ver por: {nivel_lbl} · estado: {filtro} · cuenta: {cuenta_sel} · "
-               f"país: {pais_sel} · rango: {rango_lbl}")
+               f"país: {pais_sel} · rango: {rango_lbl} · valores en USD")
 
     if not anuncios:
-        st.info("No hay datos para este filtro. En la barra lateral pulsa **Recargar** para "
-                "traer los anuncios de Facebook.")
+        st.info("No hay datos para este filtro. En la barra lateral (o arriba) pulsa **Recargar** "
+                "para traer los anuncios de Facebook.")
         return
 
-    insights = _insights_cache(date_preset, nivel)
-    ventas_agg = db.ventas_agg_por_ad(cutoff)
+    insights = _insights_cache(date_preset, nivel, since, until)
+    ventas_agg = db.ventas_agg_por_ad(cutoff, hasta_dt)
     filas = _construir_filas(anuncios, nivel, insights, ventas_agg, ahora)
 
     if not insights:
-        st.info("El **gasto**, CPM, CTR y conversaciones vienen de Facebook. Aún no se ven "
-                "porque no hay una conexión activa: agrega un token en **Configuración → "
-                "Conexiones** y pulsa **Recargar**. Mientras tanto el gasto es estimado.")
+        st.info("El **gasto**, CPM y conversaciones vienen de Facebook. Aún no se ven porque no "
+                "hay conexión activa: agrega un token en **Configuración → Conexiones** y pulsa "
+                "**Recargar**. Mientras tanto el gasto es estimado.")
 
-    st.markdown(_TABLA_CSS + _render_tabla(filas, nivel), unsafe_allow_html=True)
+    st.markdown(_TABLA_CSS, unsafe_allow_html=True)
+    _render_lista_nativa(filas, nivel)
 
-    _editor_presupuesto()
+
+def _render_lista_nativa(filas, nivel):
+    esc = _html.escape
+    primera = {"ad": "Anuncio", "adset": "Conjunto de anuncios", "campaign": "Campaña"}[nivel]
+    W = [3, 1.0, 1.7, 1.4, 1.0, 1.4, 0.9, 1.6]
+    labels = [primera, "Estado", "Presupuesto", "Gasto", "Ventas", "Ingresos", "ROAS", "Acciones"]
+    head = st.columns(W)
+    for c, l in zip(head, labels):
+        c.markdown(f'<div class="hcol">{l}</div>', unsafe_allow_html=True)
+
+    for f in filas:
+        cols = st.columns(W, vertical_alignment="center")
+        cols[0].markdown(
+            f'<div class="big">{esc(str(f["nombre"]))[:52]}</div>'
+            f'<div class="sub">{esc(str(f["cuenta"]))} · {esc(str(f["sub"]))[:18]}</div>',
+            unsafe_allow_html=True)
+        if f["activos"] and (nivel == "ad" or f["activos"] == f["total"]):
+            est = '<span class="pill pill-run">Corriendo</span>'
+        elif f["activos"]:
+            est = f'<span class="pill pill-run">{f["activos"]}/{f["total"]}</span>'
+        else:
+            est = '<span class="pill pill-off">Pausado</span>'
+        cols[1].markdown(est, unsafe_allow_html=True)
+        cols[2].markdown(_money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
+                         unsafe_allow_html=True)
+        # Botón modificar presupuesto AL LADO del presupuesto
+        with cols[2].popover("Modificar", use_container_width=True):
+            _pop_presupuesto(f)
+        cols[3].markdown(_money_html(f["gasto"], f["gasto_nat"], f["moneda"]) +
+                         ('<div class="sub">estimado</div>' if f["spend"] is None else ''),
+                         unsafe_allow_html=True)
+        cols[4].markdown(f'<div class="big">{f["num"]}</div>', unsafe_allow_html=True)
+        cols[5].markdown(_money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
+                         unsafe_allow_html=True)
+        cols[6].markdown(
+            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:15px">{f["roas"]:.2f}x</div>',
+            unsafe_allow_html=True)
+        # Botón duplicar al final de la fila
+        with cols[7].popover("Duplicar", use_container_width=True):
+            _pop_duplicar(f)
+        st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
 
-def _editor_presupuesto():
-    """Modifica el presupuesto de un anuncio (se aplica en Facebook)."""
-    st.subheader("Modificar presupuesto de un anuncio")
-    st.caption("El presupuesto se aplica en Facebook (a nivel de conjunto). Elige el anuncio, "
-               "escribe el nuevo monto diario y pulsa Aplicar.")
-    anuncios = db.obtener_anuncios(solo_activos=False)
-    if not anuncios:
+def _pop_presupuesto(f):
+    st.markdown(f"**{esc_nombre(f)}**")
+    st.caption(f"Presupuesto actual: {_usd(f['presupuesto'])}"
+               + (f" ({_num(f['presup_nat'])} {f['moneda']})" if (f['moneda'] or 'USD').upper() != 'USD' else ""))
+    nuevo = st.number_input("Nuevo presupuesto diario (USD)", min_value=0.0,
+                            value=float(f["presupuesto"] or 0.0), step=1.0,
+                            key=f"pres_{f['sub']}")
+    if (f["moneda"] or "USD").upper() != "USD":
+        st.caption(f"Se enviará a Facebook ≈ {_num(nuevo / (f['rate_c'] or 1))} {f['moneda']}")
+    if st.button("Aplicar en Facebook", type="primary", key=f"presbtn_{f['sub']}",
+                 use_container_width=True):
+        r = _aplicar_presupuesto_grupo(f, nuevo)
+        if r["ok"] and r.get("solo_local"):
+            st.warning("Guardado localmente (sin conexión de Facebook).")
+        elif r["ok"]:
+            st.success("Presupuesto actualizado en Facebook.")
+        else:
+            st.error(f"Facebook rechazó el cambio: {r['error']}")
+        time.sleep(1.0)
+        st.rerun()
+
+
+def _pop_duplicar(f):
+    st.markdown(f"**Duplicar: {esc_nombre(f)}**")
+    hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
+    if not hay:
+        st.info("Necesitas una conexión de Facebook activa para duplicar.")
         return
-    opciones = {f"{a['nombre']}  ·  {a['ad_id']}": a['ad_id'] for a in anuncios}
-    col1, col2, col3 = st.columns([3, 2, 2])
-    with col1:
-        sel = st.selectbox("Anuncio", list(opciones.keys()), key="edit_sel")
-    ad_id_sel = opciones[sel]
-    abierto_sel = db.periodo_abierto(ad_id_sel)
-    presup_actual = float(abierto_sel["presupuesto"]) if abierto_sel else 0.0
-    with col2:
-        nuevo = st.number_input("Nuevo presupuesto diario", min_value=0.0,
-                                value=float(presup_actual or 0.0), step=1.0, key="edit_monto")
-    with col3:
-        st.write("")
-        st.write("")
-        if st.button("Aplicar", key="edit_btn", use_container_width=True, type="primary"):
-            r = cambio_presupuesto_completo(ad_id_sel, nuevo)
-            if r["ok"] and r.get("solo_local"):
-                st.warning(f"Registrado localmente ({r.get('motivo')}). Nuevo período iniciado.")
-            elif r["ok"]:
-                st.success("Presupuesto actualizado en Facebook — nuevo período iniciado.")
-            else:
-                st.error(f"Facebook rechazó el cambio: {r['error']}. El período NO se cerró.")
-            time.sleep(1.0)
-            st.rerun()
+    n = st.number_input("Número de copias", min_value=1, max_value=10, value=4, step=1,
+                        key=f"dupn_{f['sub']}")
+    presu = st.number_input("Presupuesto por copia (USD)", min_value=0.0,
+                            value=float(f["presupuesto"] or 0.0), step=1.0, key=f"dupp_{f['sub']}")
+    activar = st.toggle("Activar copias de inmediato", value=False, key=f"dupa_{f['sub']}")
+    if st.button("Duplicar ahora", type="primary", key=f"dupbtn_{f['sub']}",
+                 use_container_width=True):
+        nativo = presu / (f["rate_c"] or 1)
+        with st.spinner("Duplicando en Facebook..."):
+            res = fb.duplicar_anuncio(f["ad_rep"], int(n), float(nativo), activar=bool(activar),
+                                      conexion_id=f.get("conexion_id"), cuenta_id=f.get("cuenta_id"),
+                                      cuenta_nombre=f.get("cuenta_nombre"))
+        ok = res.get("exitosas", [])
+        fail = res.get("fallidas", [])
+        if res.get("error_global"):
+            st.error(res["error_global"])
+        if ok:
+            st.success(f"{len(ok)} copia(s) creada(s).")
+        for x in fail:
+            st.error(f"{x['nombre']}: {x['error']}")
+
+
+def esc_nombre(f):
+    return _html.escape(str(f.get("nombre", "")))[:52]
 
 
 # --------------------------------------------------------------------------- #
@@ -448,6 +575,9 @@ table.ads tbody tr:hover td { background:linear-gradient(90deg, rgba(140,210,215
 .chip { display:inline-block; background:rgba(191,242,226,.14); color:#BFF2E2; border-radius:6px;
     padding:2px 8px; font-size:10px; font-weight:600; }
 .up { color:#5ee7a0; } .down { color:#ff8b84; } .flat { color:#9ca3af; }
+.hcol { color:#8fd6db; font-size:10px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.06em; padding:4px 0 2px; }
+hr.rowline { margin:6px 0; border:none; border-top:1px solid rgba(255,255,255,.06); }
 </style>
 """
 
@@ -917,10 +1047,15 @@ _LOGIN_CSS = """
 [data-testid="stAppViewContainer"]::after{
     content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
     background:
-      radial-gradient(520px 520px at 22% 20%, rgba(191,242,226,.16), transparent 60%),
-      radial-gradient(560px 560px at 82% 82%, rgba(230,213,255,.16), transparent 60%);
+      radial-gradient(560px 560px at 18% 22%, rgba(191,242,226,.22), transparent 60%),
+      radial-gradient(600px 600px at 84% 80%, rgba(230,213,255,.22), transparent 60%),
+      radial-gradient(520px 520px at 55% 8%, rgba(199,196,255,.16), transparent 60%),
+      radial-gradient(480px 480px at 8% 92%, rgba(140,210,215,.14), transparent 60%);
     animation:orbFloat 16s ease-in-out infinite alternate;
 }
+.login-feats li:nth-child(1)::before{ background:linear-gradient(135deg,#8cd2d7,#a8eff4); }
+.login-feats li:nth-child(2)::before{ background:linear-gradient(135deg,#BFF2E2,#8cd2d7); }
+.login-feats li:nth-child(3)::before{ background:linear-gradient(135deg,#C7C4FF,#E6D5FF); }
 @keyframes matrixPulse{ 0%,100%{opacity:.35} 50%{opacity:.85} }
 @keyframes orbFloat{ 0%{transform:translate(0,0)} 100%{transform:translate(-24px,26px)} }
 /* Contenido por encima */
@@ -1090,9 +1225,10 @@ def _inject_css():
     html, body, [data-testid="stAppViewContainer"]{ color:var(--txt); }
     [data-testid="stAppViewContainer"]{
         background:
-          radial-gradient(900px 600px at 90% -5%, rgba(140,210,215,.16), transparent 55%),
-          radial-gradient(820px 620px at -8% 8%, rgba(230,213,255,.15), transparent 55%),
-          radial-gradient(700px 700px at 55% 115%, rgba(199,196,255,.12), transparent 55%),
+          radial-gradient(1000px 640px at 92% -6%, rgba(140,210,215,.22), transparent 56%),
+          radial-gradient(900px 660px at -10% 6%, rgba(230,213,255,.20), transparent 56%),
+          radial-gradient(760px 760px at 50% 118%, rgba(199,196,255,.17), transparent 56%),
+          radial-gradient(600px 600px at 30% 45%, rgba(191,242,226,.07), transparent 60%),
           linear-gradient(180deg,#0d0f16,#0b0d13) !important;
     }
     /* Matriz de puntos sutil + brillo suave, detrás del contenido */
@@ -1340,6 +1476,16 @@ def pagina_dashboard():
     seccion_lote()
     st.divider()
     seccion_manual()
+
+    # Actualización automática de la vista cada 15 minutos.
+    _auto_refresco(900)
+
+
+def _auto_refresco(segundos: int):
+    st.components.v1.html(
+        f"<script>setTimeout(function(){{window.parent.location.reload();}}, {segundos*1000});</script>",
+        height=0,
+    )
 
 
 # --------------------------------------------------------------------------- #

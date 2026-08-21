@@ -37,6 +37,7 @@ try:
     from facebook_business.adobjects.user import User
     from facebook_business.adobjects.ad import Ad
     from facebook_business.adobjects.adset import AdSet
+    from facebook_business.adobjects.campaign import Campaign
     from facebook_business.exceptions import FacebookRequestError
 except Exception as e:  # pragma: no cover
     SDK_DISPONIBLE = False
@@ -253,6 +254,7 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
 
         total_cuentas += len(cuentas)
         cache_budget = {}
+        cache_camp = {}
 
         for cta in cuentas:
             try:
@@ -289,6 +291,8 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
 
                 presupuesto = None
                 pais_pauta = None
+                budget_nivel = None
+                budget_obj_id = None
                 if adset_id:
                     if adset_id in cache_budget:
                         info = cache_budget[adset_id]
@@ -297,6 +301,20 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                         cache_budget[adset_id] = info
                     presupuesto = info.get("presupuesto")
                     pais_pauta = info.get("pais")
+                    if presupuesto is not None:
+                        budget_nivel = "adset"
+                        budget_obj_id = adset_id
+
+                # Si el conjunto no tiene presupuesto propio, es CBO (a nivel de campaña).
+                if presupuesto is None and campaign_id:
+                    if campaign_id in cache_camp:
+                        presupuesto = cache_camp[campaign_id]
+                    else:
+                        presupuesto = _leer_campaign_budget(campaign_id, api)
+                        cache_camp[campaign_id] = presupuesto
+                    if presupuesto is not None:
+                        budget_nivel = "campaign"
+                        budget_obj_id = campaign_id
 
                 # País: el del targeting del conjunto; si no, el de la cuenta.
                 pais = pais_pauta or cta.get("pais")
@@ -309,6 +327,7 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                     cuenta_moneda=cta.get("moneda"),
                     campaign_id=campaign_id, campaign_nombre=campaign_nombre,
                     adset_nombre=adset_nombre,
+                    budget_nivel=budget_nivel, budget_obj_id=budget_obj_id,
                 )
                 ids_vistos.append(ad_id)
 
@@ -366,10 +385,21 @@ def _leer_daily_budget_adset(adset_id: str, api=None) -> Optional[float]:
     return _leer_adset_info(adset_id, api).get("presupuesto")
 
 
+def _leer_campaign_budget(campaign_id: str, api=None) -> Optional[float]:
+    """Presupuesto diario de la campaña (CBO), centavos → unidades."""
+    try:
+        camp = Campaign(campaign_id, api=api).api_get(fields=[Campaign.Field.daily_budget])
+        raw = camp.get(Campaign.Field.daily_budget)
+        return (float(raw) / 100.0) if raw is not None else None
+    except Exception:
+        return None
+
+
 # --------------------------------------------------------------------------- #
 #  Insights agregados de todas las conexiones/cuentas
 # --------------------------------------------------------------------------- #
-def obtener_insights(date_preset: str = "today", nivel: str = "ad") -> dict:
+def obtener_insights(date_preset: str = "today", nivel: str = "ad",
+                     time_range: Optional[dict] = None) -> dict:
     """
     Métricas agregadas de todas las conexiones/cuentas, al nivel indicado:
       nivel='ad'       → clave = ad_id
@@ -393,8 +423,14 @@ def obtener_insights(date_preset: str = "today", nivel: str = "ad") -> dict:
             continue
         for cta in cuentas:
             try:
+                params = {"level": nivel, "limit": 500}
+                if time_range and time_range.get("since") and time_range.get("until"):
+                    params["time_range"] = {"since": time_range["since"],
+                                            "until": time_range["until"]}
+                else:
+                    params["date_preset"] = date_preset
                 filas = AdAccount(cta["act_id"], api=api).get_insights(
-                    params={"level": nivel, "date_preset": date_preset, "limit": 500},
+                    params=params,
                     fields=[id_field, "spend", "cpm", "ctr", "impressions",
                             "clicks", "actions"])
             except Exception as e:
@@ -430,25 +466,40 @@ def _to_float(v) -> float:
 # --------------------------------------------------------------------------- #
 #  Modificación de presupuesto (usa el token de la conexión del anuncio)
 # --------------------------------------------------------------------------- #
-def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float,
-                                    conexion_id: Optional[int] = None) -> dict:
-    """POST /{adset-id} daily_budget (monto*100). NO toca SQLite."""
+def actualizar_presupuesto(obj_id: str, nivel: str, nuevo_monto: float,
+                           conexion_id: Optional[int] = None) -> dict:
+    """
+    Cambia el daily_budget en Facebook del objeto correcto:
+      nivel='campaign' → la campaña (CBO); si no → el conjunto (adset).
+    Monto en centavos (monto*100). NO toca SQLite.
+    """
     if not SDK_DISPONIBLE:
         return {"ok": False, "error": f"SDK no disponible: {SDK_ERROR_IMPORT}"}
-    if not adset_id:
-        return {"ok": False, "error": "El anuncio no tiene adset_id. Recarga los anuncios."}
+    if not obj_id:
+        return {"ok": False, "error": "Este anuncio no tiene dónde aplicar el presupuesto. "
+                                       "Recarga los anuncios."}
     api = _api_para_conexion(conexion_id)
     if api is None:
         return {"ok": False, "error": "No hay token para la conexión de este anuncio."}
     try:
         centavos = int(round(float(nuevo_monto) * 100))
-        AdSet(adset_id, api=api).api_update(params={AdSet.Field.daily_budget: centavos})
-        _log(f"Presupuesto de adset {adset_id} → {nuevo_monto:.2f}.")
+        if nivel == "campaign":
+            Campaign(obj_id, api=api).api_update(params={Campaign.Field.daily_budget: centavos})
+            _log(f"Presupuesto de campaña {obj_id} → {nuevo_monto:.2f}.")
+        else:
+            AdSet(obj_id, api=api).api_update(params={AdSet.Field.daily_budget: centavos})
+            _log(f"Presupuesto de conjunto {obj_id} → {nuevo_monto:.2f}.")
         return {"ok": True, "error": None}
     except FacebookRequestError as e:
         return {"ok": False, "error": _fmt_fb_error(e)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float,
+                                    conexion_id: Optional[int] = None) -> dict:
+    """Compat: actualiza el presupuesto del conjunto."""
+    return actualizar_presupuesto(adset_id, "adset", nuevo_monto, conexion_id)
 
 
 # --------------------------------------------------------------------------- #
