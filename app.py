@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v47 · 2026-08-21"
+APP_VERSION = "v48 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -430,10 +430,12 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             inicio_mod = db.a_fecha(ab["hora_inicio"])
             mins = max(0.0, (ahora - inicio_mod).total_seconds() / 60.0) if inicio_mod else 0.0
             gmod_nat = (float(ab["presupuesto"]) / config.MINUTOS_POR_DIA) * mins
-            imod_nat = db.ventas_suma(ad_ids_grupo, inicio_mod)["ingreso_nat"]
+            vs_mod = db.ventas_suma(ad_ids_grupo, inicio_mod)
+            imod_nat = vs_mod["ingreso_nat"]
+            ventas_mod = int(vs_mod.get("num", 0))
             roas_mod = (imod_nat / gmod_nat) if gmod_nat > 0 else 0.0
         else:
-            inicio_mod, gmod_nat, imod_nat, roas_mod = None, 0.0, 0.0, 0.0
+            inicio_mod, gmod_nat, imod_nat, roas_mod, ventas_mod = None, 0.0, 0.0, 0.0, 0
 
         filas.append({
             "nombre": g["nombre"], "sub": g["sub"], "cuenta": g["cuenta"],
@@ -447,7 +449,7 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
             "creado": rep.get("fecha_creacion"), "ult_mod": inicio_mod,
             "roas_mod": roas_mod, "ingresos_mod": imod_nat * rate_v,
-            "gasto_mod": gmod_nat * rate_c,
+            "gasto_mod": gmod_nat * rate_c, "ventas_mod": ventas_mod,
             "conv": ins.get("conversaciones"),
             "impresiones": ins.get("impressions"), "clics": ins.get("clicks"),
             "spend_nat": spend_nat, "compras_meta": ins.get("compras"),
@@ -785,8 +787,48 @@ def _estado_cell(f, nivel):
     return '<span class="pill pill-off">Pausado</span>'
 
 
+def _perf_block_html(f, ahora) -> str:
+    """Bloque 'Rendimiento desde el último cambio de presupuesto' (visible en la
+    fila y en la card). Datos en tiempo real desde SQLite."""
+    umod = f.get("ult_mod")
+    if not umod:
+        return ('<div class="perf-block"><div class="perf-line">'
+                '<span class="perf-time">Sin cambios de presupuesto registrados</span>'
+                '</div></div>')
+    mins = max(0, int((ahora - umod).total_seconds() // 60))
+    if mins < 60:
+        hace = f"hace {mins} min"
+    else:
+        _h, _m = divmod(mins, 60)
+        hace = f"hace {_h}h {_m}m" if _m else f"hace {_h}h"
+    roas = f.get("roas_mod") or 0.0
+    ventas = int(f.get("ventas_mod") or 0)
+    ingreso = f.get("ingresos_mod") or 0.0
+    if roas > 2:
+        col, emoji = "#5ee7a0", "🟢"
+    elif roas >= 1:
+        col, emoji = "#f5c451", "🟡"
+    else:
+        col, emoji = "#ff8b84", "🔴"
+    pct = max(0.0, min(roas / 3.0, 1.0)) * 100.0
+    alerta = mins > 30 and roas < 1.5
+    cls = "perf-block perf-alert" if alerta else "perf-block"
+    warn = '<span class="perf-warn">⚠️</span>' if alerta else ''
+    return (
+        f'<div class="{cls}">'
+        f'<div class="perf-line">{warn}'
+        f'<span class="perf-time">{hace}</span> <span class="perf-sep">|</span> '
+        f'<b>{ventas}</b> vtas <span class="perf-sep">|</span> '
+        f'<b>{_usd(ingreso)}</b> <span class="perf-sep">|</span> '
+        f'ROAS <b style="color:{col}">{roas:.2f}x {emoji}</b></div>'
+        f'<div class="perf-bar">'
+        f'<div class="perf-fill" style="width:{pct:.0f}%"></div>'
+        f'<div class="perf-marker"></div></div></div>')
+
+
 def _render_lista_nativa(filas, nivel):
     esc = _html.escape
+    ahora = db.ahora()
     _msg = st.session_state.pop("_estado_msg", None)
     if _msg:
         (st.success if _msg[0] == "ok" else st.error)(_msg[1])
@@ -864,37 +906,22 @@ def _render_lista_nativa(filas, nivel):
             est_col = "#ff8b84"
         else:
             est_col = "#f5c451"
-        # Datos "desde la última modificación de presupuesto".
+        # Fecha de creación (se mantiene bajo Cuenta).
         creado = _fecha_corta(f.get("creado"))
-        umod = f.get("ult_mod")
-        ult_mod = _fecha_corta(umod.isoformat()) if umod else "—"
-        rmod = f.get("roas_mod") or 0.0
-        rmod_col = _roas_color(rmod)
-        util_mod = (f.get("ingresos_mod") or 0) - (f.get("gasto_mod") or 0)
-        mod_mini = (f'<div class="meta-mini" title="Última modificación de presupuesto">'
-                    f'Últ. mod. <b>{ult_mod}</b></div>')
         creado_mini = f'<div class="meta-mini" title="Fecha de creación">Creado <b>{creado}</b></div>'
-        gasto_mini = (f'<div class="meta-mini" title="Gastado desde la última modificación">'
-                      f'mod. <b>{_usd(f.get("gasto_mod") or 0)}</b></div>')
-        fact_mini = (f'<div class="meta-mini" title="Facturado desde la última modificación">'
-                     f'mod. <b>{_usd(f.get("ingresos_mod") or 0)}</b></div>')
-        util_mini = (f'<div class="meta-mini" title="Utilidad desde la última modificación">'
-                     f'mod. <b style="color:{"#5ee7a0" if util_mod>=0 else "#ff8b84"}">'
-                     f'{"+" if util_mod>=0 else ""}{_usd(util_mod)}</b></div>')
-        roas_mini = (f'<div class="meta-mini" title="ROAS desde la última modificación">'
-                     f'mod. <b style="color:{rmod_col}">{rmod:.2f}x</b></div>')
+        # Bloque de rendimiento desde el último cambio, visible bajo el nombre.
+        perf = _perf_block_html(f, ahora)
         # Degradado rojo SOLO para los que van muy mal: gastan y su ROAS < 1 (pierden).
         muy_mal = bool(f["gasto"] and f["gasto"] > 0 and (f["roas"] or 0) < 1.0)
         nombre_html = (f'<div class="big" style="color:{est_col};white-space:normal;'
-                       f'word-break:break-word">{esc(str(f["nombre"]))[:120]}</div>'
-                       f'{mod_mini}')
+                       f'word-break:break-word">{esc(str(f["nombre"]))[:120]}</div>')
         if muy_mal:
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
                            f'debajo de 1x con gasto. Considera pausar o ajustar.">'
                            f'{nombre_html}</div>')
+        nombre_html += perf
         gastado_cell = (_money_html(f["gasto"], f["gasto_nat"], f["moneda"])
-                        + ('<div class="sub">est.</div>' if f["spend"] is None else '')
-                        + gasto_mini)
+                        + ('<div class="sub">est.</div>' if f["spend"] is None else ''))
         cells = [
             nombre_html,
             f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>'
@@ -906,10 +933,9 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big">{cpm}</div><div class="sub">{ctr} CTR</div>',
             f'<div class="big">{f["num"]}</div>',
             costov,
-            _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint") + fact_mini,
-            f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>' + util_mini,
-            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>'
-            + roas_mini,
+            _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
+            f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
+            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>',
         ]
         est_txt = ("Activo" if est_col == "#5ee7a0"
                    else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
@@ -923,7 +949,7 @@ def _render_lista_nativa(filas, nivel):
                      label_visibility="collapsed",
                      help="Prender / Apagar en Facebook")
         with rc[1]:
-            dcols = st.columns(GRID_W, gap="small", vertical_alignment="center")
+            dcols = st.columns(GRID_W, gap="small", vertical_alignment="top")
             for col, cell in zip(dcols, cells):
                 col.markdown(f'<div class="gcell">{cell}</div>', unsafe_allow_html=True)
         if rc[2].button("", icon=":material/info:", key=f"info_{f['sub']}",
@@ -944,6 +970,11 @@ def _dialog_info():
         return
     st.markdown(f"#### {f['nombre']}")
     st.caption(f"{f.get('cuenta','')} · ID del anuncio: {f.get('sub','')}")
+
+    # Bloque "Rendimiento desde el último cambio" (mismo de la fila), en tiempo real.
+    st.markdown(_TABLA_CSS, unsafe_allow_html=True)
+    st.markdown("**Rendimiento desde el último cambio**", unsafe_allow_html=True)
+    st.markdown(_perf_block_html(f, db.ahora()), unsafe_allow_html=True)
 
     rate = f.get("rate_c") or 1.0
     a = db.obtener_anuncio(f["ad_rep"]) or {}
@@ -1131,6 +1162,22 @@ table.ads tbody tr:hover td { background:linear-gradient(90deg, rgba(140,210,215
 .hcol { color:#8fd6db; font-size:10px; font-weight:700; text-transform:uppercase;
     letter-spacing:.06em; padding:4px 0 2px; }
 hr.rowline { margin:6px 0; border:none; border-top:1px solid rgba(255,255,255,.06); }
+/* Bloque "Rendimiento desde el último cambio" (fila + card) */
+.perf-block{ background:rgba(255,255,255,.03); border-radius:8px; padding:6px 10px;
+    margin-top:5px; border:1px solid transparent; }
+.perf-block.perf-alert{ border:1px solid rgba(239,68,68,.4); }
+.perf-line{ font-size:10.5px; color:#dbe2ea; line-height:1.35; }
+.perf-line b{ color:#fff; font-weight:600; }
+.perf-time{ color:#8a93a6; }
+.perf-sep{ color:#5a6474; margin:0 1px; }
+.perf-warn{ margin-right:5px; animation:perfBlink 1s steps(1) infinite; }
+@keyframes perfBlink{ 50%{ opacity:.15; } }
+.perf-bar{ position:relative; height:5px; border-radius:3px;
+    background:rgba(255,255,255,.08); margin-top:5px; }
+.perf-fill{ height:100%; border-radius:3px;
+    background:linear-gradient(90deg,#7c3aed,#10b981); transition:width .4s ease; }
+.perf-marker{ position:absolute; top:-1px; left:66.6%; width:2px; height:7px;
+    background:#e6e7ee; opacity:.8; border-radius:1px; }
 </style>
 """
 
