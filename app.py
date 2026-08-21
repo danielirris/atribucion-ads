@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v20 · 2026-08-20"
+APP_VERSION = "v21 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -214,9 +214,11 @@ def sidebar_filtros():
                          key="f_rango")
     if st.session_state.get("f_rango") == "Personalizado":
         hoy = db.ahora().date()
-        st.sidebar.date_input("Desde", value=hoy - timedelta(days=7), key="f_desde",
-                              format="DD/MM/YYYY")
-        st.sidebar.date_input("Hasta", value=hoy, key="f_hasta", format="DD/MM/YYYY")
+        st.sidebar.date_input(
+            "Elige el rango (desde – hasta)",
+            value=(hoy - timedelta(days=7), hoy),
+            format="DD/MM/YYYY", key="f_rango_pers",
+            help="Haz clic para abrir el calendario: elige el día de inicio y luego el de fin.")
 
     _resumen_pais(todos)
 
@@ -420,11 +422,13 @@ def _aplicar_presupuesto_grupo(fila, nuevo_usd):
 def _rango_actual(ahora):
     """Devuelve (date_preset, since, until, cutoff, hasta) según el filtro de rango."""
     rango_lbl = st.session_state.get("f_rango", "Hoy")
-    if rango_lbl == "Personalizado" and st.session_state.get("f_desde") and st.session_state.get("f_hasta"):
-        d, h = st.session_state["f_desde"], st.session_state["f_hasta"]
-        return ("today", d.strftime("%Y-%m-%d"), h.strftime("%Y-%m-%d"),
-                datetime.combine(d, datetime.min.time()),
-                datetime.combine(h, datetime.min.time()) + timedelta(days=1))
+    if rango_lbl == "Personalizado":
+        rp = st.session_state.get("f_rango_pers")
+        if isinstance(rp, (list, tuple)) and len(rp) == 2 and rp[0] and rp[1]:
+            d, h = rp[0], rp[1]
+            return ("today", d.strftime("%Y-%m-%d"), h.strftime("%Y-%m-%d"),
+                    datetime.combine(d, datetime.min.time()),
+                    datetime.combine(h, datetime.min.time()) + timedelta(days=1))
     RANGO = {
         "Hoy": ("today", ahora.replace(hour=0, minute=0, second=0, microsecond=0)),
         "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
