@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v56 · 2026-08-21"
+APP_VERSION = "v57 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -1147,7 +1147,7 @@ def _dialog_presupuesto():
         _pop_presupuesto(f)
 
 
-@st.dialog("Duplicar anuncio")
+@st.dialog("Duplicar")
 def _dialog_duplicar():
     f = st.session_state.get("dup_row")
     if f:
@@ -1200,44 +1200,58 @@ def _pop_presupuesto(f):
 
 
 def _pop_duplicar(f):
-    st.markdown(f"**Duplicar: {esc_nombre(f)}**")
+    # Duplica según el NIVEL de la vista actual (anuncio / conjunto / campaña).
+    nivel = f.get("status_nivel", "ad")
+    obj_id = f.get("status_obj_id")
+    lbl = {"ad": "anuncio", "adset": "conjunto", "campaign": "campaña"}.get(nivel, "anuncio")
+    st.markdown(f"**Duplicar {lbl}: {esc_nombre(f)}**")
+    st.caption(f"Estás en la vista **{lbl}**, así que se duplica el {lbl} completo "
+               "en su misma campaña.")
     hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
     if not hay:
         st.info("Necesitas una conexión de Facebook activa para duplicar.")
         return
     n = st.number_input("Número de copias", min_value=1, max_value=10, value=4, step=1,
                         key=f"dupn_{f['sub']}")
-    presu = st.number_input("Presupuesto por copia (USD)", min_value=0.0,
+    presu = st.number_input(f"Presupuesto por copia (USD)", min_value=0.0,
                             value=4.0, step=1.0, key=f"dupp_{f['sub']}",
                             help="Por defecto 4 USD por copia.")
     activar = st.toggle("Activar copias de inmediato", value=False, key=f"dupa_{f['sub']}")
-    reutilizar = st.toggle("Conservar interacciones (usar la misma publicación)",
-                           value=True, key=f"dupr_{f['sub']}",
-                           help="Fuerza a las copias a usar el MISMO post del original, así "
-                                "arrastran los likes, comentarios y compartidos (prueba social).")
+    reutilizar = True
+    if nivel == "ad":
+        reutilizar = st.toggle("Conservar interacciones (usar la misma publicación)",
+                               value=True, key=f"dupr_{f['sub']}",
+                               help="Fuerza a la copia a usar el MISMO post del original, así "
+                                    "arrastra los likes, comentarios y compartidos.")
+    else:
+        st.caption("Las interacciones se conservan si los anuncios del "
+                   f"{lbl} usan publicaciones existentes (deep copy de Facebook).")
     if st.button("Duplicar ahora", type="primary", key=f"dupbtn_{f['sub']}",
                  use_container_width=True):
         nativo = presu / (f["rate_c"] or 1)
-        with st.spinner("Duplicando en Facebook..."):
-            res = fb.duplicar_anuncio(f["ad_rep"], int(n), float(nativo), activar=bool(activar),
-                                      conexion_id=f.get("conexion_id"), cuenta_id=f.get("cuenta_id"),
-                                      cuenta_nombre=f.get("cuenta_nombre"),
-                                      reutilizar_post=bool(reutilizar))
+        with st.spinner(f"Duplicando {lbl} en Facebook..."):
+            res = fb.duplicar_objeto(nivel, obj_id, int(n), float(nativo),
+                                     activar=bool(activar), conexion_id=f.get("conexion_id"),
+                                     cuenta_id=f.get("cuenta_id"),
+                                     cuenta_nombre=f.get("cuenta_nombre"),
+                                     reutilizar_post=bool(reutilizar))
         ok = res.get("exitosas", [])
         fail = res.get("fallidas", [])
         if res.get("error_global"):
             st.error(res["error_global"])
         if ok:
-            st.success(f"{len(ok)} copia(s) creada(s).")
-            if reutilizar:
+            st.success(f"{len(ok)} copia(s) de {lbl} creada(s).")
+            if nivel == "ad" and reutilizar:
                 nrp = res.get("post_reutilizado", 0)
                 if res.get("post_id") and nrp:
                     st.info(f"✅ {nrp} copia(s) usan la misma publicación "
-                            f"({res['post_id']}) → conservan likes/comentarios/compartidos.")
+                            f"({res['post_id']}) → conservan interacciones.")
                 elif not res.get("post_id"):
-                    st.warning("No pude leer la publicación del original (puede ser un "
-                               "creativo especial), así que las copias quedaron con su propio "
-                               "post. Revisa los mensajes del sistema.")
+                    st.warning("No pude leer la publicación del original (creativo especial); "
+                               "las copias quedaron con su propio post.")
+            if nivel != "ad":
+                st.info("Pulsa **🔄 Recargar** (arriba a la derecha) para ver las copias "
+                        "con sus anuncios en la tabla.")
         for x in fail:
             st.error(f"{x['nombre']}: {x['error']}")
 

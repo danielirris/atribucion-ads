@@ -930,6 +930,67 @@ def _resolver_adset_de_copia(copia: dict, nuevo_ad_id: Optional[str], api) -> Op
     return None
 
 
+def duplicar_objeto(nivel: str, obj_id: str, num_copias: int, presupuesto: float,
+                    activar: bool = False, conexion_id: Optional[int] = None,
+                    cuenta_id: Optional[str] = None, cuenta_nombre: Optional[str] = None,
+                    reutilizar_post: bool = True) -> dict:
+    """Duplica según el NIVEL de la vista:
+      - 'ad'       → duplica el ANUNCIO (con reuso de publicación/interacciones).
+      - 'adset'    → duplica el CONJUNTO completo (con sus anuncios) en su campaña.
+      - 'campaign' → duplica la CAMPAÑA completa.
+    """
+    if nivel == "ad":
+        return duplicar_anuncio(obj_id, num_copias, presupuesto, activar, conexion_id,
+                                cuenta_id, cuenta_nombre, reutilizar_post)
+
+    resultado = {"exitosas": [], "fallidas": [], "error_global": None, "nivel": nivel}
+    if not SDK_DISPONIBLE:
+        resultado["error_global"] = f"SDK no disponible: {SDK_ERROR_IMPORT}"
+        return resultado
+    api = _api_para_conexion(conexion_id)
+    if api is None:
+        resultado["error_global"] = "No hay token para la conexión."
+        return resultado
+    if not obj_id:
+        resultado["error_global"] = "No hay objeto que duplicar. Pulsa Recargar y reintenta."
+        return resultado
+
+    num_copias = max(1, min(int(num_copias), 10))
+    status_copia = "ACTIVE" if activar else "PAUSED"
+    centavos = int(round(float(presupuesto) * 100))
+    etiqueta = "conjunto" if nivel == "adset" else "campaña"
+
+    for i in range(1, num_copias + 1):
+        try:
+            if nivel == "adset":
+                copia = AdSet(obj_id, api=api).create_copy(params={
+                    "deep_copy": True, "status_option": status_copia})
+                nuevo = copia.get("copied_adset_id") or copia.get("id")
+                if nuevo:
+                    try:  # aplica el presupuesto al conjunto nuevo (si no es CBO)
+                        AdSet(nuevo, api=api).api_update(
+                            params={AdSet.Field.daily_budget: centavos})
+                    except Exception as e:
+                        _log(f"Copia de conjunto {nuevo}: presupuesto no aplicado ({e}).")
+            else:  # campaign
+                copia = Campaign(obj_id, api=api).create_copy(params={
+                    "deep_copy": True, "status_option": status_copia})
+                nuevo = copia.get("copied_campaign_id") or copia.get("id")
+                if nuevo:
+                    try:  # si es CBO, aplica presupuesto a la campaña; si no, se ignora
+                        Campaign(nuevo, api=api).api_update(
+                            params={Campaign.Field.daily_budget: centavos})
+                    except Exception:
+                        pass
+            resultado["exitosas"].append({"id": nuevo, "nivel": nivel})
+            _log(f"Copia de {etiqueta} creada desde {obj_id}: {nuevo}.")
+        except FacebookRequestError as e:
+            resultado["fallidas"].append({"nombre": f"{etiqueta} {i}", "error": _fmt_fb_error(e)})
+        except Exception as e:
+            resultado["fallidas"].append({"nombre": f"{etiqueta} {i}", "error": str(e)})
+    return resultado
+
+
 # --------------------------------------------------------------------------- #
 #  Polling en segundo plano
 # --------------------------------------------------------------------------- #
