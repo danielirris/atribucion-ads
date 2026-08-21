@@ -67,6 +67,26 @@ def _norm(s):
     return str(s).strip().lower()
 
 
+def limpiar_id(v):
+    """
+    Normaliza un ad_id: evita que un ID largo se convierta en notación científica
+    o quede con '.0'. Ej: 1.2023682856562014e+17 -> 120236828565620140.
+    """
+    if v is None:
+        return ""
+    s = str(v).strip()
+    if s.lower() in ("nan", "none", ""):
+        return ""
+    # Notación científica o decimal -> entero exacto (con Decimal, sin perder dígitos).
+    if "e" in s.lower() or "." in s:
+        try:
+            from decimal import Decimal
+            return str(int(Decimal(s)))
+        except Exception:
+            pass
+    return s
+
+
 def detectar_columnas(columnas):
     """
     Detecta las columnas de ID de anuncio, valor, hora y país por nombre (flexible).
@@ -189,8 +209,8 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
     deteccion = db.ahora()
     total = 0
     try:
-        # engine openpyxl para .xlsx. sheet_name=None -> dict de todas las hojas.
-        hojas = pd.read_excel(path, sheet_name=None, engine="openpyxl")
+        # dtype=str: lee todo como texto para no perder precisión en IDs largos.
+        hojas = pd.read_excel(path, sheet_name=None, engine="openpyxl", dtype=str)
     except Exception as e:
         _set_estado(ultimo_error=f"No se pudo leer el Excel: {e}")
         _log(f"Error leyendo Excel: {e}")
@@ -225,7 +245,7 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
                 hora = _parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
                 pais = fila.get(cmap["pais"]) if cmap["pais"] else None
                 pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
-                ok = _procesar_fila(fila.get(cmap["id"]), valor, hora, nombre_hoja, pais=pais)
+                ok = _procesar_fila(limpiar_id(fila.get(cmap["id"])), valor, hora, nombre_hoja, pais=pais)
                 if ok:
                     total += 1
 
@@ -322,7 +342,7 @@ def _sincronizar_filas_existentes() -> None:
     if not os.path.exists(path):
         return
     try:
-        hojas = pd.read_excel(path, sheet_name=None, engine="openpyxl")
+        hojas = pd.read_excel(path, sheet_name=None, engine="openpyxl", dtype=str)
         with _PROC_LOCK:
             for nombre_hoja, dff in hojas.items():
                 clave = f"{os.path.abspath(path)}::{nombre_hoja}"

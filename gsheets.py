@@ -135,7 +135,7 @@ def probar() -> dict:
     if err:
         return {"ok": False, "hojas": [], "error": err}
     try:
-        hojas = pd.read_excel(io.BytesIO(contenido), sheet_name=None, engine="openpyxl")
+        hojas = pd.read_excel(io.BytesIO(contenido), sheet_name=None, engine="openpyxl", dtype=str)
     except Exception as e:
         return {"ok": False, "hojas": [], "error": f"No pude leer el Sheet: {e}"}
     info = []
@@ -146,8 +146,9 @@ def probar() -> dict:
         muestra_id = None
         if dfr is not None and cmap["id"] and cmap["id"] in dfr.columns and len(dfr):
             for v in dfr[cmap["id"]].tolist():
-                if v is not None and str(v).strip().lower() not in ("nan", "none", ""):
-                    muestra_id = str(v).strip()
+                lid = watcher.limpiar_id(v)
+                if lid:
+                    muestra_id = lid
                     break
         info.append({"nombre": nombre, "columnas": cols, "detectado": cmap,
                      "muestra_id": muestra_id, "filas": 0 if dff is None else len(dff)})
@@ -160,7 +161,7 @@ def sincronizar() -> dict:
     if err:
         return {"ok": False, "insertadas": 0, "sin_periodo": 0, "error": err}
     try:
-        hojas = pd.read_excel(io.BytesIO(contenido), sheet_name=None, engine="openpyxl")
+        hojas = pd.read_excel(io.BytesIO(contenido), sheet_name=None, engine="openpyxl", dtype=str)
     except Exception as e:
         return {"ok": False, "insertadas": 0, "sin_periodo": 0, "error": str(e)}
 
@@ -211,9 +212,8 @@ def sincronizar() -> dict:
             if ignora_cero and valor == 0:
                 ceros += 1
                 continue
-            ad_id = fila.get(cmap["id"])
-            ad_id = str(ad_id).strip() if ad_id is not None else ""
-            if not ad_id or ad_id.lower() in ("nan", "none"):
+            ad_id = watcher.limpiar_id(fila.get(cmap["id"]))
+            if not ad_id:
                 sin_id += 1
                 continue
             hora = watcher._parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
