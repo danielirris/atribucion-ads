@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v63 · 2026-08-21"
+APP_VERSION = "v64 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -472,12 +472,17 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             roas_mod = (imod_nat / gmod_nat) if gmod_nat > 0 else 0.0
         else:
             inicio_mod, gmod_nat, imod_nat, roas_mod, ventas_mod = None, 0.0, 0.0, 0.0, 0
+        # Presupuesto ANTERIOR (período previo al último cambio), en USD.
+        _periodos = db.obtener_periodos(rep["ad_id"])
+        presup_anterior = ((float(_periodos[-2]["presupuesto"]) * rate_c)
+                           if len(_periodos) >= 2 else None)
 
         filas.append({
             "nombre": g["nombre"], "sub": g["sub"], "cuenta": g["cuenta"],
             "moneda": moneda_cuenta, "rate_c": rate_c,
             "activos": activos, "total": len(ads),
             "presupuesto": presupuesto, "presup_nat": presup_nat,
+            "presup_anterior": presup_anterior,
             "spend": spend, "gasto": gasto, "gasto_nat": gasto_nat,
             "pct": (spend / presupuesto * 100) if (spend is not None and presupuesto) else None,
             "cpm": cpm, "ctr": ins.get("ctr"), "costo_venta": costo_venta,
@@ -855,8 +860,18 @@ def _perf_help_text(f, ahora) -> str:
     # El "$" activa el modo fórmula (LaTeX) del tooltip -> hay que escaparlo.
     def _d(v):
         return _usd(v).replace("$", "\\$")
+    # Presupuesto: anterior → actual.
+    p_act = f.get("presupuesto")
+    p_ant = f.get("presup_anterior")
+    if p_ant is not None and p_act is not None:
+        presup_line = f"Presupuesto: **{_d(p_ant)}** → **{_d(p_act)}**  \n"
+    elif p_act is not None:
+        presup_line = f"Presupuesto: **{_d(p_act)}** (sin cambios previos)  \n"
+    else:
+        presup_line = ""
     return (
         f"**Rendimiento desde el último cambio** · {_hace_amigable(umod, ahora)}\n\n"
+        f"{presup_line}"
         f"Ventas: **{ventas}**  \n"
         f"Gasto publicitario: **{_d(gasto_mod)}**  \n"
         f"Ingreso: **{_d(ingreso)}**  \n"
