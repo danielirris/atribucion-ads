@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v31 · 2026-08-21"
+APP_VERSION = "v32 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -728,39 +728,53 @@ def _render_lista_nativa(filas, nivel):
     if _msg:
         (st.success if _msg[0] == "ok" else st.error)(_msg[1])
     primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
-    labels = [primera, "Cuenta", "Estado", "Presupuesto", "Conv.", "Costo/conv",
-              "CPM/CTR", "Ventas", "Costo/venta", "Ingresos", "Utilidad", "ROAS"]
+    # Etiquetas cortas (caben en columnas angostas); el nombre completo va en el tooltip.
+    labels = [primera, "Cuenta", "Estado", "Presup.", "Conv.", "C/conv",
+              "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS"]
+    ayudas = {"Presup.": "Presupuesto diario", "C/conv": "Costo por conversación",
+              "CPM": "CPM / CTR", "C/venta": "Costo por venta", "Ingr.": "Ingresos",
+              "Util.": "Utilidad (ganancia)", "Conv.": "Conversaciones",
+              "ROAS": "Retorno sobre la inversión"}
     st.markdown(
         f'<style>.gr{{display:grid;grid-template-columns:{_GRID_TMPL};gap:12px;'
         f'align-items:center;padding:6px 4px;}}'
         f'.gr .h2{{color:#8fd6db;font-size:11.5px;font-weight:700;text-transform:uppercase;'
         f'letter-spacing:.04em;}}'
-        f'.meta-mod{{font-size:10.5px;color:#8b97a8;margin-top:2px;line-height:1.35;}}'
-        f'.meta-mod b{{color:#aeb8c6;font-weight:600;}}'
-        f'.hlink{{color:#8fd6db!important;text-decoration:none;cursor:pointer;}}'
-        f'.hlink:hover{{color:#BFF2E2!important;}}</style>', unsafe_allow_html=True)
+        f'.meta-mini{{font-size:9.5px;color:#7f8b9c;line-height:1.25;margin-top:1px;}}'
+        f'.meta-mini b{{color:#9fb0c2;font-weight:600;}}'
+        # Botones de encabezado (ordenar) con pinta de título, sin recargar la página.
+        f'.stButton button[kind="tertiary"]{{padding:0 !important;min-height:0 !important;'
+        f'color:#8fd6db !important;letter-spacing:0;line-height:1.1;'
+        f'justify-content:flex-start !important;}}'
+        f'.stButton button[kind="tertiary"] p{{font-size:10px !important;font-weight:700 !important;'
+        f'text-transform:uppercase;margin:0 !important;white-space:nowrap;}}'
+        f'.stButton button[kind="tertiary"]:hover p{{color:#BFF2E2 !important;}}</style>',
+        unsafe_allow_html=True)
 
-    # Encabezados clicables para ordenar (usan query params).
+    # Encabezados clicables (botones nativos): reordenan SIN recargar la página
+    # (así no se pierde la sesión / no te saca).
     sort_c = st.query_params.get("sort", "roas")
     dir_c = st.query_params.get("dir", "desc")
     keys = ["nombre", "cuenta", None, "presupuesto", "conv", "costo_conv",
             "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas"]
+    GRID_W = [3.2, 0.9, 0.8, 0.9, 0.55, 0.85, 0.8, 0.55, 0.85, 0.95, 0.85, 0.6]
 
-    def _hcell(label, key):
-        if not key:
-            return f'<div class="h2">{label}</div>'
-        if sort_c == key:
-            nd = "asc" if dir_c == "desc" else "desc"
-            arrow = " ▼" if dir_c == "desc" else " ▲"
-        else:
-            nd, arrow = "desc", ""
-        return f'<a class="h2 hlink" target="_self" href="?sort={key}&dir={nd}">{label}{arrow}</a>'
-
-    hdr = "".join(_hcell(l, k) for l, k in zip(labels, keys))
     ACC = [0.5, 11.0, 0.55, 0.55, 0.55]
-    hc = st.columns(ACC)
+    hc = st.columns(ACC, vertical_alignment="center")
     hc[0].markdown('<div class="h2" style="text-align:center">On/Off</div>', unsafe_allow_html=True)
-    hc[1].markdown(f'<div class="gr">{hdr}</div>', unsafe_allow_html=True)
+    with hc[1]:
+        bcols = st.columns(GRID_W, gap="small", vertical_alignment="center")
+        for col, label, key in zip(bcols, labels, keys):
+            if not key:
+                col.markdown(f'<div class="h2">{label}</div>', unsafe_allow_html=True)
+                continue
+            arrow = (" ▼" if dir_c == "desc" else " ▲") if sort_c == key else ""
+            if col.button(f"{label}{arrow}", key=f"sort_{key}", type="tertiary",
+                          help=ayudas.get(label), use_container_width=True):
+                nd = "asc" if (sort_c == key and dir_c == "desc") else "desc"
+                st.query_params["sort"] = key
+                st.query_params["dir"] = nd
+                st.rerun()
     hc[2].markdown('<div class="h2" style="text-align:center">Info</div>', unsafe_allow_html=True)
     hc[3].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
     hc[4].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
@@ -777,37 +791,43 @@ def _render_lista_nativa(filas, nivel):
                   if f.get("costo_venta") else '<div class="big">—</div>')
         # Alerta: gastando y con ROAS bajo (< 1.5x) -> nombre en rojo difuminado
         alerta = bool(f["gasto"] and f["gasto"] > 0 and f["roas"] < 1.5)
-        # Info de fechas y ROAS desde la última modificación de presupuesto.
+        # Info "desde la última modificación de presupuesto": se reparte por columnas
+        # (fechas bajo Cuenta, gasto bajo Presupuesto, facturado bajo Ingresos,
+        #  ROAS bajo ROAS) para que la fila quede más delgada.
         creado = _fecha_corta(f.get("creado"))
         umod = f.get("ult_mod")
         ult_mod = _fecha_corta(umod.isoformat()) if umod else "—"
         rmod = f.get("roas_mod") or 0.0
         rmod_col = _roas_color(rmod)
-        meta_html = (
-            f'<div class="meta-mod">Creado <b>{creado}</b> · Últ. mod. <b>{ult_mod}</b></div>'
-            f'<div class="meta-mod">Desde mod.: ROAS '
-            f'<b style="color:{rmod_col}">{rmod:.2f}x</b> · '
-            f'fact. <b>{_usd(f.get("ingresos_mod") or 0)}</b> · '
-            f'gast. <b>{_usd(f.get("gasto_mod") or 0)}</b></div>')
+        fechas_mini = (f'<div class="meta-mini" title="Fecha de creación">Creado <b>{creado}</b></div>'
+                       f'<div class="meta-mini" title="Última modificación de presupuesto">'
+                       f'Mod. <b>{ult_mod}</b></div>')
+        gasto_mini = (f'<div class="meta-mini" title="Gastado desde la última modificación">'
+                      f'mod. <b>{_usd(f.get("gasto_mod") or 0)}</b></div>')
+        fact_mini = (f'<div class="meta-mini" title="Facturado desde la última modificación">'
+                     f'mod. <b>{_usd(f.get("ingresos_mod") or 0)}</b></div>')
+        roas_mini = (f'<div class="meta-mini" title="ROAS desde la última modificación">'
+                     f'mod. <b style="color:{rmod_col}">{rmod:.2f}x</b></div>')
         nombre_html = (f'<div class="big" style="white-space:normal;word-break:break-word">'
                        f'{esc(str(f["nombre"]))[:90]}</div>'
-                       f'<div class="sub">{esc(str(f["sub"]))[:22]}</div>'
-                       f'{meta_html}')
+                       f'<div class="sub">{esc(str(f["sub"]))[:22]}</div>')
         if alerta:
             nombre_html = f'<div class="name-alert">{nombre_html}</div>'
         cells = [
             nombre_html,
-            f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>',
+            f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>'
+            + fechas_mini,
             _estado_cell(f, nivel),
-            _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
+            _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri") + gasto_mini,
             f'<div class="big">{conv}</div>',
             costoc,
             f'<div class="big">{cpm}</div><div class="sub">{ctr} CTR</div>',
             f'<div class="big">{f["num"]}</div>',
             costov,
-            _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
+            _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint") + fact_mini,
             f'<div class="big {gcls}">{"+" if g>=0 else ""}{_usd(g)}</div>',
-            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>',
+            f'<div class="big" style="color:{_roas_color(f["roas"])};font-size:16px">{f["roas"]:.2f}x</div>'
+            + roas_mini,
         ]
         row_html = '<div class="gr">' + "".join(f'<div>{c}</div>' for c in cells) + '</div>'
         rc = st.columns(ACC, vertical_alignment="center")
