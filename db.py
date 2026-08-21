@@ -24,8 +24,17 @@ FMT = "%Y-%m-%dT%H:%M:%S"
 
 
 def ahora() -> datetime:
-    """Timestamp actual (sin microsegundos, para consistencia)."""
-    return datetime.now().replace(microsecond=0)
+    """Timestamp actual en la zona horaria de la operación (Bogotá por defecto).
+
+    Se devuelve *naive* (sin tzinfo) porque toda la app compara datetimes naive,
+    pero anclado a la hora local de config.APP_TZ para que "hoy" empiece a la
+    medianoche de Bogotá y no a la del reloj del servidor (que suele ser UTC).
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(config.APP_TZ)).replace(microsecond=0, tzinfo=None)
+    except Exception:
+        return datetime.now().replace(microsecond=0)
 
 
 def a_texto(dt: datetime) -> str:

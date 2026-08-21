@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v30 · 2026-08-21"
+APP_VERSION = "v31 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -281,6 +281,12 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
     moneda_ventas_cfg = db.get_config("moneda_ventas", "auto")
     # Fuente de ventas del dashboard: excel / gsheets / supabase / todas / meta.
     fuente_ventas = db.get_config("fuente_ventas", "todas")
+    # ¿Hay conexión activa a Facebook? Si la hay, el gasto es el REAL de Meta y un
+    # anuncio sin entrega en el período gasta 0 (no se estima, para no inflarlo).
+    try:
+        hay_conexion = bool(fb.SDK_DISPONIBLE and fb._conexiones_efectivas())
+    except Exception:
+        hay_conexion = False
 
     grupos = {}
     for a in anuncios:
@@ -342,7 +348,12 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         spend = (spend_nat * rate_c) if spend_nat is not None else None
         if spend_nat is not None:
             gasto_nat = spend_nat
+        elif hay_conexion:
+            # Con conexión activa: sin fila de insights = sin entrega = gasto 0.
+            # (Antes se estimaba desde el presupuesto e inflaba el total.)
+            gasto_nat = 0.0
         else:
+            # Sin conexión a Facebook: mostramos un gasto estimado desde el presupuesto.
             gasto_nat = sum((calculos.metricas_periodo_actual(x["ad_id"], ahora) or {}).get(
                 "gasto_estimado", 0.0) for x in ads)
         gasto = gasto_nat * rate_c

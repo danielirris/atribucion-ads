@@ -62,6 +62,11 @@ def supabase_configurado() -> bool:
 # Minutos en un día (para el cálculo de gasto estimado)
 MINUTOS_POR_DIA = 1440
 
+# Zona horaria de la operación (define cuándo empieza y termina "hoy").
+# En el VPS el reloj del sistema suele estar en UTC; sin esto, "hoy" arrancaría
+# a las 7 p. m. de Bogotá del día anterior y se colarían datos de ayer.
+APP_TZ = os.getenv("APP_TZ", "America/Bogota").strip() or "America/Bogota"
+
 
 def facebook_configurado() -> bool:
     """Devuelve True si todas las credenciales necesarias están presentes."""
