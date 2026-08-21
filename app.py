@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v60 · 2026-08-21"
+APP_VERSION = "v61 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -741,9 +741,10 @@ def seccion_vista_general():
 
     filas = _ordenar_filas(filas)
     st.markdown(_TABLA_CSS, unsafe_allow_html=True)
-    cta_a, _ = st.columns([1.2, 4])
-    cta_a.toggle("Ampliar conjunto", key="f_ancho_nombre",
-                 help="Ensancha la columna del conjunto/anuncio para ver nombres largos.")
+    cta_a, _ = st.columns([1.6, 4])
+    cta_a.toggle("Nombres más anchos", key="f_ancho_nombre",
+                 help="Ensancha la columna del nombre para leer completos los nombres "
+                      "largos de conjuntos/anuncios (a costa de un poco de las otras columnas).")
     _render_lista_nativa(filas, nivel)
 
 
@@ -868,11 +869,14 @@ def _perf_help_text(f, ahora) -> str:
     ventas = int(f.get("ventas_mod") or 0)
     ingreso = f.get("ingresos_mod") or 0.0
     gasto_mod = f.get("gasto_mod") or 0.0
+    # El "$" activa el modo fórmula (LaTeX) del tooltip -> hay que escaparlo.
+    def _d(v):
+        return _usd(v).replace("$", "\\$")
     return (
         f"**Rendimiento desde el último cambio** · {_hace_amigable(umod, ahora)}\n\n"
         f"Ventas: **{ventas}**  \n"
-        f"Gasto publicitario: **{_usd(gasto_mod)}**  \n"
-        f"Ingreso: **{_usd(ingreso)}**  \n"
+        f"Gasto publicitario: **{_d(gasto_mod)}**  \n"
+        f"Ingreso: **{_d(ingreso)}**  \n"
         f"ROAS: **{roas:.2f}x** {emoji}\n\n"
         f"Haz clic para ver el detalle y la gráfica de 7 días.")
 
