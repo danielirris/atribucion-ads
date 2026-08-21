@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v19 · 2026-08-20"
+APP_VERSION = "v20 · 2026-08-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -552,7 +552,7 @@ def seccion_vista_general():
     _render_lista_nativa(filas, nivel)
 
 
-_GRID_TMPL = "1.9fr .8fr 1fr 1.05fr 1.05fr .95fr .55fr 1.05fr 1.05fr .6fr .65fr .85fr .45fr"
+_GRID_TMPL = "2.9fr .7fr .9fr .95fr .95fr .85fr .5fr .95fr .95fr .55fr .6fr .8fr .4fr"
 
 
 def _estado_cell(f, nivel):
@@ -603,8 +603,9 @@ def _render_lista_nativa(filas, nivel):
             alerta_cell = f'<span class="alert-badge" title="{esc(msg)}">!</span>'
         else:
             alerta_cell = '<span class="ok-dot" title="Sin alertas"></span>'
-        nombre_html = (f'<div class="big">{esc(str(f["nombre"]))[:44]}</div>'
-                       f'<div class="sub">{esc(str(f["sub"]))[:18]}</div>')
+        nombre_html = (f'<div class="big" style="white-space:normal;word-break:break-word">'
+                       f'{esc(str(f["nombre"]))[:90]}</div>'
+                       f'<div class="sub">{esc(str(f["sub"]))[:22]}</div>')
         if alerta:
             nombre_html = f'<div class="name-alert">{nombre_html}</div>'
         cells = [
