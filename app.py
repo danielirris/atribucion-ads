@@ -27,7 +27,7 @@ import fx
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v35 · 2026-08-21"
+APP_VERSION = "v36 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -742,12 +742,19 @@ def _render_lista_nativa(filas, nivel):
     st.markdown(
         '<style>.meta-mini{font-size:9.5px;color:#7f8b9c;line-height:1.25;margin-top:1px;}'
         '.meta-mini b{color:#9fb0c2;font-weight:600;}'
-        # Botones de encabezado (ordenar) con pinta de título, sin recargar la página.
+        # Botones de encabezado (ordenar) con pinta de título, alineados a la
+        # izquierda igual que los datos, y SIN recuadro de foco.
         '.stButton button[kind="tertiary"]{padding:0 !important;min-height:0 !important;'
         'color:#8fd6db !important;letter-spacing:0;line-height:1.1;'
-        'justify-content:flex-start !important;}'
+        'justify-content:flex-start !important;text-align:left !important;'
+        'border:none !important;box-shadow:none !important;background:transparent !important;}'
+        '.stButton button[kind="tertiary"]:focus,.stButton button[kind="tertiary"]:active,'
+        '.stButton button[kind="tertiary"]:focus-visible{box-shadow:none !important;'
+        'outline:none !important;border:none !important;color:#8fd6db !important;}'
+        '.stButton button[kind="tertiary"] div[data-testid="stMarkdownContainer"]'
+        '{width:100% !important;text-align:left !important;}'
         '.stButton button[kind="tertiary"] p{font-size:10px !important;font-weight:700 !important;'
-        'text-transform:uppercase;margin:0 !important;white-space:nowrap;}'
+        'text-transform:uppercase;margin:0 !important;white-space:nowrap;text-align:left !important;}'
         '.stButton button[kind="tertiary"]:hover p{color:#BFF2E2 !important;}</style>',
         unsafe_allow_html=True)
 
