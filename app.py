@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v71 · 2026-08-21"
+APP_VERSION = "v72 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -667,31 +667,43 @@ def seccion_por_pais():
 
 
 def _seccion_ia(filas, contexto):
-    """Asistente de IA: preguntas en lenguaje natural sobre los anuncios visibles."""
-    titulo = "🤖 Pregúntale a la IA sobre tus anuncios"
-    with st.expander(titulo, expanded=False):
+    """Asistente de IA tipo chat: preguntas en lenguaje natural sobre los anuncios."""
+    with st.expander("🤖 Asistente IA — pregúntale sobre tus anuncios", expanded=False):
         if not ia.disponible():
-            st.info("Para activar el asistente: agrega la variable de entorno "
-                    "**ANTHROPIC_API_KEY** en EasyPanel (tu clave de "
-                    "[console.anthropic.com](https://console.anthropic.com)) y redesplega. "
-                    "Opcional: **IA_MODEL** para elegir el modelo (por defecto el más potente; "
-                    "puedes poner `claude-sonnet-5` o `claude-haiku-4-5` para gastar menos).")
+            st.info("Activa el asistente agregando en EasyPanel una variable de entorno:\n\n"
+                    "- **OPENAI_API_KEY** para usar OpenAI (ChatGPT), **o**\n"
+                    "- **ANTHROPIC_API_KEY** para usar Claude.\n\n"
+                    "Opcional **IA_MODEL** para elegir el modelo (ej. `gpt-4o-mini` barato, "
+                    "`gpt-4o`, o `claude-sonnet-5`). Luego redesplega.")
             return
-        st.caption("Analiza los anuncios del rango y filtros que tengas puestos. Ejemplos: "
-                   "«¿Cuáles activos tienen ROAS por debajo del promedio?» · «¿Qué anuncios no "
-                   "tienen ni una venta?» · «Top 5 por utilidad» · «¿Cuáles conviene pausar?».")
-        preg = st.text_input("Tu pregunta", key="ia_preg",
+        st.caption(f"Proveedor: **{ia.proveedor()}** · modelo `{ia.modelo()}`. Analiza los "
+                   "anuncios del rango/filtros actuales. Ej.: «¿Cuáles activos tienen ROAS por "
+                   "debajo del promedio?» · «¿Qué anuncios no tienen ni una venta?» · «Top 5 por "
+                   "utilidad» · «¿Cuáles conviene pausar y por qué?».")
+        hist = st.session_state.setdefault("ia_hist", [])
+        for m in hist:
+            with st.chat_message("user" if m["role"] == "user" else "assistant"):
+                st.markdown(m["texto"])
+        preg = st.text_input("Escribe tu pregunta", key="ia_preg",
                              placeholder="¿Cuáles anuncios no tienen ni una venta?",
                              label_visibility="collapsed")
-        if st.button("Preguntar a la IA", type="primary", key="ia_btn"):
+        c1, c2 = st.columns([2, 1])
+        if c1.button("Preguntar a la IA", type="primary", key="ia_btn", use_container_width=True):
             if not preg.strip():
                 st.warning("Escribe una pregunta.")
             else:
                 with st.spinner("Analizando tus anuncios con IA…"):
                     try:
-                        st.markdown(ia.preguntar(preg, filas, contexto))
+                        hmodel = [{"role": m["role"], "content": m["texto"]} for m in hist]
+                        resp = ia.preguntar(preg, filas, contexto, historial=hmodel)
+                        hist.append({"role": "user", "texto": preg})
+                        hist.append({"role": "assistant", "texto": resp})
+                        st.rerun()
                     except Exception as e:
                         st.error(f"No pude responder: {e}")
+        if c2.button("Limpiar chat", key="ia_clear", use_container_width=True):
+            st.session_state["ia_hist"] = []
+            st.rerun()
 
 
 def seccion_vista_general():
@@ -823,6 +835,7 @@ def seccion_vista_general():
     cta_a.toggle("Nombres más anchos", key="f_ancho_nombre",
                  help="Ensancha la columna del nombre para leer completos los nombres "
                       "largos de conjuntos/anuncios (a costa de un poco de las otras columnas).")
+    _barra_acciones_conjunto(filas)
     _render_lista_nativa(filas, nivel)
 
 
@@ -1004,6 +1017,68 @@ def _perf_block_html(f, ahora) -> str:
         f'<div class="perf-marker"></div></div></div>')
 
 
+def _limpiar_seleccion(filas):
+    for f in filas:
+        st.session_state.pop(f"sel_{f['sub']}", None)
+
+
+def _bulk_estado(sel, activar):
+    ok, err = 0, []
+    for f in sel:
+        r = fb.cambiar_estado(f["status_obj_id"], f.get("status_nivel", "ad"),
+                              activar, f.get("conexion_id"))
+        if r.get("ok"):
+            db.set_estado_ads(f["ad_ids"], activar)
+            ok += 1
+        else:
+            err.append(r.get("error", ""))
+    verbo = "activado(s)" if activar else "pausado(s)"
+    st.session_state["_estado_msg"] = ("ok" if ok else "err",
+        f"{ok} {verbo}." + (f" {len(err)} con error." if err else ""))
+
+
+def _barra_acciones_conjunto(filas):
+    """Barra de acciones para modificar VARIOS anuncios a la vez (los seleccionados)."""
+    sel = [f for f in filas if st.session_state.get(f"sel_{f['sub']}")]
+    if not sel:
+        st.caption("💡 Marca la casilla ☐ (izquierda) de varios anuncios para modificarlos "
+                   "en conjunto: bajarles el presupuesto, pausarlos o activarlos a la vez.")
+        return
+    with st.container(border=True):
+        st.markdown(f"**{len(sel)} seleccionado(s)** — acción en conjunto")
+        c1, c2, c3, c4, c5 = st.columns([1.4, 1.1, 0.9, 0.9, 1])
+        nuevo = c1.number_input("Nuevo presupuesto c/u (USD)", min_value=0.0, value=4.0,
+                                step=1.0, key="bulk_presup")
+        if c2.button("Aplicar presupuesto", type="primary", key="bulk_pres_btn",
+                     use_container_width=True):
+            hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
+            for f in sel:
+                rate = f.get("rate_c") or 1.0
+                nativo = (nuevo / rate) if rate else nuevo
+                for aid in f["ad_ids"]:
+                    db.cambiar_periodo(aid, nativo)
+                if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
+                    fb.actualizar_presupuesto_async(
+                        f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
+                        f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40])
+            st.session_state["_estado_msg"] = ("ok",
+                f"Presupuesto de {len(sel)} anuncio(s) → {_usd(nuevo)}. "
+                "Aplicándose en Facebook.")
+            _limpiar_seleccion(filas)
+            st.rerun()
+        if c3.button("⏸ Pausar", key="bulk_pause", use_container_width=True):
+            _bulk_estado(sel, activar=False)
+            _limpiar_seleccion(filas)
+            st.rerun()
+        if c4.button("▶ Activar", key="bulk_act", use_container_width=True):
+            _bulk_estado(sel, activar=True)
+            _limpiar_seleccion(filas)
+            st.rerun()
+        if c5.button("Limpiar selección", key="bulk_clear", use_container_width=True):
+            _limpiar_seleccion(filas)
+            st.rerun()
+
+
 def _render_lista_nativa(filas, nivel):
     esc = _html.escape
     ahora = db.ahora()
@@ -1049,6 +1124,8 @@ def _render_lista_nativa(filas, nivel):
     dir_c = st.query_params.get("dir", "desc")
 
     ACC = [0.5, 11.0, 0.55, 0.55, 0.55]
+    # Marcador para fijar (sticky) la fila de títulos al hacer scroll.
+    st.markdown('<span class="tbl-hdr-anchor"></span>', unsafe_allow_html=True)
     hc = st.columns(ACC, vertical_alignment="center")
     hc[0].markdown('<div class="h2" style="text-align:center">On/Off</div>', unsafe_allow_html=True)
     with hc[1]:
@@ -1123,6 +1200,8 @@ def _render_lista_nativa(filas, nivel):
         est_txt = ("Activo" if est_col == "#10b981"
                    else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
         rc = st.columns(ACC, vertical_alignment="center")
+        rc[0].checkbox(" ", key=f"sel_{f['sub']}", label_visibility="collapsed",
+                       help="Seleccionar para modificar en conjunto (varios a la vez)")
         rc[0].markdown(
             f'<div title="{est_txt}" style="text-align:center;color:{est_col};'
             f'font-size:15px;line-height:1;margin-bottom:-6px">●</div>',
@@ -1401,6 +1480,13 @@ table.ads tbody tr:hover td { background:linear-gradient(90deg, rgba(140,210,215
 .hcol { color:#8fd6db; font-size:10px; font-weight:700; text-transform:uppercase;
     letter-spacing:.06em; padding:4px 0 2px; }
 hr.rowline { margin:6px 0; border:none; border-top:1px solid rgba(255,255,255,.06); }
+/* Fija (sticky) la fila de títulos de la tabla al hacer scroll hacia abajo.
+   El hermano siguiente al marcador puede ser stLayoutWrapper o stHorizontalBlock. */
+[data-testid="stElementContainer"]:has(.tbl-hdr-anchor) + *{
+    position:sticky; top:0; z-index:30; background:#080810;
+    box-shadow:0 6px 12px -8px rgba(0,0,0,.7); padding:6px 0 4px;
+    border-bottom:1px solid rgba(255,255,255,.08);
+}
 /* Bloque "Rendimiento desde el último cambio" (fila + card) */
 .perf-block{ background:rgba(255,255,255,.03); border-radius:8px; padding:6px 10px;
     margin-top:5px; border:1px solid transparent; }
