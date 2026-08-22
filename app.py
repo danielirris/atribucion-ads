@@ -23,11 +23,12 @@ import excel_watcher as watcher
 import supabase_source as supa
 import gsheets as gs
 import fx
+import ia
 
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v70 · 2026-08-21"
+APP_VERSION = "v71 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -665,6 +666,34 @@ def seccion_por_pais():
                    "país a tus ventas (columna 'Pais' en el Excel o mapea la columna en Supabase).")
 
 
+def _seccion_ia(filas, contexto):
+    """Asistente de IA: preguntas en lenguaje natural sobre los anuncios visibles."""
+    titulo = "🤖 Pregúntale a la IA sobre tus anuncios"
+    with st.expander(titulo, expanded=False):
+        if not ia.disponible():
+            st.info("Para activar el asistente: agrega la variable de entorno "
+                    "**ANTHROPIC_API_KEY** en EasyPanel (tu clave de "
+                    "[console.anthropic.com](https://console.anthropic.com)) y redesplega. "
+                    "Opcional: **IA_MODEL** para elegir el modelo (por defecto el más potente; "
+                    "puedes poner `claude-sonnet-5` o `claude-haiku-4-5` para gastar menos).")
+            return
+        st.caption("Analiza los anuncios del rango y filtros que tengas puestos. Ejemplos: "
+                   "«¿Cuáles activos tienen ROAS por debajo del promedio?» · «¿Qué anuncios no "
+                   "tienen ni una venta?» · «Top 5 por utilidad» · «¿Cuáles conviene pausar?».")
+        preg = st.text_input("Tu pregunta", key="ia_preg",
+                             placeholder="¿Cuáles anuncios no tienen ni una venta?",
+                             label_visibility="collapsed")
+        if st.button("Preguntar a la IA", type="primary", key="ia_btn"):
+            if not preg.strip():
+                st.warning("Escribe una pregunta.")
+            else:
+                with st.spinner("Analizando tus anuncios con IA…"):
+                    try:
+                        st.markdown(ia.preguntar(preg, filas, contexto))
+                    except Exception as e:
+                        st.error(f"No pude responder: {e}")
+
+
 def seccion_vista_general():
     ahora = db.ahora()
 
@@ -779,6 +808,9 @@ def seccion_vista_general():
                  if q in str(f["nombre"]).lower() or q in str(f["sub"]).lower()]
 
     _render_totales(filas)
+
+    _seccion_ia(filas, f"Vista por: {nivel_lbl} · estado: {filtro} · rango: {rango_lbl} · "
+                       f"{len(filas)} elementos · montos en USD")
 
     if not insights:
         st.info("El **gasto**, CPM y conversaciones vienen de Facebook. Aún no se ven porque no "
