@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v73 · 2026-08-21"
+APP_VERSION = "v74 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -740,32 +740,19 @@ def seccion_vista_general():
             f'background:{_bg} !important;border:1px solid {_bd} !important;'
             'color:#fff !important;}</style>', unsafe_allow_html=True)
     with ct3:
-        rlbl = st.session_state.get("f_rango", "Hoy")
-        st.markdown('<div style="font-size:14px;color:#94a3b8;margin-bottom:1px">'
-                    'Rango de fechas</div><span class="rango-anchor"></span>',
-                    unsafe_allow_html=True)
-        # Popover: se abre AQUÍ MISMO (anclado al botón), no como ventana central.
-        with st.popover(f"📅  {rlbl}", use_container_width=True):
-            st.caption("Elige un rango en el calendario:")
+        # Selectbox normal: SIEMPRE se muestra (los popovers daban problemas).
+        st.selectbox("Rango de fechas",
+                     ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
+                      "Máximo", "Personalizado"], key="f_rango")
+    with ct4:
+        st.text_input("Buscar", key="f_buscar", placeholder="nombre o ID…")
+    # Si eligen "Personalizado", el calendario sale debajo (ancho de columna).
+    if st.session_state.get("f_rango") == "Personalizado":
+        cp, _ = st.columns([1.4, 4])
+        with cp:
             _hoy = db.ahora().date()
             _defv = st.session_state.get("f_rango_pers") or (_hoy - timedelta(days=7), _hoy)
             st.date_input("Desde – hasta", value=_defv, format="DD/MM/YYYY", key="f_rango_pers")
-            if st.button("Usar este rango del calendario", use_container_width=True,
-                         type="primary", key="rq_custom"):
-                st.session_state["f_rango"] = "Personalizado"
-                st.rerun()
-            st.divider()
-            st.caption("Atajos rápidos")
-            _atajos = [("Hoy", "Hoy"), ("Ayer", "Ayer"), ("Últimos 7 días", "7 días"),
-                       ("Este mes", "Este mes"), ("Últimos 30 días", "30 días"),
-                       ("Máximo", "Máximo")]
-            _qc = st.columns(3)
-            for _i, (_val, _lab) in enumerate(_atajos):
-                if _qc[_i % 3].button(_lab, use_container_width=True, key=f"rq_{_val}"):
-                    st.session_state["f_rango"] = _val
-                    st.rerun()
-    with ct4:
-        st.text_input("Buscar", key="f_buscar", placeholder="nombre o ID…")
     nivel = _NIVELES.get(nivel_lbl, "adset")
 
     filtro = st.session_state.get("f_estado") or "Activos"
