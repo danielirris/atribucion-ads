@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v72 · 2026-08-21"
+APP_VERSION = "v73 · 2026-08-21"
 
 
 # --------------------------------------------------------------------------- #
@@ -70,6 +70,13 @@ def _usd(v):
         return f"{s} US$"
     except Exception:
         return str(v)
+
+
+def _norm_txt(s) -> str:
+    """minúsculas y sin acentos (para búsquedas tolerantes)."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+    return s.lower().strip()
 
 
 def _roas_color(r):
@@ -670,11 +677,9 @@ def _seccion_ia(filas, contexto):
     """Asistente de IA tipo chat: preguntas en lenguaje natural sobre los anuncios."""
     with st.expander("🤖 Asistente IA — pregúntale sobre tus anuncios", expanded=False):
         if not ia.disponible():
-            st.info("Activa el asistente agregando en EasyPanel una variable de entorno:\n\n"
-                    "- **OPENAI_API_KEY** para usar OpenAI (ChatGPT), **o**\n"
-                    "- **ANTHROPIC_API_KEY** para usar Claude.\n\n"
-                    "Opcional **IA_MODEL** para elegir el modelo (ej. `gpt-4o-mini` barato, "
-                    "`gpt-4o`, o `claude-sonnet-5`). Luego redesplega.")
+            st.info("Activa el asistente en **Configuración → IA**: elige el proveedor "
+                    "(OpenAI o Anthropic) y pega tu API key. (También sirve poner "
+                    "OPENAI_API_KEY / ANTHROPIC_API_KEY como variable de entorno.)")
             return
         st.caption(f"Proveedor: **{ia.proveedor()}** · modelo `{ia.modelo()}`. Analiza los "
                    "anuncios del rango/filtros actuales. Ej.: «¿Cuáles activos tienen ROAS por "
@@ -737,7 +742,8 @@ def seccion_vista_general():
     with ct3:
         rlbl = st.session_state.get("f_rango", "Hoy")
         st.markdown('<div style="font-size:14px;color:#94a3b8;margin-bottom:1px">'
-                    'Rango de fechas</div>', unsafe_allow_html=True)
+                    'Rango de fechas</div><span class="rango-anchor"></span>',
+                    unsafe_allow_html=True)
         # Popover: se abre AQUÍ MISMO (anclado al botón), no como ventana central.
         with st.popover(f"📅  {rlbl}", use_container_width=True):
             st.caption("Elige un rango en el calendario:")
@@ -798,6 +804,19 @@ def seccion_vista_general():
     if pais_sel != "Todos":
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
 
+    # Búsqueda: sobre los anuncios crudos, en TODOS los nombres (anuncio, conjunto,
+    # campaña, cuenta) y el ID; insensible a acentos y por palabras (todas deben estar).
+    q = (st.session_state.get("f_buscar") or "").strip()
+    if q:
+        palabras = [_norm_txt(w) for w in q.split() if w]
+
+        def _match_busqueda(a):
+            blob = _norm_txt(" ".join(str(a.get(k) or "") for k in
+                             ("nombre", "adset_nombre", "campaign_nombre",
+                              "cuenta_nombre", "ad_id", "adset_id", "campaign_id")))
+            return all(w in blob for w in palabras)
+        anuncios = [a for a in anuncios if _match_busqueda(a)]
+
     fuente = db.get_config("fuente_ventas", "todas")
 
     if not anuncios:
@@ -812,12 +831,6 @@ def seccion_vista_general():
     ventas_agg = db.ventas_agg_por_ad(cutoff, hasta_dt,
                                       fuente if fuente != "meta" else "todas")
     filas = _construir_filas(anuncios, nivel, insights, ventas_agg, ahora)
-
-    # Búsqueda por nombre o ID
-    q = (st.session_state.get("f_buscar") or "").strip().lower()
-    if q:
-        filas = [f for f in filas
-                 if q in str(f["nombre"]).lower() or q in str(f["sub"]).lower()]
 
     _render_totales(filas)
 
@@ -2372,6 +2385,17 @@ def _inject_css():
     .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)) [data-testid="stIconMaterial"]{
         color:#c4b5fd !important;
     }
+    /* El popover de "Rango de fechas" NO debe verse como los mini-botones de acción:
+       se muestra como un dropdown claro y visible (con su "📅 Hoy"). */
+    [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]{
+        padding:9px 12px !important; min-height:38px !important; width:100% !important;
+        justify-content:space-between !important; font-size:14px !important;
+        background:rgba(255,255,255,.05) !important; border:1px solid rgba(255,255,255,.14) !important;
+        color:#fff !important; border-radius:10px !important;
+    }
+    [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]:hover{
+        border-color:#7c3aed !important; box-shadow:0 0 14px rgba(124,58,237,.3) !important;
+    }
     /* Toggle On/Off rediseñado: OFF gris, ON verde con glow (transición suave) */
     [data-testid="stCheckbox"] label > div:first-of-type{
         background:#374151 !important; transition:background .2s ease, box-shadow .2s ease;
@@ -2594,6 +2618,45 @@ def _panel_supabase():
             st.error(f"{r['error']}")
 
 
+def _panel_ia():
+    st.subheader("Asistente de IA")
+    st.caption("Elige qué IA conectar. La clave se guarda en este servidor (volumen /data), "
+               "no en el repositorio. También puedes usar variables de entorno "
+               "(OPENAI_API_KEY / ANTHROPIC_API_KEY).")
+    prov_actual = db.get_config(ia.K_PROV, "") or ""
+    opciones = {"": "Automático (según la key disponible)",
+                "openai": "OpenAI (ChatGPT)", "anthropic": "Anthropic (Claude)"}
+    prov = st.selectbox("Proveedor de IA", list(opciones.keys()),
+                        index=list(opciones.keys()).index(prov_actual) if prov_actual in opciones else 0,
+                        format_func=lambda k: opciones[k])
+    key_actual = db.get_config(ia.K_KEY, "") or ""
+    nueva_key = st.text_input("API key", type="password",
+                              placeholder=("•••• (ya guardada, deja vacío para no cambiarla)"
+                                           if key_actual else "sk-..."),
+                              help="OpenAI: platform.openai.com/api-keys · "
+                                   "Anthropic: console.anthropic.com")
+    modelo_def = "gpt-4o-mini" if prov == "openai" else ("claude-opus-5" if prov == "anthropic" else "")
+    modelo = st.text_input("Modelo (opcional)", value=db.get_config(ia.K_MODELO, "") or "",
+                           placeholder=modelo_def or "gpt-4o-mini / claude-sonnet-5 …",
+                           help="OpenAI: gpt-4o-mini (barato), gpt-4o. "
+                                "Anthropic: claude-opus-5, claude-sonnet-5, claude-haiku-4-5.")
+    if st.button("Guardar configuración de IA", type="primary"):
+        db.set_config(ia.K_PROV, prov)
+        if nueva_key.strip():
+            db.set_config(ia.K_KEY, nueva_key.strip())
+        db.set_config(ia.K_MODELO, modelo.strip())
+        st.success("Guardado. El asistente aparece en el Dashboard.")
+        st.rerun()
+    st.divider()
+    if ia.disponible():
+        st.success(f"IA activa · proveedor: **{ia.proveedor()}** · modelo: `{ia.modelo()}`")
+    else:
+        st.warning("Aún no hay IA configurada: elige proveedor y pega tu API key arriba.")
+    if key_actual and st.button("Borrar API key guardada"):
+        db.set_config(ia.K_KEY, "")
+        st.rerun()
+
+
 def _panel_cuentas():
     st.subheader("Cuentas publicitarias detectadas")
     todos = db.obtener_anuncios(solo_activos=False)
@@ -2761,21 +2824,23 @@ def pagina_configuracion():
     st.title("Configuración")
     st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase), la moneda y "
                "revisa tus cuentas.")
-    tabs = st.tabs(["Conexiones", "Excel", "Google Sheets", "Supabase", "Moneda",
+    tabs = st.tabs(["Conexiones", "IA", "Excel", "Google Sheets", "Supabase", "Moneda",
                     "Cuentas", "Diagnóstico API"])
     with tabs[0]:
         seccion_conexiones()
     with tabs[1]:
-        _panel_excel()
+        _panel_ia()
     with tabs[2]:
-        _panel_gsheets()
+        _panel_excel()
     with tabs[3]:
-        _panel_supabase()
+        _panel_gsheets()
     with tabs[4]:
-        _panel_moneda()
+        _panel_supabase()
     with tabs[5]:
-        _panel_cuentas()
+        _panel_moneda()
     with tabs[6]:
+        _panel_cuentas()
+    with tabs[7]:
         _panel_diagnostico_api()
 
 

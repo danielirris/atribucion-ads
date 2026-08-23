@@ -1,43 +1,57 @@
 """
 ia.py
-Asistente de IA que responde preguntas en lenguaje natural sobre los anuncios del
-Dashboard. Soporta DOS proveedores; elige automáticamente según la key que tengas:
+Asistente de IA sobre los anuncios del Dashboard. Soporta OpenAI o Anthropic.
 
-  - OpenAI   -> si defines OPENAI_API_KEY      (modelo por defecto: gpt-4o-mini)
-  - Anthropic-> si defines ANTHROPIC_API_KEY   (modelo por defecto: claude-opus-5)
-
-Puedes forzar el modelo con IA_MODEL. Se le pasan los datos ya calculados del
-rango/filtros seleccionados; el modelo responde SOLO sobre esos datos, en español.
+La configuración (proveedor, API key, modelo) se puede poner:
+  1) En la app: Configuración → IA  (se guarda en la base, volumen /data), o
+  2) Como variables de entorno: OPENAI_API_KEY / ANTHROPIC_API_KEY / IA_MODEL.
+La config de la app tiene prioridad; si no hay, se usan las variables de entorno.
 """
 import json
 import os
 
+import db
 
-def _tiene_openai() -> bool:
-    if not os.getenv("OPENAI_API_KEY"):
-        return False
+K_PROV = "ia_proveedor"     # "openai" | "anthropic" | ""(auto)
+K_KEY = "ia_api_key"
+K_MODELO = "ia_modelo"
+
+
+def _cfg() -> dict:
+    return {
+        "proveedor": (db.get_config(K_PROV, "") or "").strip().lower(),
+        "api_key": (db.get_config(K_KEY, "") or "").strip(),
+        "modelo": (db.get_config(K_MODELO, "") or "").strip(),
+    }
+
+
+def _sdk_ok(prov: str) -> bool:
     try:
-        import openai  # noqa: F401
+        if prov == "openai":
+            import openai  # noqa: F401
+        else:
+            import anthropic  # noqa: F401
         return True
     except Exception:
         return False
 
 
-def _tiene_anthropic() -> bool:
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        return False
-    try:
-        import anthropic  # noqa: F401
-        return True
-    except Exception:
-        return False
+def _key(prov: str):
+    """API key de un proveedor: primero la de la config, luego la del entorno."""
+    c = _cfg()
+    if c["proveedor"] == prov and c["api_key"]:
+        return c["api_key"]
+    return os.getenv("OPENAI_API_KEY") if prov == "openai" else os.getenv("ANTHROPIC_API_KEY")
 
 
 def proveedor() -> str:
-    if _tiene_openai():
-        return "openai"
-    if _tiene_anthropic():
-        return "anthropic"
+    """Proveedor a usar: el forzado en config (si tiene key y SDK), o autodetección."""
+    forzado = _cfg()["proveedor"]
+    if forzado in ("openai", "anthropic") and _key(forzado) and _sdk_ok(forzado):
+        return forzado
+    for p in ("openai", "anthropic"):
+        if _key(p) and _sdk_ok(p):
+            return p
     return ""
 
 
@@ -46,9 +60,12 @@ def disponible() -> bool:
 
 
 def modelo() -> str:
-    m = (os.getenv("IA_MODEL") or "").strip()
-    if m:
-        return m
+    c = _cfg()
+    if c["modelo"]:
+        return c["modelo"]
+    env = (os.getenv("IA_MODEL") or "").strip()
+    if env:
+        return env
     return "gpt-4o-mini" if proveedor() == "openai" else "claude-opus-5"
 
 
@@ -99,13 +116,11 @@ def _mensaje_usuario(pregunta: str, filas: list, contexto: str) -> str:
 
 
 def preguntar(pregunta: str, filas: list, contexto: str, historial=None) -> str:
-    """Envía la pregunta + los datos al proveedor disponible y devuelve el texto.
-    `historial` opcional: lista de {'role','content'} de turnos previos (chat)."""
     user = _mensaje_usuario(pregunta, filas, contexto)
     prov = proveedor()
     if prov == "openai":
         from openai import OpenAI
-        client = OpenAI()  # usa OPENAI_API_KEY del entorno
+        client = OpenAI(api_key=_key("openai"))
         mensajes = [{"role": "system", "content": _SYSTEM}]
         mensajes += (historial or [])
         mensajes.append({"role": "user", "content": user})
@@ -114,7 +129,7 @@ def preguntar(pregunta: str, filas: list, contexto: str, historial=None) -> str:
         return (resp.choices[0].message.content or "").strip() or "No obtuve respuesta."
     elif prov == "anthropic":
         import anthropic
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(api_key=_key("anthropic"))
         mensajes = list(historial or [])
         mensajes.append({"role": "user", "content": user})
         resp = client.messages.create(
