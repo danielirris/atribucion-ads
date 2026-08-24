@@ -134,8 +134,12 @@ def obtener_estado() -> dict:
 # --------------------------------------------------------------------------- #
 #  Parseo de una fila
 # --------------------------------------------------------------------------- #
-def _parse_hora(valor, deteccion: datetime) -> datetime:
-    """Interpreta Hora_Venta. Si viene vacía, usa el timestamp de detección."""
+def _parse_hora(valor, deteccion: Optional[datetime] = None):
+    """Interpreta Hora_Venta y devuelve un datetime, o `deteccion` si no se puede.
+
+    IMPORTANTE: en importaciones masivas se llama con deteccion=None. Si la fecha
+    viene vacía o ilegible devuelve None (la venta se marca 'sin fecha' y NO se
+    cuenta como de hoy). Solo el registro manual/en vivo pasa deteccion=ahora."""
     if valor is None:
         return deteccion
     if isinstance(valor, datetime):
@@ -228,6 +232,7 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
 
     deteccion = db.ahora()
     total = 0
+    sin_fecha = 0
     try:
         # dtype=str: lee todo como texto para no perder precisión en IDs largos.
         hojas = pd.read_excel(path, sheet_name=None, engine="openpyxl", dtype=str)
@@ -267,7 +272,12 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
                 valor = _parse_valor(fila.get(cmap["valor"]))
                 if valor is None:
                     continue
-                hora = _parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
+                # Fecha ESTRICTA (deteccion=None): si no se puede leer, se salta la
+                # venta (no se marca como "hoy"). Evita inflar el conteo del día.
+                hora = _parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None)
+                if hora is None:
+                    sin_fecha += 1
+                    continue
                 pais = fila.get(cmap["pais"]) if cmap["pais"] else None
                 pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
                 producto = fila.get(cmap["producto"]) if cmap.get("producto") else None
@@ -282,8 +292,9 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
         with _ESTADO_LOCK:
             ESTADO["ventas_procesadas"] += total
     _set_estado(ultima_lectura=deteccion, ultimo_error=None)
-    if total:
-        _log(f"{total} venta(s) nueva(s) procesada(s).")
+    if total or sin_fecha:
+        _log(f"{total} venta(s) nueva(s) procesada(s)."
+             + (f" {sin_fecha} sin fecha legible (no se importaron)." if sin_fecha else ""))
     return total
 
 

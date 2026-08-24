@@ -200,7 +200,7 @@ def sincronizar() -> dict:
                     if objetivo in _norm(c):
                         dedup_col = c
                         break
-        ins_hoja, dup, sin_val, sin_id, ceros = 0, 0, 0, 0, 0
+        ins_hoja, dup, sin_val, sin_id, ceros, sin_fecha = 0, 0, 0, 0, 0, 0
         firmas = {}  # contador de ocurrencias por huella de contenido (esta hoja)
         # Columnas que definen una venta (para la huella de contenido). Se usan los
         # valores CRUDOS del Sheet (no cambian salvo que edites el dato), así la
@@ -236,7 +236,11 @@ def sincronizar() -> dict:
             if not ad_id:
                 sin_id += 1
                 ad_id = ""
-            hora = watcher._parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
+            # Fecha ESTRICTA: si no se puede leer, se salta (no se marca como "hoy").
+            hora = watcher._parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None)
+            if hora is None:
+                sin_fecha += 1
+                continue
             pais = fila.get(cmap["pais"]) if cmap["pais"] else None
             pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
             producto = fila.get(cmap["producto"]) if cmap.get("producto") else None
@@ -248,7 +252,7 @@ def sincronizar() -> dict:
                         "columnas": cmap,
                         "motivo": (f"OK · {ins_hoja} nuevas, {dup} ya estaban, "
                                    f"{sin_val} sin valor, {ceros} con valor 0 ignoradas, "
-                                   f"{sin_id} sin ID")})
+                                   f"{sin_id} sin ID, {sin_fecha} sin fecha legible (no importadas)")})
     insertadas = db.insertar_ventas_bulk(lote)
     return {"ok": True, "insertadas": insertadas, "sin_periodo": 0,
             "detalle": detalle, "error": None}

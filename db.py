@@ -599,6 +599,57 @@ def borrar_ventas_excel() -> int:
         return cur.rowcount
 
 
+def deduplicar_ventas_todas() -> int:
+    """Quita ventas duplicadas (idénticas en ad_id, valor, hora, producto y país) de
+    TODAS las fuentes, dejando una de cada grupo. Devuelve cuántas borró."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(
+            """DELETE FROM ventas WHERE id NOT IN (
+                 SELECT MIN(id) FROM ventas
+                 GROUP BY ad_id, valor_venta, hora_venta,
+                          COALESCE(producto,''), COALESCE(pais,''))""")
+        conn.commit()
+        return cur.rowcount
+
+
+def borrar_ventas_sin_adid() -> int:
+    """Borra las ventas SIN ad_id (fila vacía). Útil para limpiar las que se colaron
+    por importaciones antiguas con fecha/ID mal leídos."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute("DELETE FROM ventas WHERE ad_id IS NULL OR TRIM(ad_id)=''")
+        conn.commit()
+        return cur.rowcount
+
+
+def borrar_todas_ventas() -> int:
+    """Borra TODAS las ventas (reset total). Después hay que re-importar/re-sincronizar."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute("DELETE FROM ventas")
+        conn.commit()
+        return cur.rowcount
+
+
+def ventas_por_fuente_rango(cutoff: Optional[datetime] = None,
+                            hasta: Optional[datetime] = None) -> list:
+    """Desglose de ventas por fuente (hoja_origen) dentro de un rango, separando las
+    que tienen ad_id de las que no. Para diagnóstico del conteo."""
+    cond, args = [], []
+    if cutoff is not None:
+        cond.append("hora_venta >= ?"); args.append(a_texto(cutoff))
+    if hasta is not None:
+        cond.append("hora_venta < ?"); args.append(a_texto(hasta))
+    where = (" WHERE " + " AND ".join(cond)) if cond else ""
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT COALESCE(hoja_origen,'—') AS fuente,
+                       SUM(CASE WHEN ad_id IS NULL OR TRIM(ad_id)='' THEN 1 ELSE 0 END) AS sin_id,
+                       SUM(CASE WHEN ad_id IS NOT NULL AND TRIM(ad_id)<>'' THEN 1 ELSE 0 END) AS con_id,
+                       COUNT(*) AS total
+                FROM ventas{where} GROUP BY fuente ORDER BY total DESC""", args)
+        return [{"fuente": r["fuente"], "sin_id": r["sin_id"],
+                 "con_id": r["con_id"], "total": r["total"]} for r in rows]
+
+
 def resumen_ventas_fuente(hoja_origen: str) -> dict:
     """Total de ventas e ingresos de una fuente + desglose por día."""
     with _conn() as conn:

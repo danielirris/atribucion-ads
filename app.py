@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v79 · 2026-08-23"
+APP_VERSION = "v80 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -857,7 +857,7 @@ def seccion_vista_general():
             sin_adid = {"num": sa_num, "ingreso_usd": sa_ing_nat * rate_sa}
 
     _render_totales(filas, sin_adid)
-    _cuadre_ventas(todos, ventas_agg, filas, rango_lbl)
+    _cuadre_ventas(todos, ventas_agg, filas, rango_lbl, cutoff, hasta_dt)
 
     _seccion_ia(filas, f"Vista por: {nivel_lbl} · estado: {filtro} · rango: {rango_lbl} · "
                        f"{len(filas)} elementos · montos en USD")
@@ -903,7 +903,7 @@ def _ordenar_filas(filas):
     return filas
 
 
-def _cuadre_ventas(todos, ventas_agg, filas, rango_lbl):
+def _cuadre_ventas(todos, ventas_agg, filas, rango_lbl, cutoff=None, hasta=None):
     """Desglose de las ventas de ESTA FECHA (ventas_agg ya viene filtrado por el rango):
     total en la base = mostradas + ocultas por filtro + sin ad id + huérfanas.
     Todo se cuenta SOLO dentro de la fecha del filtro."""
@@ -939,9 +939,21 @@ def _cuadre_ventas(todos, ventas_agg, filas, rango_lbl):
             st.dataframe(
                 pd.DataFrame([{"ad_id": a, "ventas": n} for a, n in huerf_detalle[:25]]),
                 hide_index=True, use_container_width=True)
-        st.caption("Si el total aquí ya es menor que en tu Excel/Sheet, esas ventas no se "
-                   "importaron (valor 0 ignorado o duplicado). Revisa en "
-                   "**Configuración → Fuentes de ventas → Probar**.")
+        # Desglose por fuente (para ver de dónde salen las 'sin ad id').
+        try:
+            por_fuente = db.ventas_por_fuente_rango(cutoff, hasta)
+        except Exception:
+            por_fuente = []
+        if por_fuente:
+            st.caption("Por fuente (en esta fecha):")
+            st.dataframe(
+                pd.DataFrame([{"Fuente": r["fuente"], "Con ad_id": r["con_id"],
+                               "Sin ad_id": r["sin_id"], "Total": r["total"]}
+                              for r in por_fuente]),
+                hide_index=True, use_container_width=True)
+        st.caption("Si ves MUCHAS 'sin ad id' o un total mayor al de tu Excel/Sheet, casi "
+                   "seguro son de importaciones viejas mal fechadas. Límpialas en "
+                   "**Configuración → Fuentes de ventas → Excel → Limpieza de ventas**.")
 
 
 def _render_totales(filas, sin_adid=None):
@@ -2668,20 +2680,31 @@ def _panel_excel():
         st.success(f"{n} ventas importadas (sin duplicar).")
 
     st.divider()
-    st.markdown("**🧹 Arreglar ventas duplicadas**")
-    st.caption("Si ves MÁS ventas de las que tienes en tu Excel, es por imports antiguos que "
-               "reinsertaban todo. Esto lo arregla. Ya no volverá a pasar (el dedup ahora es "
-               "estable). *Quita ventas de Excel repetidas; no toca Google Sheets ni Supabase.*")
+    st.markdown("**🧹 Limpieza de ventas**")
+    st.caption("Si ves MÁS ventas de las que tienes en tu Excel/Sheet, son de imports "
+               "antiguos (que reinsertaban todo o marcaban fechas mal). Aquí lo arreglas. "
+               "Con la versión actual ya no vuelve a pasar.")
     d1, d2 = st.columns(2)
-    if d1.button("Quitar duplicados (recomendado)", use_container_width=True, type="primary",
-                 help="No destructivo: deja una sola de cada venta idéntica."):
-        borradas = db.deduplicar_ventas_excel()
+    if d1.button("① Quitar duplicados (todas las fuentes)", use_container_width=True,
+                 type="primary", help="No destructivo: deja una sola de cada venta idéntica."):
+        borradas = db.deduplicar_ventas_todas()
         st.success(f"Listo: {borradas} venta(s) duplicada(s) eliminada(s).")
-    if d2.button("Borrar TODO y re-subir", use_container_width=True,
-                 help="Borra todas las ventas de Excel; luego vuelve a subir el archivo arriba."):
-        borradas = db.borrar_ventas_excel()
-        st.warning(f"Borradas {borradas} venta(s) de Excel. Ahora sube el archivo arriba "
-                   "para re-importarlo limpio.")
+    if d2.button("② Borrar ventas SIN ad_id", use_container_width=True,
+                 help="Quita las ventas con ID de anuncio vacío (las que inflan 'sin ad id')."):
+        borradas = db.borrar_ventas_sin_adid()
+        st.success(f"Listo: {borradas} venta(s) sin ad_id eliminada(s).")
+    st.caption("¿Sigue descuadrado? Reset total y vuelve a importar/sincronizar tus fuentes:")
+    if st.button("③ Borrar TODAS las ventas (reset)", use_container_width=True,
+                 help="Borra TODO el historial de ventas. Luego re-sube el Excel o sincroniza "
+                      "el Google Sheet para reconstruirlo limpio."):
+        if st.session_state.get("_confirm_reset_ventas"):
+            borradas = db.borrar_todas_ventas()
+            st.session_state["_confirm_reset_ventas"] = False
+            st.warning(f"Borradas TODAS las ventas ({borradas}). Re-sube el Excel arriba o "
+                       "sincroniza el Sheet para reconstruir.")
+        else:
+            st.session_state["_confirm_reset_ventas"] = True
+            st.error("⚠️ Esto borra TODO el historial de ventas. Pulsa otra vez para confirmar.")
 
 
 def _panel_supabase():
@@ -2774,23 +2797,40 @@ def _panel_ia():
         st.rerun()
 
 
+# Paleta oscura para colorear filas por Business (legible sobre tema oscuro).
+_BIZ_COLORS = ["#1e3a5f", "#3b2f5f", "#5f1e3a", "#1e5f4f", "#5f4a1e", "#2f5f1e",
+               "#5f1e1e", "#1e2f5f", "#4a1e5f", "#5f5f1e", "#1e5f5f", "#5f2f1e"]
+
+
 def _panel_cuentas():
     st.subheader("Cuentas publicitarias detectadas")
+    st.caption("El color de cada fila indica su **Business**. Así ves de un vistazo qué "
+               "cuentas pertenecen a cada uno.")
     todos = db.obtener_anuncios(solo_activos=False)
     if not todos:
         st.info("Aún no hay cuentas. Agrega una conexión y pulsa **Recargar** en la barra lateral.")
         return
+    conexiones = db.obtener_conexiones()
     filas = {}
     for a in todos:
         c = a.get("cuenta_nombre") or "—"
         if c not in filas:
-            filas[c] = {"Cuenta": c, "País (pauta)": a.get("cuenta_pais") or "—",
-                        "Moneda": a.get("cuenta_moneda") or "—",
+            filas[c] = {"Business": _alias_conexion(a.get("conexion_id"), conexiones),
+                        "Cuenta": c, "Moneda": a.get("cuenta_moneda") or "—",
                         "Anuncios": 0, "Activos": 0}
         filas[c]["Anuncios"] += 1
         if _es_activo(a):
             filas[c]["Activos"] += 1
-    st.dataframe(pd.DataFrame(list(filas.values())),
+    df = pd.DataFrame(list(filas.values())).sort_values(["Business", "Cuenta"])
+    # Un color por Business.
+    biz = list(dict.fromkeys(df["Business"]))
+    cmap = {b: _BIZ_COLORS[i % len(_BIZ_COLORS)] for i, b in enumerate(biz)}
+
+    def _fila_color(row):
+        col = cmap.get(row["Business"], "")
+        return [f"background-color: {col}; color: #fff"] * len(row)
+
+    st.dataframe(df.style.apply(_fila_color, axis=1),
                  use_container_width=True, hide_index=True)
 
 
