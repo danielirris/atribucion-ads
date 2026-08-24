@@ -851,6 +851,32 @@ def ventas_diarias(ad_ids: list, desde: datetime) -> dict:
         return {r["dia"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
 
 
+def ingresos_diarios_por_ad(desde: datetime,
+                            hasta: Optional[datetime] = None) -> dict:
+    """Facturación (ingreso nativo) por anuncio y por día, en UNA sola consulta.
+
+    Devuelve {ad_id: {'YYYY-MM-DD': ingreso_nat}} para todas las ventas con
+    hora_venta >= `desde` (y < `hasta` si se da). Sirve para dibujar el mini
+    gráfico de "facturación de los últimos 7 días" de cada fila sin lanzar una
+    consulta por anuncio.
+    """
+    cond = ["hora_venta >= ?"]
+    args = [a_texto(desde)]
+    if hasta is not None:
+        cond.append("hora_venta < ?"); args.append(a_texto(hasta))
+    where = " WHERE " + " AND ".join(cond)
+    out: dict = {}
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT ad_id, substr(hora_venta,1,10) AS dia,
+                       COALESCE(SUM(valor_venta),0) AS total
+                FROM ventas{where}
+                GROUP BY ad_id, dia""", args)
+        for r in rows:
+            out.setdefault(r["ad_id"], {})[r["dia"]] = float(r["total"])
+    return out
+
+
 def obtener_ventas(ad_id: Optional[str] = None) -> list:
     with _conn() as conn:
         if ad_id:

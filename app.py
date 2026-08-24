@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v91 · 2026-08-24"
+APP_VERSION = "v92 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -132,6 +132,33 @@ def _spark_svg(serie, color="#22c55e", w=78, h=26):
     return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
             f'<polyline points="{path}" fill="none" stroke="{color}" '
             f'stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>')
+
+
+def _spark_bars(serie, color="#10b981", w=82, h=28):
+    """Mini-gráfica de BARRAS (una barra por día) para la facturación diaria.
+    Más clara que una línea para 'cuánto facturó cada día'. Los días en 0 se
+    dibujan como una barra mínima gris para que se vea que ese día no vendió."""
+    vals = [max(0.0, float(x or 0)) for x in (serie or [])]
+    if not vals:
+        return f'<svg width="{w}" height="{h}"></svg>'
+    hi = max(vals)
+    n = len(vals)
+    gap = 2.0
+    bw = (w - gap * (n - 1)) / n
+    barras = []
+    for i, v in enumerate(vals):
+        x = i * (bw + gap)
+        if hi > 0 and v > 0:
+            bh = max(2.0, (v / hi) * (h - 2))
+            fill = color
+        else:
+            bh = 2.0                      # día sin ventas: barrita gris al piso
+            fill = "rgba(255,255,255,.14)"
+        y = h - bh
+        barras.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" '
+                      f'height="{bh:.1f}" rx="1" fill="{fill}"/>')
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
+            f'{"".join(barras)}</svg>')
 
 
 def _fecha_corta(iso):
@@ -510,6 +537,11 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
     except Exception:
         hay_conexion = False
 
+    # Facturación diaria por anuncio de los últimos 7 días (una sola consulta),
+    # para el mini gráfico de barras "salud/facturación 7d" de cada fila.
+    _dias7 = [(ahora - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
+    _diario7 = db.ingresos_diarios_por_ad(ahora - timedelta(days=7))
+
     grupos = {}
     for a in anuncios:
         if nivel == "adset":
@@ -624,7 +656,15 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         presup_anterior = ((float(_periodos[-2]["presupuesto"]) * rate_c)
                            if len(_periodos) >= 2 else None)
 
+        # Serie de facturación de los últimos 7 días (en USD) para el mini gráfico.
+        # Suma, por día, lo facturado por todos los anuncios del grupo.
+        serie7 = []
+        for _d in _dias7:
+            _tot = sum(_diario7.get(aid, {}).get(_d, 0.0) for aid in ad_ids_grupo)
+            serie7.append(round(_tot * rate_v, 2))
+
         filas.append({
+            "serie7": serie7, "dias7": _dias7,
             "nombre": g["nombre"], "sub": g["sub"], "cuenta": g["cuenta"],
             "moneda": moneda_cuenta, "rate_c": rate_c,
             "activos": activos, "total": len(ads),
@@ -1321,17 +1361,18 @@ def _render_lista_nativa(filas, nivel):
     primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
     # Encabezado y datos usan la MISMA rejilla de columnas nativas -> alineación exacta.
     labels = [primera, "Cuenta", "Presup.", "Gastado", "Conv.", "C/conv",
-              "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS"]
+              "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS", "Fact. 7d"]
     keys = ["nombre", "cuenta", "presupuesto", "gasto", "conv", "costo_conv",
-            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas"]
+            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas", "serie7"]
     # Ancho de la columna del conjunto/anuncio (ampliable con el toggle).
     name_w = 5.2 if st.session_state.get("f_ancho_nombre") else 3.0
-    GRID_W = [name_w, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6]
+    GRID_W = [name_w, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6, 1.1]
     ayudas = {"Presup.": "Presupuesto diario", "Gastado": "Importe gastado",
               "C/conv": "Costo por conversación", "CPM": "CPM / CTR",
               "C/venta": "Costo por venta", "Ingr.": "Ingresos",
               "Util.": "Utilidad (ganancia)", "Conv.": "Conversaciones",
-              "ROAS": "Retorno sobre la inversión"}
+              "ROAS": "Retorno sobre la inversión",
+              "Fact. 7d": "Facturación de los últimos 7 días (una barra por día)"}
     st.markdown(
         '<style>.meta-mini{font-size:9.5px;color:#7f8b9c;line-height:1.25;margin-top:1px;}'
         '.meta-mini b{color:#9fb0c2;font-weight:600;}'
@@ -1364,6 +1405,14 @@ def _render_lista_nativa(filas, nivel):
     with hc[1]:
         bcols = st.columns(GRID_W, gap="small", vertical_alignment="center")
         for col, label, key in zip(bcols, labels, keys):
+            # La columna del mini gráfico no se ordena: título simple (sin botón).
+            if key == "serie7":
+                col.markdown(
+                    f'<div class="h2" style="text-align:center;font-size:10px;'
+                    f'color:#8fd6db;text-transform:uppercase;letter-spacing:.06em" '
+                    f'title="{esc(ayudas.get(label, ""))}">{esc(label)}</div>',
+                    unsafe_allow_html=True)
+                continue
             arrow = (" ▼" if dir_c == "desc" else " ▲") if sort_c == key else ""
             if col.button(f"{label}{arrow}", key=f"sort_{key}", type="tertiary",
                           help=ayudas.get(label), use_container_width=True):
@@ -1413,6 +1462,17 @@ def _render_lista_nativa(filas, nivel):
                            f'{nombre_html}</div>')
         gastado_cell = (_money_html(f["gasto"], f["gasto_nat"], f["moneda"])
                         + ('<div class="sub">est.</div>' if f["spend"] is None else ''))
+        # Mini gráfico de barras: facturación de los últimos 7 días (una barra/día).
+        # El color sigue la salud del anuncio (verde ROAS>2, amarillo 1-2, rojo <1).
+        serie7 = f.get("serie7") or []
+        dias7 = f.get("dias7") or []
+        tot7 = sum(serie7)
+        spark7 = _spark_bars(serie7, color=_roas_color(f["roas"]))
+        # Tooltip con el detalle día por día (MM-DD: $monto).
+        _tip = " · ".join(f'{d[5:]}: {_usd(v)}' for d, v in zip(dias7, serie7))
+        spark_cell = (
+            f'<div title="Facturación últimos 7 días — {esc(_tip)}">{spark7}'
+            f'<div class="sub" style="font-size:10.5px;margin-top:1px">{_usd(tot7)}</div></div>')
         cells = [
             nombre_html,
             f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>'
@@ -1428,6 +1488,7 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big" style="color:{"#10b981" if g>=0 else "#ff8b84"};font-weight:700">'
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0),
+            spark_cell,
         ]
         est_txt = ("Activo" if est_col == "#10b981"
                    else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
