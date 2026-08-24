@@ -29,7 +29,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v84 · 2026-08-23"
+APP_VERSION = "v85 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -2496,9 +2496,9 @@ def _inject_css():
         border-color:rgba(124,58,237,.4) !important;
     }
 
-    /* Controles segmentados (Ver por / Estado): grupo glass, activo púrpura */
-    [data-testid="stButtonGroup"]{ background:rgba(255,255,255,.03);
-        border:1px solid rgba(255,255,255,.07); border-radius:10px; padding:3px; }
+    /* Controles segmentados (Ver por / Estado): SIN recuadro, activo púrpura */
+    [data-testid="stButtonGroup"]{ background:transparent !important;
+        border:none !important; border-radius:0 !important; padding:0 !important; }
     button[data-variant="segmented_control"]{ color:#94a3b8 !important;
         background:transparent !important; border:1px solid transparent !important; border-radius:8px !important; }
     button[data-variant="segmented_control"]:hover{ color:#fff !important; background:rgba(124,58,237,.1) !important; }
@@ -2611,6 +2611,35 @@ def _panel_gsheets():
                 st.caption(f"• **{d['hoja']}**: {d['motivo']}")
         else:
             st.error(r["error"])
+
+    st.divider()
+    st.markdown("**🚫 Excluir pestañas (que NO son de ventas)**")
+    st.caption("El Sheet se sigue sincronizando solo cada pocos minutos, pero las pestañas "
+               "que marques aquí **NO se importan** (p. ej. *Data_Unificada*, *Anuncios*, "
+               "resúmenes). Data_Unificada, Anuncios y RETIROS ya se excluyen de fábrica.")
+    if st.button("Ver pestañas del Sheet para excluir"):
+        gs.set_url(url)
+        r = gs.probar()
+        if r["ok"]:
+            st.session_state["_gs_hojas"] = [h["nombre"] for h in r["hojas"]]
+        else:
+            st.error(r["error"])
+    nombres = st.session_state.get("_gs_hojas", [])
+    if nombres:
+        actuales = [n for n in nombres if watcher._hoja_ignorada(n)]
+        excluir = st.multiselect("Pestañas a EXCLUIR (no se importan)", nombres,
+                                 default=actuales, key="_gs_excl")
+        incluir = [n for n in nombres if n not in excluir]
+        st.caption(f"Se importarán **{len(incluir)}** pestaña(s): "
+                   + (", ".join(incluir) if incluir else "ninguna"))
+        if st.button("Guardar exclusiones del Sheet", type="primary"):
+            # Conserva exclusiones de otras fuentes (Excel) que no están en este Sheet.
+            previas = [x.strip() for x in (db.get_config("hojas_ignorar", "") or "").split(",")
+                       if x.strip()]
+            otras = [p for p in previas if p not in nombres]
+            db.set_config("hojas_ignorar", ",".join(otras + excluir))
+            st.success(f"Guardado. Se excluirán {len(excluir)} pestaña(s) en cada "
+                       "sincronización automática.")
 
     with st.expander("Columnas (opcional — si el auto-detector se equivoca)"):
         st.caption("Deja en blanco para detección automática. Si el valor sale en 0 o toma la "
