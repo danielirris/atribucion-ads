@@ -29,7 +29,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v87 · 2026-08-23"
+APP_VERSION = "v88 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -3167,6 +3167,24 @@ def _panel_diagnostico_api():
     uso = est.get("uso_api")
     st.caption(f"Uso API reportado por Facebook: **{uso if uso is not None else '—'}%** · "
                f"Cuentas: {est.get('num_cuentas', 0)} · Conexiones: {est.get('num_conexiones', 0)}")
+
+    # Cambios de presupuesto en cola (por el límite de Facebook): se reintentan solos.
+    pend = fb.pendientes_presupuesto()
+    if pend:
+        st.warning(f"⏳ Hay **{len(pend)}** cambio(s) de presupuesto en cola (Facebook estaba "
+                   "frenado). Se reintentan solos cada ~2 min; también puedes forzarlo:")
+        st.dataframe(pd.DataFrame([
+            {"Objeto": p.get("etiqueta") or p.get("obj_id"),
+             "Nuevo presupuesto": f"${p.get('monto', 0):.2f}",
+             "En cola desde": p.get("ts", "")} for p in pend]),
+            hide_index=True, use_container_width=True)
+        if st.button("Reintentar cambios pendientes ahora", type="primary"):
+            n = fb.procesar_pendientes_presupuesto()
+            st.success(f"{n} cambio(s) aplicado(s)." if n else
+                       "Facebook sigue frenado; siguen en cola, se reintentarán solos.")
+            st.rerun()
+    else:
+        st.caption("✅ No hay cambios de presupuesto pendientes.")
     if tts and not reciente:
         st.success("El último freno ya pasó (hace más de ~12 min). El aviso NO debería "
                    "estar saliendo; si lo ves, es que aún hay frenos recientes.")

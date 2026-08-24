@@ -79,6 +79,7 @@ ESTADO = {
     "throttled": False,     # True si Facebook nos frenó en el último ciclo
     "throttled_ts": None,   # cuándo fue el último freno (para que el aviso se limpie solo)
     "llamados_ciclo": 0,    # llamados a Facebook en el último ciclo
+    "pendientes_presupuesto": 0,  # cambios de presupuesto en cola por el límite
     "mensajes": [],
 }
 
@@ -794,15 +795,90 @@ def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float,
     return actualizar_presupuesto(adset_id, "adset", nuevo_monto, conexion_id)
 
 
+# --- Cola de cambios de presupuesto PENDIENTES (reintento ante rate limit) --- #
+_PEND_KEY = "pendientes_presupuesto"
+_PEND_LOCK = threading.Lock()
+
+
+def _pendientes_leer() -> list:
+    import json
+    try:
+        return json.loads(db.get_config(_PEND_KEY, "") or "[]")
+    except Exception:
+        return []
+
+
+def _pendientes_guardar(lst: list) -> None:
+    import json
+    db.set_config(_PEND_KEY, json.dumps(lst, ensure_ascii=False))
+
+
+def pendientes_presupuesto() -> list:
+    with _PEND_LOCK:
+        return _pendientes_leer()
+
+
+def _encolar_pendiente(obj_id, nivel, monto, conexion_id, etiqueta) -> None:
+    """Guarda un cambio de presupuesto que Facebook no aceptó (por límite) para
+    reintentarlo solo. Si ya había uno para el mismo objeto, se reemplaza (gana el
+    último valor)."""
+    with _PEND_LOCK:
+        lst = [p for p in _pendientes_leer() if p.get("obj_id") != obj_id]
+        lst.append({"obj_id": obj_id, "nivel": nivel, "monto": float(monto),
+                    "conexion_id": conexion_id, "etiqueta": etiqueta,
+                    "ts": db.a_texto(db.ahora())})
+        _pendientes_guardar(lst)
+    _set_estado(pendientes_presupuesto=len(lst))
+
+
+def procesar_pendientes_presupuesto() -> int:
+    """Reintenta los cambios de presupuesto pendientes. Devuelve cuántos se aplicaron.
+    Se llama periódicamente desde el hilo de ventas (cada pocos minutos)."""
+    with _PEND_LOCK:
+        lst = _pendientes_leer()
+    if not lst:
+        return 0
+    quedan, aplicados = [], 0
+    for p in lst:
+        r = actualizar_presupuesto(p["obj_id"], p.get("nivel", "adset"),
+                                   p["monto"], p.get("conexion_id"))
+        if r.get("ok"):
+            aplicados += 1
+            _log(f"✔ Presupuesto pendiente aplicado: {p.get('etiqueta') or p['obj_id']} "
+                 f"→ {p['monto']:.2f}.")
+        elif _es_error_rate_limit_txt(r.get("error")):
+            quedan.append(p)   # sigue frenado: reintentar luego
+        else:
+            _log(f"⚠ Cambio de presupuesto descartado (Facebook lo rechazó): "
+                 f"{p.get('etiqueta') or p['obj_id']} — {r.get('error')}")
+    with _PEND_LOCK:
+        _pendientes_guardar(quedan)
+    _set_estado(pendientes_presupuesto=len(quedan))
+    return aplicados
+
+
+def _es_error_rate_limit_txt(txt: Optional[str]) -> bool:
+    if not txt:
+        return False
+    t = str(txt).lower()
+    return ("límite" in t or "limit" in t or "too many" in t or "#80004" in t
+            or "rate" in t or "frecuencia" in t)
+
+
 def actualizar_presupuesto_async(obj_id: str, nivel: str, nuevo_monto: float,
                                  conexion_id: Optional[int] = None,
                                  etiqueta: str = "") -> None:
     """Empuja el cambio de presupuesto a Facebook en SEGUNDO PLANO (no bloquea la
-    UI). El resultado (éxito o error) queda en los mensajes del sistema."""
+    UI). Si Facebook está frenado (rate limit), NO se pierde: se encola y se
+    reintenta solo cada pocos minutos hasta aplicarse."""
     def _worker():
         r = actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id)
         if r.get("ok"):
             _log(f"✔ Presupuesto aplicado en Facebook: {etiqueta or obj_id} → {nuevo_monto:.2f}.")
+        elif _es_error_rate_limit_txt(r.get("error")):
+            _encolar_pendiente(obj_id, nivel, nuevo_monto, conexion_id, etiqueta)
+            _log(f"⏳ Facebook está frenado; el presupuesto de {etiqueta or obj_id} "
+                 f"→ {nuevo_monto:.2f} quedó EN COLA y se aplicará solo en unos minutos.")
         else:
             _log(f"⚠ Facebook rechazó el presupuesto de {etiqueta or obj_id}: {r.get('error')}")
     threading.Thread(target=_worker, name="pres-async", daemon=True).start()
@@ -1193,6 +1269,12 @@ def _loop_ventas() -> None:
             _sincronizar_fuentes_ventas()
         except Exception as e:
             _log(f"Sync de ventas: {e}")
+        try:
+            # Reintenta los cambios de presupuesto que quedaron en cola por el límite
+            # de Facebook. Así un cambio nunca se pierde: se aplica en cuanto se libera.
+            procesar_pendientes_presupuesto()
+        except Exception as e:
+            _log(f"Reintento de presupuestos pendientes: {e}")
         if _VENTAS_STOP.wait(_intervalo_ventas()):
             break
 
