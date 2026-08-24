@@ -70,6 +70,37 @@ def _norm(s):
     return str(s).strip().lower()
 
 
+# Hojas que NO son de ventas (resúmenes / datos agregados / finanzas): se ignoran por
+# nombre para no importar filas basura. Se puede ampliar por config (ver _hojas_ignorar).
+_HOJAS_IGNORAR_DEF = {"dataunificada", "anuncios", "retiros"}
+
+
+def _hojas_ignorar() -> set:
+    """Conjunto de nombres de hoja a ignorar (normalizados: sin espacios/guiones/acentos).
+    Base fija + las que el usuario agregue en config 'hojas_ignorar' (separadas por coma)."""
+    extra = ""
+    try:
+        extra = db.get_config("hojas_ignorar", "") or ""
+    except Exception:
+        pass
+    s = set(_HOJAS_IGNORAR_DEF)
+    for x in extra.split(","):
+        n = _norm_hoja(x)
+        if n:
+            s.add(n)
+    return s
+
+
+def _norm_hoja(nombre) -> str:
+    import unicodedata
+    n = unicodedata.normalize("NFKD", str(nombre)).encode("ascii", "ignore").decode()
+    return n.lower().replace("_", "").replace(" ", "").strip()
+
+
+def _hoja_ignorada(nombre) -> bool:
+    return _norm_hoja(nombre) in _hojas_ignorar()
+
+
 def limpiar_id(v):
     """
     Normaliza un ad_id: evita que un ID largo se convierta en notación científica
@@ -152,12 +183,18 @@ def _parse_hora(valor, deteccion: Optional[datetime] = None):
     txt = str(valor).strip()
     if txt == "" or txt.lower() in ("nan", "nat", "none"):
         return deteccion
-    # Intentar parsear con pandas. Preferimos día/mes (formato de LatAm: 23/8/2026),
-    # así fechas ambiguas como 5/8/2026 se leen 5-agosto y NO 8-mayo.
+    # Elegir la interpretación según el FORMATO, no a ciegas:
+    #  - ISO 'YYYY-MM-DD ...' (así lo guarda Excel): es inequívoco -> NO usar dayfirst
+    #    (con dayfirst=True, '2026-02-09' se corrompía a 2026-09-02).
+    #  - 'dd/mm/aaaa' (LatAm, así viene el CSV): usar dayfirst=True para que 5/8=5-ago.
+    import re
     try:
-        ts = pd.to_datetime(txt, dayfirst=True, errors="coerce")
-        if pd.isna(ts):
-            ts = pd.to_datetime(txt, dayfirst=False, errors="coerce")
+        if re.match(r"^\d{4}-\d{1,2}-\d{1,2}", txt):
+            ts = pd.to_datetime(txt, errors="coerce")           # ISO, sin dayfirst
+        else:
+            ts = pd.to_datetime(txt, dayfirst=True, errors="coerce")   # dd/mm/aaaa
+            if pd.isna(ts):
+                ts = pd.to_datetime(txt, dayfirst=False, errors="coerce")
         if pd.isna(ts):
             return deteccion
         dt = ts.to_pydatetime().replace(microsecond=0)
@@ -255,6 +292,9 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
     with _PROC_LOCK:
         for nombre_hoja, dff in hojas.items():
             if dff is None or dff.empty:
+                continue
+            if _hoja_ignorada(nombre_hoja):
+                _log(f"Hoja '{nombre_hoja}' ignorada (no es de ventas: resumen/datos).")
                 continue
 
             # Normalizar nombres y detectar columnas de forma flexible.

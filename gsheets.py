@@ -181,6 +181,10 @@ def sincronizar() -> dict:
             detalle.append({"hoja": nombre_hoja, "leidas": 0, "insertadas": 0,
                             "motivo": "hoja vacía"})
             continue
+        if watcher._hoja_ignorada(nombre_hoja):
+            detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": 0,
+                            "motivo": "ignorada (no es de ventas: resumen/datos agregados)"})
+            continue
         dff = dff.rename(columns=lambda c: str(c).strip())
         cmap = _columnas(list(dff.columns))
         if not cmap["id"] or not cmap["valor"]:
