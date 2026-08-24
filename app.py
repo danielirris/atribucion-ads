@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v89 · 2026-08-23"
+APP_VERSION = "v90 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -269,6 +269,41 @@ def _business_por_fuente() -> dict:
 
 def _set_business_por_fuente(mapa: dict) -> None:
     db.set_config("business_por_fuente", json.dumps(mapa, ensure_ascii=False))
+
+
+def _bitacora_presupuesto(f, anterior, nuevo):
+    """Registra un cambio de presupuesto con el contexto de métricas del momento
+    (útil para el historial y para entrenar la IA más adelante)."""
+    try:
+        ctx = {"roas": round(float(f.get("roas") or 0), 2),
+               "gasto_usd": round(float(f.get("gasto") or 0), 2),
+               "ventas": int(f.get("num") or 0),
+               "ingresos_usd": round(float(f.get("ingresos") or 0), 2),
+               "roas_desde_cambio": round(float(f.get("roas_mod") or 0), 2)}
+        subio = (nuevo or 0) >= (anterior or 0)
+        db.registrar_bitacora(
+            "presupuesto", nombre=str(f.get("nombre") or "")[:120],
+            obj_id=str(f.get("budget_obj_id") or f.get("sub") or ""),
+            nivel=f.get("budget_nivel") or f.get("status_nivel"),
+            cuenta=f.get("cuenta"), valor_anterior=float(anterior or 0),
+            valor_nuevo=float(nuevo or 0),
+            detalle=json.dumps({"accion": "subió" if subio else "bajó", **ctx},
+                               ensure_ascii=False),
+            usuario=config.APP_USER)
+    except Exception:
+        pass
+
+
+def _bitacora_estado(f, activar):
+    try:
+        db.registrar_bitacora(
+            "estado", nombre=str(f.get("nombre") or "")[:120],
+            obj_id=str(f.get("status_obj_id") or f.get("sub") or ""),
+            nivel=f.get("status_nivel"), cuenta=f.get("cuenta"),
+            valor_nuevo=1 if activar else 0,
+            detalle="activado" if activar else "pausado", usuario=config.APP_USER)
+    except Exception:
+        pass
 
 
 def _alias_conexion(conexion_id, conexiones):
@@ -744,8 +779,8 @@ def seccion_por_pais():
 
 
 def _seccion_ia(filas, contexto):
-    """Asistente de IA tipo chat, en la barra lateral izquierda."""
-    with st.sidebar.expander("🤖 Asistente IA", expanded=False):
+    """Asistente de IA tipo chat, al final del Dashboard."""
+    with st.expander("🤖 Asistente IA — pregúntale sobre tus anuncios", expanded=False):
         if not ia.disponible():
             st.info("Actívalo en **Configuración → IA**: elige el proveedor "
                     "(OpenAI o Anthropic) y pega tu API key. (También sirve poner "
@@ -917,8 +952,12 @@ def seccion_vista_general():
 
     _cuadre_ventas(todos, ventas_agg, filas, rango_lbl, cutoff, hasta_dt)
 
-    _seccion_ia(filas, f"Vista por: {nivel_lbl} · estado: {filtro} · rango: {rango_lbl} · "
-                       f"{len(filas)} elementos · montos en USD")
+    # La IA se renderiza al FINAL del dashboard (pagina_dashboard); aquí solo guardamos
+    # los datos ya calculados para que los use.
+    st.session_state["_ia_filas"] = filas
+    st.session_state["_ia_contexto"] = (
+        f"Vista por: {nivel_lbl} · estado: {filtro} · rango: {rango_lbl} · "
+        f"{len(filas)} elementos · montos en USD")
 
     if not insights:
         st.info("El **gasto**, CPM y conversaciones vienen de Facebook. Aún no se ven porque no "
@@ -1195,6 +1234,7 @@ def _bulk_estado(sel, activar):
                               activar, f.get("conexion_id"))
         if r.get("ok"):
             db.set_estado_ads(f["ad_ids"], activar)
+            _bitacora_estado(f, activar)
             ok += 1
         else:
             err.append(r.get("error", ""))
@@ -1239,6 +1279,7 @@ def _barra_acciones_conjunto(filas):
                 nativo = (monto_usd / rate) if rate else monto_usd
                 for aid in f["ad_ids"]:
                     db.cambiar_periodo(aid, nativo)
+                _bitacora_presupuesto(f, f.get("presupuesto"), monto_usd)  # bitácora
                 if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
                     fb.actualizar_presupuesto_async(
                         f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
@@ -1518,6 +1559,7 @@ def _toggle_estado_cb(f):
                           activar, f.get("conexion_id"))
     if r["ok"]:
         db.set_estado_ads(f["ad_ids"], activar)
+        _bitacora_estado(f, activar)
         st.session_state["_estado_msg"] = ("ok",
             f"{f['nombre']}: {'activado' if activar else 'pausado'} en Facebook.")
     else:
@@ -1554,6 +1596,7 @@ def _pop_presupuesto(f):
         nativo = (nuevo / rate) if rate else nuevo
         for aid in f["ad_ids"]:
             db.cambiar_periodo(aid, nativo)
+        _bitacora_presupuesto(f, actual, nuevo)   # registra en la bitácora
         hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
         if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
             fb.actualizar_presupuesto_async(
@@ -3129,13 +3172,67 @@ def pagina_configuracion():
 
     # --- Grupo 4: herramientas / diagnóstico ---
     with grupos[3]:
-        t = st.tabs(["Auditoría de ventas", "Limpieza de ventas", "Diagnóstico API"])
+        t = st.tabs(["Actividad (bitácora)", "Auditoría de ventas", "Limpieza de ventas",
+                     "Diagnóstico API"])
         with t[0]:
-            _panel_auditoria_ventas()
+            _panel_actividad()
         with t[1]:
-            _panel_limpieza_ventas()
+            _panel_auditoria_ventas()
         with t[2]:
+            _panel_limpieza_ventas()
+        with t[3]:
             _panel_diagnostico_api()
+
+
+def _panel_actividad():
+    st.subheader("📒 Bitácora de actividad")
+    st.caption("Registro de cada cambio: subir/bajar presupuesto, pausar/activar. Guarda el "
+               "contexto (ROAS, gasto, ventas) del momento — la base para, más adelante, "
+               "enseñarle a una IA a decidir.")
+    total = db.contar_bitacora()
+    filtro = st.radio("Ver", ["Todo", "Solo presupuesto", "Solo estado"],
+                      horizontal=True, key="bit_filtro")
+    acc = {"Solo presupuesto": "presupuesto", "Solo estado": "estado"}.get(filtro)
+    filas = db.leer_bitacora(limite=1000, accion=acc)
+    st.caption(f"{total} evento(s) en total.")
+    if not filas:
+        st.info("Aún no hay actividad registrada. Cambia un presupuesto o pausa/activa un "
+                "anuncio y aquí quedará el registro.")
+        return
+
+    def _fmt(r):
+        ts = db.a_fecha(r.get("ts"))
+        cuando = ts.strftime("%d/%m %H:%M") if ts else (r.get("ts") or "")[:16]
+        if r["accion"] == "presupuesto":
+            cambio = f"{_usd(r.get('valor_anterior') or 0)} → {_usd(r.get('valor_nuevo') or 0)}"
+        elif r["accion"] == "estado":
+            cambio = "▶ Activado" if (r.get("valor_nuevo") or 0) else "⏸ Pausado"
+        else:
+            cambio = r.get("detalle") or ""
+        # Contexto legible (ROAS/ventas) desde el JSON del detalle.
+        ctx = ""
+        try:
+            d = json.loads(r.get("detalle") or "{}")
+            if isinstance(d, dict) and "roas" in d:
+                ctx = f"ROAS {d.get('roas')} · {d.get('ventas', 0)} ventas · gasto {_usd(d.get('gasto_usd') or 0)}"
+        except Exception:
+            ctx = r.get("detalle") or ""
+        return {"Fecha": cuando, "Acción": r["accion"], "Anuncio": r.get("nombre") or "",
+                "Cuenta": r.get("cuenta") or "", "Cambio": cambio, "Contexto": ctx}
+
+    df = pd.DataFrame([_fmt(r) for r in filas])
+    st.dataframe(df, hide_index=True, use_container_width=True, height=460)
+    c1, c2 = st.columns(2)
+    c1.download_button("⬇️ Descargar CSV (para la IA)", df.to_csv(index=False).encode("utf-8"),
+                       "bitacora_actividad.csv", "text/csv", use_container_width=True)
+    if c2.button("Borrar toda la bitácora", use_container_width=True):
+        if st.session_state.get("_confirm_borrar_bit"):
+            n = db.borrar_bitacora()
+            st.session_state["_confirm_borrar_bit"] = False
+            st.warning(f"Bitácora borrada ({n} eventos).")
+        else:
+            st.session_state["_confirm_borrar_bit"] = True
+            st.error("Pulsa otra vez para confirmar el borrado.")
 
 
 def _panel_auditoria_ventas():
@@ -3359,18 +3456,16 @@ def pagina_dashboard():
                 pass
             st.rerun()
 
-    # Paneles de la barra lateral (registrar venta arriba; IA y cuadre los agrega
+    # Paneles de la barra lateral (registrar venta arriba; el cuadre lo agrega
     # seccion_vista_general una vez calculados los datos).
     seccion_venta_manual()
     seccion_vista_general()
     st.divider()
     seccion_por_pais()
     st.divider()
-    seccion_detalle()
-    st.divider()
-    seccion_lote()
-    st.divider()
-    seccion_manual()
+    # Asistente IA AL FINAL del dashboard (usa los datos ya calculados).
+    _seccion_ia(st.session_state.get("_ia_filas", []),
+                st.session_state.get("_ia_contexto", ""))
 
 
 # --------------------------------------------------------------------------- #

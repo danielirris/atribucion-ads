@@ -118,9 +118,24 @@ def init_db() -> None:
                 valor TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS bitacora (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                accion TEXT NOT NULL,        -- 'presupuesto' | 'estado' | 'duplicar' | ...
+                nivel TEXT,                  -- ad | adset | campaign
+                obj_id TEXT,
+                nombre TEXT,
+                cuenta TEXT,
+                valor_anterior REAL,
+                valor_nuevo REAL,
+                detalle TEXT,                -- texto o JSON con contexto (ROAS, gasto...)
+                usuario TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_periodos_ad   ON periodos(ad_id);
             CREATE INDEX IF NOT EXISTS idx_ventas_ad     ON ventas(ad_id);
             CREATE INDEX IF NOT EXISTS idx_ventas_periodo ON ventas(periodo_id);
+            CREATE INDEX IF NOT EXISTS idx_bitacora_ts   ON bitacora(ts);
             """
         )
         conn.commit()
@@ -643,6 +658,51 @@ def borrar_todas_ventas() -> int:
     """Borra TODAS las ventas (reset total). Después hay que re-importar/re-sincronizar."""
     with _LOCK, _conn() as conn:
         cur = conn.execute("DELETE FROM ventas")
+        conn.commit()
+        return cur.rowcount
+
+
+def registrar_bitacora(accion: str, nombre: Optional[str] = None,
+                       obj_id: Optional[str] = None, nivel: Optional[str] = None,
+                       cuenta: Optional[str] = None,
+                       valor_anterior: Optional[float] = None,
+                       valor_nuevo: Optional[float] = None,
+                       detalle: Optional[str] = None,
+                       usuario: Optional[str] = None) -> int:
+    """Registra una acción en la bitácora de actividad (para historial y, luego, IA)."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO bitacora
+               (ts, accion, nivel, obj_id, nombre, cuenta, valor_anterior, valor_nuevo,
+                detalle, usuario)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (a_texto(ahora()), accion, nivel, obj_id, nombre, cuenta,
+             valor_anterior, valor_nuevo, detalle, usuario))
+        conn.commit()
+        return cur.lastrowid
+
+
+def leer_bitacora(limite: int = 500, accion: Optional[str] = None) -> list:
+    """Últimas entradas de la bitácora (más recientes primero)."""
+    cond, args = [], []
+    if accion:
+        cond.append("accion = ?"); args.append(accion)
+    where = (" WHERE " + " AND ".join(cond)) if cond else ""
+    args.append(int(limite))
+    with _conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM bitacora{where} ORDER BY id DESC LIMIT ?", args)
+        return [dict(r) for r in rows]
+
+
+def contar_bitacora() -> int:
+    with _conn() as conn:
+        return conn.execute("SELECT COUNT(*) c FROM bitacora").fetchone()["c"]
+
+
+def borrar_bitacora() -> int:
+    with _LOCK, _conn() as conn:
+        cur = conn.execute("DELETE FROM bitacora")
         conn.commit()
         return cur.rowcount
 
