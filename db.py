@@ -629,6 +629,32 @@ def borrar_todas_ventas() -> int:
         return cur.rowcount
 
 
+def fuentes_ventas_distintas() -> list:
+    """Lista de fuentes (hoja_origen) que existen en la tabla de ventas."""
+    with _conn() as conn:
+        return [r["f"] for r in conn.execute(
+            "SELECT DISTINCT COALESCE(hoja_origen,'—') f FROM ventas ORDER BY f")]
+
+
+def ventas_sin_adid_por_fuente(cutoff: Optional[datetime] = None,
+                               hasta: Optional[datetime] = None) -> dict:
+    """Ventas SIN ad_id agrupadas por fuente: {fuente: {'num': n, 'ingreso_nat': x}}."""
+    cond = ["(ad_id IS NULL OR TRIM(ad_id)='')"]
+    args = []
+    if cutoff is not None:
+        cond.append("hora_venta >= ?"); args.append(a_texto(cutoff))
+    if hasta is not None:
+        cond.append("hora_venta < ?"); args.append(a_texto(hasta))
+    where = " WHERE " + " AND ".join(cond)
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT COALESCE(hoja_origen,'—') fuente, COUNT(*) num,
+                       COALESCE(SUM(valor_venta),0) total
+                FROM ventas{where} GROUP BY fuente""", args)
+        return {r["fuente"]: {"num": r["num"], "ingreso_nat": float(r["total"])}
+                for r in rows}
+
+
 def auditoria_ventas(cutoff_hoy: Optional[datetime] = None,
                      manana: Optional[datetime] = None) -> dict:
     """Radiografía completa de la tabla de ventas para diagnosticar descuadres:

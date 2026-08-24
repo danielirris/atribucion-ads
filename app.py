@@ -7,6 +7,7 @@ Ejecutar con:
     streamlit run app.py
 """
 import time
+import json
 import html as _html
 from datetime import datetime, timedelta
 
@@ -28,7 +29,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v83 · 2026-08-23"
+APP_VERSION = "v84 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -235,6 +236,22 @@ def _sidebar_nav(pagina: str):
             st.session_state["_pagina"] = key
             st.rerun()
     st.sidebar.caption(f"Versión: {APP_VERSION}")
+
+
+_SIN_BIZ = "— (sin asignar)"
+
+
+def _business_por_fuente() -> dict:
+    """Mapa {fuente_de_ventas: alias_de_business}. Sirve para atribuir las ventas SIN
+    ad_id al Business de la fuente de donde salieron."""
+    try:
+        return json.loads(db.get_config("business_por_fuente", "") or "{}")
+    except Exception:
+        return {}
+
+
+def _set_business_por_fuente(mapa: dict) -> None:
+    db.set_config("business_por_fuente", json.dumps(mapa, ensure_ascii=False))
 
 
 def _alias_conexion(conexion_id, conexiones):
@@ -853,12 +870,18 @@ def seccion_vista_general():
             from collections import Counter
             monc = Counter((a.get("cuenta_moneda") or "USD") for a in todos)
             rate_sa = fx.tasa_a_usd(monc.most_common(1)[0][0] if monc else "USD")
+        # Ventas SIN ad_id por fuente -> se atribuyen al Business de su fuente. Si hay
+        # filtro de Business activo, solo cuentan las fuentes de ESE Business.
+        sin_por_fuente = db.ventas_sin_adid_por_fuente(cutoff, hasta_dt)
+        mapa_biz = _business_por_fuente()
         sa_num, sa_ing_nat = 0, 0.0
-        for ad_id, v in ventas_agg.items():
-            aid = str(ad_id).strip().lower()
-            if aid in ("", "nan", "none"):   # SOLO vacías; no huérfanas
-                sa_num += int(v.get("num_ventas") or 0)
-                sa_ing_nat += float(v.get("ingreso_total") or 0.0)
+        for fnt, d in sin_por_fuente.items():
+            if business_sel:
+                biz = mapa_biz.get(fnt)
+                if biz not in business_sel:
+                    continue   # esta fuente no es del Business filtrado
+            sa_num += int(d.get("num") or 0)
+            sa_ing_nat += float(d.get("ingreso_nat") or 0.0)
         if sa_num:
             sin_adid = {"num": sa_num, "ingreso_usd": sa_ing_nat * rate_sa}
 
@@ -2799,6 +2822,40 @@ def _panel_supabase():
             st.error(f"{r['error']}")
 
 
+def _panel_business_fuente():
+    st.subheader("Business por fuente de ventas")
+    st.caption("Cuando una venta trae **ad_id**, se atribuye a su anuncio (y a su Business) "
+               "automáticamente. Cuando **NO** trae ad_id, se atribuye al Business de la "
+               "**fuente** de donde salió. Aquí dices qué Business corresponde a cada fuente. "
+               "Recomendado: que cada Business saque sus ventas de UNA sola fuente.")
+    conexiones = db.obtener_conexiones()
+    business = sorted({(c.get("alias") or f"Conexión {c['id']}") for c in conexiones})
+    business = ["ENV (.env)"] + business
+    opciones = [_SIN_BIZ] + business
+    # Fuentes conocidas: las que ya existen en la base + las genéricas.
+    fuentes = list(dict.fromkeys(
+        (db.fuentes_ventas_distintas() or []) + ["GoogleSheets", "Supabase"]))
+    fuentes = [f for f in fuentes if f and f != "—"]
+    if not fuentes:
+        st.info("Aún no hay fuentes de ventas. Sube un Excel o sincroniza un Sheet/Supabase "
+                "y vuelve aquí para asignarles su Business.")
+        return
+    mapa = _business_por_fuente()
+    nuevo = {}
+    st.markdown("**Asigna cada fuente a un Business:**")
+    for f in fuentes:
+        actual = mapa.get(f, _SIN_BIZ)
+        idx = opciones.index(actual) if actual in opciones else 0
+        sel = st.selectbox(f"Fuente: {f}", opciones, index=idx, key=f"bizf_{f}")
+        if sel != _SIN_BIZ:
+            nuevo[f] = sel
+    if st.button("Guardar asignación", type="primary"):
+        _set_business_por_fuente(nuevo)
+        st.success("Guardado. Las ventas sin ad_id se atribuirán al Business de su fuente.")
+    st.caption("Con esto, al filtrar por un Business en el Dashboard, sus ventas sin ad_id "
+               "(las de su fuente asignada) sí se cuentan; las de otras fuentes no.")
+
+
 def _panel_ia():
     st.subheader("Asistente de IA")
     st.caption("Elige qué IA conectar. La clave se guarda en este servidor (volumen /data), "
@@ -3029,7 +3086,8 @@ def pagina_configuracion():
     with grupos[0]:
         st.caption("Tus ventas pueden venir de varias fuentes a la vez. Aquí las conectas y "
                    "eliges en qué moneda vienen.")
-        t = st.tabs(["Excel", "Google Sheets", "Supabase", "Moneda de las ventas"])
+        t = st.tabs(["Excel", "Google Sheets", "Supabase", "Business por fuente",
+                     "Moneda de las ventas"])
         with t[0]:
             _panel_excel()
         with t[1]:
@@ -3037,6 +3095,8 @@ def pagina_configuracion():
         with t[2]:
             _panel_supabase()
         with t[3]:
+            _panel_business_fuente()
+        with t[4]:
             _panel_moneda()
 
     # --- Grupo 2: conectar Facebook / Business ---
