@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v74 · 2026-08-23"
+APP_VERSION = "v75 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -820,6 +820,7 @@ def seccion_vista_general():
     filas = _construir_filas(anuncios, nivel, insights, ventas_agg, ahora)
 
     _render_totales(filas)
+    _cuadre_ventas(todos, ventas_agg, filas, rango_lbl)
 
     _seccion_ia(filas, f"Vista por: {nivel_lbl} · estado: {filtro} · rango: {rango_lbl} · "
                        f"{len(filas)} elementos · montos en USD")
@@ -863,6 +864,44 @@ def _ordenar_filas(filas):
         return (v is None, v if v is not None else 0)
     filas.sort(key=keyf, reverse=(direc == "desc"))
     return filas
+
+
+def _cuadre_ventas(todos, ventas_agg, filas, rango_lbl):
+    """Explica la diferencia entre las ventas de tus registros y las que ves en el
+    dashboard: cuántas están en la base para este rango, cuántas se muestran, cuántas
+    quedan ocultas por los filtros y cuántas son 'huérfanas' (su ad_id no coincide con
+    ningún anuncio cargado)."""
+    ids_conocidos = {str(a.get("ad_id")) for a in todos}
+    total_rango = sum(int(v.get("num_ventas") or 0) for v in ventas_agg.values())
+    mostradas = sum(int(f["num"] or 0) for f in filas)
+    huerfanas, huerf_detalle = 0, []
+    for ad_id, v in ventas_agg.items():
+        n = int(v.get("num_ventas") or 0)
+        if str(ad_id) not in ids_conocidos:
+            huerfanas += n
+            huerf_detalle.append((str(ad_id), n))
+    ocultas = max(0, total_rango - mostradas - huerfanas)
+    if total_rango == mostradas and huerfanas == 0:
+        return  # todo cuadra: no molestamos
+    huerf_detalle.sort(key=lambda x: -x[1])
+    with st.expander(f"🧮 Cuadre de ventas — en la base hay **{total_rango}** para "
+                     f"«{rango_lbl}», el dashboard muestra **{mostradas}**", expanded=False):
+        st.markdown(
+            f"- **{mostradas}** se muestran (anuncios visibles con los filtros actuales).\n"
+            f"- **{ocultas}** están ocultas por filtros (Estado, País, Cuenta o Buscar): "
+            "son ventas de anuncios que SÍ existen pero no pasan el filtro. "
+            "Pon **Estado = Todos** y **País = Todos**, y borra la búsqueda, para verlas.\n"
+            f"- **{huerfanas}** son *huérfanas*: su `ad_id` no coincide con ningún anuncio "
+            "cargado (anuncio borrado, de una cuenta/token no conectado, o el ID del "
+            "registro está mal escrito).")
+        if huerf_detalle:
+            st.caption("ad_id sin anuncio (los que más ventas aportan):")
+            st.dataframe(
+                pd.DataFrame([{"ad_id": a, "ventas": n} for a, n in huerf_detalle[:25]]),
+                hide_index=True, use_container_width=True)
+        st.caption("¿El total en la base ya es menor que en tu Sheet/Excel? Entonces esas "
+                   "ventas no se importaron (sin ID, valor 0 ignorado o duplicado). "
+                   "Revisa el detalle en **Configuración → Google Sheets / Excel → Probar**.")
 
 
 def _render_totales(filas):
@@ -1046,23 +1085,40 @@ def _barra_acciones_conjunto(filas):
         return
     with st.container(border=True):
         st.markdown(f"**{len(sel)} seleccionado(s)** — acción en conjunto")
+        modo = st.radio("Presupuesto:", ["Porcentaje % (sobre el de cada uno)",
+                                         "Monto fijo (USD, igual para todos)"],
+                        horizontal=True, key="bulk_modo")
         c1, c2, c3, c4, c5 = st.columns([1.4, 1.1, 0.9, 0.9, 1])
-        nuevo = c1.number_input("Nuevo presupuesto c/u (USD)", min_value=0.0, value=4.0,
-                                step=1.0, key="bulk_presup")
-        if c2.button("Aplicar presupuesto", type="primary", key="bulk_pres_btn",
+        if modo.startswith("Porcentaje"):
+            accion = c1.radio("Acción", ["Reducir", "Aumentar"], horizontal=True,
+                              key="bulk_acc")
+            pct = c1.number_input("% de cambio", min_value=0.0, max_value=100.0,
+                                  value=35.0, step=5.0, key="bulk_pct")
+            factor = (1 - pct / 100.0) if accion == "Reducir" else (1 + pct / 100.0)
+            btn_lbl = f"{accion} {pct:g}%"
+        else:
+            nuevo = c1.number_input("Nuevo presupuesto c/u (USD)", min_value=0.0,
+                                    value=4.0, step=1.0, key="bulk_presup")
+            factor = None
+            btn_lbl = "Aplicar presupuesto"
+        if c2.button(btn_lbl, type="primary", key="bulk_pres_btn",
                      use_container_width=True):
             hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
             for f in sel:
                 rate = f.get("rate_c") or 1.0
-                nativo = (nuevo / rate) if rate else nuevo
+                # % -> se aplica al presupuesto propio de cada anuncio; fijo -> mismo monto.
+                monto_usd = round(float(f["presupuesto"] or 0.0) * factor, 2) \
+                    if factor is not None else nuevo
+                nativo = (monto_usd / rate) if rate else monto_usd
                 for aid in f["ad_ids"]:
                     db.cambiar_periodo(aid, nativo)
                 if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
                     fb.actualizar_presupuesto_async(
                         f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
                         f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40])
+            resumen = btn_lbl if factor is not None else f"→ {_usd(nuevo)}"
             st.session_state["_estado_msg"] = ("ok",
-                f"Presupuesto de {len(sel)} anuncio(s) → {_usd(nuevo)}. "
+                f"Presupuesto de {len(sel)} anuncio(s): {resumen}. "
                 "Aplicándose en Facebook.")
             _limpiar_seleccion(filas)
             st.rerun()
@@ -1349,11 +1405,24 @@ def _toggle_estado_cb(f):
 
 def _pop_presupuesto(f):
     st.markdown(f"**{esc_nombre(f)}**")
-    st.caption(f"Presupuesto actual: {_usd(f['presupuesto'])}"
+    actual = float(f["presupuesto"] or 0.0)
+    st.caption(f"Presupuesto actual: {_usd(actual)}"
                + (f" ({_num(f['presup_nat'])} {f['moneda']})" if (f['moneda'] or 'USD').upper() != 'USD' else ""))
-    nuevo = st.number_input("Nuevo presupuesto diario (USD)", min_value=0.0,
-                            value=float(f["presupuesto"] or 0.0), step=1.0,
-                            key=f"pres_{f['sub']}")
+    modo = st.radio("¿Cómo lo cambias?", ["Monto fijo (USD)", "Porcentaje %"],
+                    horizontal=True, key=f"presmodo_{f['sub']}")
+    if modo == "Porcentaje %":
+        cpa, cpb = st.columns([1, 1])
+        accion = cpa.radio("Acción", ["Reducir", "Aumentar"], horizontal=True,
+                           key=f"presacc_{f['sub']}")
+        pct = cpb.number_input("% de cambio", min_value=0.0, max_value=100.0,
+                               value=35.0, step=5.0, key=f"prespct_{f['sub']}")
+        factor = (1 - pct / 100.0) if accion == "Reducir" else (1 + pct / 100.0)
+        nuevo = round(actual * factor, 2)
+        signo = "−" if accion == "Reducir" else "+"
+        st.info(f"{accion} {pct:g}%:  {_usd(actual)}  →  **{_usd(nuevo)}**  ({signo}{_usd(abs(nuevo-actual))})")
+    else:
+        nuevo = st.number_input("Nuevo presupuesto diario (USD)", min_value=0.0,
+                                value=actual, step=1.0, key=f"pres_{f['sub']}")
     if (f["moneda"] or "USD").upper() != "USD":
         st.caption(f"Se enviará a Facebook ≈ {_num(nuevo / (f['rate_c'] or 1))} {f['moneda']}")
     if st.button("Aplicar", type="primary", key=f"presbtn_{f['sub']}",
