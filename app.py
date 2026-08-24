@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v82 · 2026-08-23"
+APP_VERSION = "v83 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -2672,18 +2672,53 @@ def _panel_gsheets():
 
 def _panel_excel():
     st.subheader("Excel (ventas del socio)")
-    st.caption("Sube un Excel (.xlsx). Lee **todas las hojas** y detecta la columna del ID del "
-               "anuncio, valor, fecha y país aunque se llamen distinto (ID_Anuncio, Ad ID, id, "
-               "Monto, Fecha, Pais…). Solo procesa las filas nuevas.")
+    st.caption("Sube un Excel (.xlsx). Lee **todas las hojas de ventas** (la tabla de la "
+               "izquierda de cada una) y detecta las columnas de ID, valor, fecha y país. "
+               "Puedes **excluir** las hojas que no sean de ventas antes de importar.")
     subido = st.file_uploader("Subir / reemplazar ventas.xlsx", type=["xlsx"], key="up_excel_cfg")
-    c1, c2 = st.columns(2)
-    if subido is not None and c1.button("Procesar Excel subido", use_container_width=True):
-        n = watcher.guardar_excel_subido(subido.getvalue(), reemplazar=True)
-        st.success(f"{n} venta(s) nueva(s) procesada(s).")
-    if c2.button("Reimportar TODO el Excel", use_container_width=True,
-                 help="Reprocesa todas las filas. Ahora es seguro: no duplica."):
-        n = watcher.importar_todo()
-        st.success(f"{n} ventas importadas (sin duplicar).")
+
+    if subido is not None:
+        # Lee la lista de hojas UNA vez (cacheada por archivo) para no releer en cada rerun.
+        clave = f"{subido.name}:{subido.size}"
+        if st.session_state.get("_xls_key") != clave:
+            with st.spinner("Leyendo hojas del Excel…"):
+                st.session_state["_xls_key"] = clave
+                st.session_state["_xls_hojas"] = watcher.hojas_de_excel(subido.getvalue())
+        info = st.session_state.get("_xls_hojas", [])
+        if info:
+            st.markdown("**Hojas detectadas** — desmarca (excluye) las que NO son de ventas:")
+            nombres = [h["nombre"] for h in info]
+            sugerido_excluir = [h["nombre"] for h in info if h["ignorar_sugerido"]]
+            # Tabla informativa.
+            st.dataframe(pd.DataFrame([
+                {"Hoja": h["nombre"], "Filas": h["filas"],
+                 "¿Ventas?": "✅ sí" if h["es_ventas"] else "🚫 no",
+                 "Sugerencia": "Excluir" if h["ignorar_sugerido"] else "Importar"}
+                for h in info]), hide_index=True, use_container_width=True)
+            excluir = st.multiselect(
+                "Hojas a EXCLUIR (no se importan)", nombres,
+                default=st.session_state.get("_xls_excl_prev", sugerido_excluir),
+                key="_xls_excl",
+                help="Ya vienen marcadas las que no parecen de ventas (Data_Unificada, "
+                     "Anuncios, RETIROS…). Puedes agregar o quitar las que quieras.")
+            incluir = [n for n in nombres if n not in excluir]
+            st.caption(f"Se importarán **{len(incluir)}** hoja(s): "
+                       + (", ".join(incluir) if incluir else "ninguna"))
+            if st.button("Procesar hojas incluidas", type="primary",
+                         use_container_width=True, key="btn_proc_xls"):
+                # Guarda las exclusiones (persisten para futuras subidas y sincronizaciones).
+                st.session_state["_xls_excl_prev"] = excluir
+                db.set_config("hojas_ignorar", ",".join(excluir))
+                with st.spinner("Importando…"):
+                    n = watcher.guardar_excel_subido(subido.getvalue(), reemplazar=True)
+                st.success(f"{n} venta(s) nueva(s) procesada(s) de {len(incluir)} hoja(s). "
+                           "Las hojas excluidas quedaron guardadas para la próxima vez.")
+
+    with st.expander("Reimportar todo (avanzado)"):
+        if st.button("Reimportar TODO el Excel guardado", use_container_width=True,
+                     help="Reprocesa todas las filas del último Excel. Es seguro: no duplica."):
+            n = watcher.importar_todo()
+            st.success(f"{n} ventas importadas (sin duplicar).")
 
     st.divider()
     st.markdown("**🧹 Limpieza de ventas**")
@@ -3022,7 +3057,43 @@ def pagina_configuracion():
 
     # --- Grupo 4: herramientas / diagnóstico ---
     with grupos[3]:
-        _panel_diagnostico_api()
+        t = st.tabs(["Auditoría de ventas", "Diagnóstico API"])
+        with t[0]:
+            _panel_auditoria_ventas()
+        with t[1]:
+            _panel_diagnostico_api()
+
+
+def _panel_auditoria_ventas():
+    st.subheader("Auditoría de ventas")
+    st.caption("Radiografía de TODAS las ventas en la base: de qué fuente vienen, en qué "
+               "rango de fechas, y si hay duplicados. Sirve para entender cualquier descuadre.")
+    ahora = db.ahora()
+    media = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+    a = db.auditoria_ventas(media, media + timedelta(days=1))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ventas en la base (total)", f"{a['total']:,}".replace(",", "."))
+    c2.metric("Ventas de HOY", a["hoy"])
+    c3.metric("Duplicados por contenido", a["dup_sobrantes"],
+              help="Filas de más con el mismo ad_id + valor + hora (posibles duplicados "
+                   "de importar el mismo dato desde 2 archivos/fuentes).")
+    if a["fuentes"]:
+        st.markdown("**Por fuente (hoja_origen):**")
+        st.dataframe(pd.DataFrame([
+            {"Fuente": f["fuente"], "Ventas": f["n"], "Sin ad_id": f["sin_id"],
+             "Desde": f["desde"], "Hasta": f["hasta"]} for f in a["fuentes"]]),
+            hide_index=True, use_container_width=True)
+    st.caption("Cada fuente es una hoja de Excel, 'GoogleSheets' o 'Supabase'. Si ves la "
+               "MISMA venta en dos fuentes (p. ej. una hoja de Excel y 'GoogleSheets'), se "
+               "cuenta doble. Solución: usa **una sola fuente**, borra las otras y sincroniza "
+               "de nuevo. El botón de limpieza está en **Fuentes de ventas → Excel**.")
+    hi = db.get_config("hojas_ignorar", "") or ""
+    st.markdown("**Hojas excluidas (no se importan):**")
+    st.caption("Fijas: Data_Unificada, Anuncios, RETIROS." +
+               (f" · Tuyas: {hi}" if hi else " · No has excluido hojas adicionales."))
+    if hi and st.button("Limpiar mis hojas excluidas"):
+        db.set_config("hojas_ignorar", "")
+        st.rerun()
 
 
 def _panel_diagnostico_api():

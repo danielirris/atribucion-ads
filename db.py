@@ -629,6 +629,32 @@ def borrar_todas_ventas() -> int:
         return cur.rowcount
 
 
+def auditoria_ventas(cutoff_hoy: Optional[datetime] = None,
+                     manana: Optional[datetime] = None) -> dict:
+    """Radiografía completa de la tabla de ventas para diagnosticar descuadres:
+    total, desglose por fuente (con rango de fechas y # sin ad_id), duplicados por
+    contenido, y cuántas caen 'hoy'."""
+    with _conn() as conn:
+        total = conn.execute("SELECT COUNT(*) c FROM ventas").fetchone()["c"]
+        fuentes = [dict(r) for r in conn.execute(
+            """SELECT COALESCE(hoja_origen,'—') fuente, COUNT(*) n,
+                      SUM(CASE WHEN ad_id IS NULL OR TRIM(ad_id)='' THEN 1 ELSE 0 END) sin_id,
+                      MIN(substr(hora_venta,1,10)) desde, MAX(substr(hora_venta,1,10)) hasta
+               FROM ventas GROUP BY fuente ORDER BY n DESC""")]
+        # Duplicados por contenido (misma ad_id+valor+hora) que aparecen en >1 fila.
+        dup = conn.execute(
+            """SELECT COUNT(*) grupos, COALESCE(SUM(c-1),0) sobrantes FROM (
+                 SELECT COUNT(*) c FROM ventas
+                 GROUP BY ad_id, valor_venta, hora_venta HAVING COUNT(*)>1)""").fetchone()
+        hoy = 0
+        if cutoff_hoy is not None and manana is not None:
+            hoy = conn.execute(
+                "SELECT COUNT(*) c FROM ventas WHERE hora_venta>=? AND hora_venta<?",
+                (a_texto(cutoff_hoy), a_texto(manana))).fetchone()["c"]
+    return {"total": total, "fuentes": fuentes,
+            "dup_grupos": dup["grupos"], "dup_sobrantes": dup["sobrantes"], "hoy": hoy}
+
+
 def ventas_por_fuente_rango(cutoff: Optional[datetime] = None,
                             hasta: Optional[datetime] = None) -> list:
     """Desglose de ventas por fuente (hoja_origen) dentro de un rango, separando las

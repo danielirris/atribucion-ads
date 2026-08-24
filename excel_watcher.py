@@ -464,6 +464,29 @@ def importar_todo() -> int:
 # --------------------------------------------------------------------------- #
 #  Modo online: subir Excel y registrar venta manual
 # --------------------------------------------------------------------------- #
+def hojas_de_excel(contenido: bytes) -> list:
+    """Lista las hojas de un Excel (bytes) SIN importar: para que el usuario elija
+    cuáles excluir. Devuelve [{nombre, filas, es_ventas, ignorar_sugerido}]."""
+    import io
+    out = []
+    try:
+        hojas = pd.read_excel(io.BytesIO(contenido), sheet_name=None, engine="openpyxl", dtype=str)
+    except Exception as e:
+        _log(f"No pude leer las hojas del Excel: {e}")
+        return out
+    for nombre, df in hojas.items():
+        cols = [str(c).strip() for c in (df.columns if df is not None else [])]
+        cm = detectar_columnas(cols)
+        es_ventas = bool(cm.get("id") and cm.get("valor"))
+        builtin = _norm_hoja(nombre) in _HOJAS_IGNORAR_DEF
+        # Sugerimos EXCLUIR si no parece de ventas, o si es una hoja conocida no-ventas.
+        out.append({"nombre": nombre,
+                    "filas": 0 if df is None else len(df),
+                    "es_ventas": es_ventas and not builtin,
+                    "ignorar_sugerido": builtin or not es_ventas})
+    return out
+
+
 def guardar_excel_subido(contenido: bytes, reemplazar: bool = True) -> int:
     """
     Guarda un Excel subido desde la UI en EXCEL_PATH y procesa sus filas.
