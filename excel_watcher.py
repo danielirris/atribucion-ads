@@ -57,12 +57,13 @@ _ALIAS_ID = ["id_anuncio", "idanuncio", "id anuncio", "id del anuncio", "ad_id",
              "ad id", "post id", "post_id", "postid", "id_post", "id del post",
              "id", "anuncio", "id_ad", "id ad"]
 _ALIAS_VALOR = ["valor_venta", "valor venta", "valor", "monto", "importe", "precio",
-                "total", "venta", "amount", "value", "ingreso", "ingresos"]
+                "total", "venta", "amount", "value", "ingreso", "ingresos",
+                "pago recibido", "pago_recibido", "recibido", "pago"]
 _ALIAS_HORA = ["hora_venta", "hora venta", "hora", "fecha", "fecha_venta", "fecha venta",
                "fecha y hora", "timestamp", "date", "datetime", "fecha/hora"]
 _ALIAS_PAIS = ["pais", "país", "country", "pais_venta", "país_venta"]
 _ALIAS_PRODUCTO = ["producto", "product", "articulo", "artículo", "item", "sku",
-                   "descripcion", "descripción", "concepto"]
+                   "descripcion", "descripción", "concepto", "etiquetas", "etiqueta"]
 
 
 def _norm(s):
@@ -161,17 +162,23 @@ def _parse_hora(valor, deteccion: datetime) -> datetime:
 
 
 def _parse_valor(valor) -> Optional[float]:
+    """Extrae el número aunque venga con moneda o texto: '150.00 MXN', '$100',
+    '1,234.56', '87 pesos' -> 150.0 / 100.0 / 1234.56 / 87.0."""
+    import re
     try:
         if valor is None or pd.isna(valor):
             return None
     except Exception:
         pass
+    txt = str(valor).strip()
+    if txt == "" or txt.lower() in ("nan", "none", "nat"):
+        return None
+    txt = txt.replace(",", "")  # separador de miles
+    m = re.search(r"-?\d+(?:\.\d+)?", txt)  # primer número (ignora 'MXN', '$', etc.)
+    if not m:
+        return None
     try:
-        # Tolerar formatos "1,234.56" o "$100".
-        txt = str(valor).replace("$", "").replace(",", "").strip()
-        if txt == "":
-            return None
-        return float(txt)
+        return float(m.group(0))
     except Exception:
         return None
 
@@ -179,12 +186,13 @@ def _parse_valor(valor) -> Optional[float]:
 def _procesar_fila(ad_id: str, valor: float, hora: datetime, hoja: str,
                    pais: Optional[str] = None, ext_id: Optional[str] = None,
                    producto: Optional[str] = None) -> bool:
-    """Atribuye y guarda una venta. Devuelve True si se insertó."""
+    """Atribuye y guarda una venta. Devuelve True si se insertó.
+    Las ventas SIN ad_id también se guardan (ad_id="") para contarlas aparte."""
     ad_id = str(ad_id).strip()
-    if not ad_id or ad_id.lower() in ("nan", "none"):
-        return False
+    if ad_id.lower() in ("nan", "none"):
+        ad_id = ""
 
-    periodo = db.periodo_para_hora(ad_id, hora)
+    periodo = db.periodo_para_hora(ad_id, hora) if ad_id else None
     periodo_id = periodo["id"] if periodo else None
 
     db.insertar_venta(ad_id, valor, hora, periodo_id, hoja,

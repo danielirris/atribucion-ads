@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v77 · 2026-08-23"
+APP_VERSION = "v78 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -279,31 +279,14 @@ def _extraer_productos(campanas) -> list:
 
 
 def sidebar_filtros():
-    """Filtros globales que afectan al Dashboard (se guardan en session_state)."""
+    """Filtros globales que afectan al Dashboard (se guardan en session_state).
+    En el sidebar: Buscar, Rango de fechas y un expander 'Filtros' con el resto.
+    (Ver por / Estado están arriba en el Dashboard.)"""
     st.sidebar.divider()
-    st.sidebar.markdown("### Filtros")
-
-    # Controles principales (antes estaban arriba en el Dashboard; ahora aquí).
-    st.sidebar.segmented_control(
-        "Ver por", ["Campaña", "Conjunto de anuncios", "Anuncio"],
-        default=st.session_state.get("f_nivel", "Conjunto de anuncios"), key="f_nivel")
-    st.sidebar.markdown('<span class="estado-anchor"></span>', unsafe_allow_html=True)
-    st.sidebar.segmented_control(
-        "Estado", ["Activos", "Apagados", "Todos"],
-        default=st.session_state.get("f_estado", "Activos"), key="f_estado")
-    _est = st.session_state.get("f_estado") or "Activos"
-    _bg, _bd = {
-        "Activos": ("rgba(16,185,129,.2)", "rgba(16,185,129,.5)"),
-        "Apagados": ("rgba(239,68,68,.2)", "rgba(239,68,68,.5)"),
-        "Todos": ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"),
-    }.get(_est, ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"))
-    st.sidebar.markdown(
-        '<style>[data-testid="stElementContainer"]:has(.estado-anchor) + '
-        '[data-testid="stElementContainer"] '
-        'button[data-variant="segmented_control"][data-selected="true"]{'
-        f'background:{_bg} !important;border:1px solid {_bd} !important;'
-        'color:#fff !important;}</style>', unsafe_allow_html=True)
-    st.sidebar.selectbox("Rango de fechas",
+    st.sidebar.text_input("🔎 Buscar", key="f_buscar", placeholder="nombre o ID…",
+                          help="Busca por fragmento en el nombre del anuncio, conjunto, "
+                               "campaña o el ID. Ej: 'BOLIS' encuentra '[18/8] p6 BOLIS'.")
+    st.sidebar.selectbox("📅 Rango de fechas",
                          ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
                           "Máximo", "Personalizado"], key="f_rango")
     if st.session_state.get("f_rango") == "Personalizado":
@@ -311,10 +294,6 @@ def sidebar_filtros():
         _defv = st.session_state.get("f_rango_pers") or (_hoy - timedelta(days=7), _hoy)
         st.sidebar.date_input("Desde – hasta", value=_defv, format="DD/MM/YYYY",
                               key="f_rango_pers")
-    st.sidebar.text_input("Buscar", key="f_buscar", placeholder="nombre o ID…",
-                          help="Busca por fragmento en el nombre del anuncio, conjunto, "
-                               "campaña o el ID. Ej: 'BOLIS' encuentra '[18/8] p6 BOLIS'.")
-    st.sidebar.divider()
 
     todos = db.obtener_anuncios(solo_activos=False)
     conexiones = db.obtener_conexiones()
@@ -330,28 +309,31 @@ def sidebar_filtros():
         if p.upper() not in {x.upper() for x in productos}:
             productos.append(p)
 
-    st.sidebar.multiselect("Business", business, key="f_business",
-                           placeholder="Todos los Business",
-                           help="Puedes elegir VARIOS: haz clic en cada Business (queda como chip).")
-    st.sidebar.multiselect("Cuentas publicitarias", cuentas, key="f_cuenta",
-                           placeholder="Todas las cuentas",
-                           help="Puedes elegir VARIAS: haz clic en cada cuenta, una por una "
-                                "(cada una queda como chip). Deja vacío para ver todas.")
-    st.sidebar.multiselect("Campaña", campanas, key="f_campana",
-                           placeholder="Todas las campañas",
-                           help="Elige una campaña y pon 'Ver por: Conjunto de anuncios' "
-                                "para ver sus conjuntos.")
-    # El filtro de Producto SIEMPRE se muestra (aunque no haya productos aún).
-    st.sidebar.multiselect("Producto", productos, key="f_producto",
-                           placeholder=("Todos los productos" if productos
-                                        else "Sin productos aún — pulsa Recargar"),
-                           help="Se saca del NOMBRE de la campaña (p. ej. BOLIS, LAVADORAS, "
-                                "EDUCARTE). Puedes elegir varios. Filtra las campañas/conjuntos "
-                                "que contengan ese producto. Si sale vacío, pulsa 'Recargar de "
-                                "Facebook' para traer tus campañas.")
-    st.sidebar.selectbox("País", ["Todos"] + paises, key="f_pais")
-
-    _resumen_pais(todos)
+    # Cuenta cuántos filtros hay activos, para mostrarlo en el título del expander.
+    n_act = sum(bool(st.session_state.get(k)) for k in
+                ("f_business", "f_cuenta", "f_campana", "f_producto")) \
+        + (1 if st.session_state.get("f_pais", "Todos") not in ("Todos", None) else 0)
+    titulo = f"🎚️ Filtros ({n_act})" if n_act else "🎚️ Filtros"
+    with st.sidebar.expander(titulo, expanded=False):
+        st.multiselect("Business", business, key="f_business",
+                       placeholder="Todos los Business",
+                       help="Puedes elegir VARIOS: haz clic en cada Business (queda como chip).")
+        st.multiselect("Cuentas publicitarias", cuentas, key="f_cuenta",
+                       placeholder="Todas las cuentas",
+                       help="Puedes elegir VARIAS: haz clic en cada cuenta, una por una "
+                            "(cada una queda como chip). Deja vacío para ver todas.")
+        st.multiselect("Campaña", campanas, key="f_campana",
+                       placeholder="Todas las campañas",
+                       help="Elige una campaña y pon 'Ver por: Conjunto de anuncios' "
+                            "para ver sus conjuntos.")
+        st.multiselect("Producto", productos, key="f_producto",
+                       placeholder=("Todos los productos" if productos
+                                    else "Sin productos aún — pulsa Recargar"),
+                       help="Se saca del NOMBRE de la campaña (p. ej. BOLIS, LAVADORAS, "
+                            "EDUCARTE). Puedes elegir varios. Filtra las campañas/conjuntos "
+                            "que contengan ese producto.")
+        st.selectbox("País", ["Todos"] + paises, key="f_pais")
+        _resumen_pais(todos)
 
 
 def _resumen_pais(todos):
@@ -368,9 +350,10 @@ def _resumen_pais(todos):
         gasto_pais[nombre] = gasto_pais.get(nombre, 0.0) + r["spend"] * fx.tasa_a_usd(r["moneda"])
     if not gasto_pais:
         return
-    st.sidebar.markdown("**Gasto por país (USD)**")
+    # Usa el contenedor actual (va dentro del expander de Filtros), no la raíz del sidebar.
+    st.markdown("**Gasto por país (USD)**")
     for pais, g in sorted(gasto_pais.items(), key=lambda x: -x[1]):
-        st.sidebar.caption(f"{pais}: {_usd(g)}")
+        st.caption(f"{pais}: {_usd(g)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -748,8 +731,30 @@ def _seccion_ia(filas, contexto):
 def seccion_vista_general():
     ahora = db.ahora()
 
-    # Los controles (Ver por, Estado, Rango, Buscar) están en la barra lateral.
-    nivel_lbl = st.session_state.get("f_nivel") or "Conjunto de anuncios"
+    # Ver por + Estado ARRIBA (Buscar, Rango y demás filtros están en el sidebar).
+    ct1, ct2 = st.columns([2.2, 2.0])
+    with ct1:
+        nivel_lbl = st.segmented_control(
+            "Ver por", ["Campaña", "Conjunto de anuncios", "Anuncio"],
+            default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
+            key="f_nivel") or "Conjunto de anuncios"
+    with ct2:
+        st.markdown('<span class="estado-anchor"></span>', unsafe_allow_html=True)
+        st.segmented_control(
+            "Estado", ["Activos", "Apagados", "Todos"],
+            default=st.session_state.get("f_estado", "Activos"), key="f_estado")
+        _est = st.session_state.get("f_estado") or "Activos"
+        _bg, _bd = {
+            "Activos": ("rgba(16,185,129,.2)", "rgba(16,185,129,.5)"),
+            "Apagados": ("rgba(239,68,68,.2)", "rgba(239,68,68,.5)"),
+            "Todos": ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"),
+        }.get(_est, ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"))
+        st.markdown(
+            '<style>[data-testid="stElementContainer"]:has(.estado-anchor) + '
+            '[data-testid="stElementContainer"] '
+            'button[data-variant="segmented_control"][data-selected="true"]{'
+            f'background:{_bg} !important;border:1px solid {_bd} !important;'
+            'color:#fff !important;}</style>', unsafe_allow_html=True)
     nivel = _NIVELES.get(nivel_lbl, "adset")
 
     filtro = st.session_state.get("f_estado") or "Activos"
@@ -816,7 +821,28 @@ def seccion_vista_general():
                                       fuente if fuente != "meta" else "todas")
     filas = _construir_filas(anuncios, nivel, insights, ventas_agg, ahora)
 
-    _render_totales(filas)
+    # Ventas SIN ad_id (o con un ID que no coincide con ningún anuncio): se cuentan
+    # aparte y se SUMAN al total. Solo aplica cuando la fuente son tus registros.
+    sin_adid = None
+    if fuente != "meta":
+        ids_conocidos = {str(a.get("ad_id")) for a in todos}
+        moneda_v = db.get_config("moneda_ventas", "auto")
+        if moneda_v and moneda_v != "auto":
+            rate_sa = fx.tasa_a_usd(moneda_v)
+        else:
+            from collections import Counter
+            monc = Counter((a.get("cuenta_moneda") or "USD") for a in todos)
+            rate_sa = fx.tasa_a_usd(monc.most_common(1)[0][0] if monc else "USD")
+        sa_num, sa_ing_nat = 0, 0.0
+        for ad_id, v in ventas_agg.items():
+            aid = str(ad_id).strip()
+            if aid == "" or aid.lower() in ("nan", "none") or aid not in ids_conocidos:
+                sa_num += int(v.get("num_ventas") or 0)
+                sa_ing_nat += float(v.get("ingreso_total") or 0.0)
+        if sa_num:
+            sin_adid = {"num": sa_num, "ingreso_usd": sa_ing_nat * rate_sa}
+
+    _render_totales(filas, sin_adid)
     _cuadre_ventas(todos, ventas_agg, filas, rango_lbl)
 
     _seccion_ia(filas, f"Vista por: {nivel_lbl} · estado: {filtro} · rango: {rango_lbl} · "
@@ -904,11 +930,16 @@ def _cuadre_ventas(todos, ventas_agg, filas, rango_lbl):
                    "Revisa el detalle en **Configuración → Google Sheets / Excel → Probar**.")
 
 
-def _render_totales(filas):
+def _render_totales(filas, sin_adid=None):
     gasto = sum(f["gasto"] or 0 for f in filas)
     ingresos = sum(f["ingresos"] or 0 for f in filas)
     num = sum(f["num"] or 0 for f in filas)
     conv = sum((f["conv"] or 0) for f in filas)
+    # Ventas sin ad_id (o no atribuibles): se SUMAN al conteo/ingresos totales.
+    sa_num = int((sin_adid or {}).get("num", 0) or 0)
+    sa_ing = float((sin_adid or {}).get("ingreso_usd", 0.0) or 0.0)
+    num += sa_num
+    ingresos += sa_ing
     roas = (ingresos / gasto) if gasto > 0 else 0.0
     ganancia = ingresos - gasto
     costo_venta = (gasto / num) if num > 0 else 0.0
@@ -955,6 +986,18 @@ def _render_totales(filas):
         '.tnat{font-family:Inter,sans-serif;font-size:12px;font-weight:500;'
         'color:#475569;margin-top:4px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
+
+    # Fila explícita de ventas sin ad_id (no atribuibles a ningún anuncio).
+    if sa_num:
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px;margin:-4px 0 10px;'
+            'padding:8px 14px;border:1px dashed rgba(245,196,81,.5);border-radius:12px;'
+            'background:rgba(245,196,81,.08);">'
+            '<span style="font-size:13px;color:#f5c451;font-weight:700;">🏷️ VENTAS SIN AD ID</span>'
+            f'<span style="font-size:13px;color:#e6e7ee;">{sa_num} venta(s) · {_usd(sa_ing)}</span>'
+            '<span style="font-size:11.5px;color:#94a3b8;">— sí están incluidas en el total de '
+            'arriba; no se pudieron atribuir a un anuncio (fila sin POST ID o ID que no coincide).'
+            '</span></div>', unsafe_allow_html=True)
 
 
 _GRID_TMPL = ("3.2fr .9fr .8fr .9fr .55fr .85fr .8fr .55fr .85fr .95fr .85fr .6fr")

@@ -231,15 +231,18 @@ def sincronizar() -> dict:
             if ignora_cero and valor == 0:
                 ceros += 1
                 continue
+            # Sin ad_id: la venta igual se guarda (ad_id="") para contarla aparte.
             ad_id = watcher.limpiar_id(fila.get(cmap["id"]))
             if not ad_id:
                 sin_id += 1
-                continue
+                ad_id = ""
             hora = watcher._parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
             pais = fila.get(cmap["pais"]) if cmap["pais"] else None
             pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
+            producto = fila.get(cmap["producto"]) if cmap.get("producto") else None
+            producto = str(producto).strip() if producto is not None and str(producto).strip().lower() not in ("nan", "none", "") else None
             nuevos.add(ext_id)
-            lote.append((ad_id, float(valor), db.a_texto(hora), None, HOJA, ext_id, None, pais))
+            lote.append((ad_id, float(valor), db.a_texto(hora), None, HOJA, ext_id, producto, pais))
             ins_hoja += 1
         detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": ins_hoja,
                         "columnas": cmap,
