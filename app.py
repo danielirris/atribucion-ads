@@ -6,10 +6,15 @@ de presupuesto.
 Ejecutar con:
     streamlit run app.py
 """
+import os
 import time
 import json
 import html as _html
 from datetime import datetime, timedelta
+
+# Frescura del gasto/insights de Facebook (segundos). Configurable por entorno.
+# Más bajo = gasto más al día, pero más llamadas (ojo con el rate limit).
+INSIGHTS_TTL = int(os.getenv("FB_INSIGHTS_TTL", "600"))  # 10 min por defecto
 
 import pandas as pd
 import plotly.express as px
@@ -29,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v88 · 2026-08-23"
+APP_VERSION = "v89 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -141,14 +146,19 @@ def _fecha_corta(iso):
     return f"{d.day:02d} {meses[d.month - 1]} {d.year}"
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=INSIGHTS_TTL, show_spinner=False)
 def _insights_cache(date_preset: str, nivel: str = "ad",
                     since: str = "", until: str = ""):
-    """Cachea los insights de Facebook 10 min (por rango y nivel).
-    Los datos base ya se refrescan cada 30 min en segundo plano, así que no hace
-    falta llamar cada 2 min mientras miras el Dashboard (evita el rate limit)."""
+    """Cachea los insights de Facebook (gasto/CPM/conversaciones) por rango y nivel.
+    Frescura = FB_INSIGHTS_TTL (10 min por defecto). Registra la hora del último
+    llamado real para mostrar al usuario qué tan fresco está el gasto."""
     tr = {"since": since, "until": until} if (since and until) else None
-    return fb.obtener_insights(date_preset, nivel, time_range=tr)
+    res = fb.obtener_insights(date_preset, nivel, time_range=tr)
+    try:
+        db.set_config("ultima_insights_ts", db.a_texto(db.ahora()))
+    except Exception:
+        pass
+    return res
 
 
 def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
@@ -893,6 +903,18 @@ def seccion_vista_general():
             sin_adid = {"num": sa_num, "ingreso_usd": sa_ing_nat * rate_sa}
 
     _render_totales(filas, sin_adid)
+
+    # Frescura del gasto de Facebook + aviso si hubo freno (gasto puede quedar corto).
+    _ins_ts = db.a_fecha(db.get_config("ultima_insights_ts", "") or "")
+    _frase = (f"Gasto de Facebook actualizado **{_fmt_hace(_ins_ts, ahora)}** "
+              f"(se refresca cada ~{INSIGHTS_TTL // 60} min; pulsa **↻ Actualizar** para "
+              "traerlo ahora)." if _ins_ts else "")
+    if fb._throttled_reciente():
+        _frase += ("  ⚠️ Facebook frenó hace poco: puede que el gasto de algunas cuentas "
+                   "esté **incompleto**. Al liberarse se corrige solo.")
+    if _frase:
+        st.caption(_frase)
+
     _cuadre_ventas(todos, ventas_agg, filas, rango_lbl, cutoff, hasta_dt)
 
     _seccion_ia(filas, f"Vista por: {nivel_lbl} · estado: {filtro} · rango: {rango_lbl} · "
