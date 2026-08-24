@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v80 · 2026-08-23"
+APP_VERSION = "v81 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -630,20 +630,26 @@ def _rango_actual(ahora):
                     datetime.combine(d, datetime.min.time()),
                     datetime.combine(h, datetime.min.time()) + timedelta(days=1))
     medianoche = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+    manana = medianoche + timedelta(days=1)
+    if rango_lbl == "Hoy":
+        # ACOTADO a un solo día: [hoy 00:00, mañana 00:00). Antes quedaba abierto
+        # (hasta=None) y cualquier venta con fecha futura mal leída caía en "Hoy".
+        return "today", "", "", medianoche, manana
     if rango_lbl == "Ayer":
         # cutoff = ayer 00:00, hasta = hoy 00:00; date_preset 'yesterday' usa la zona
         # horaria de la cuenta en Facebook (gasto más exacto).
         return "yesterday", "", "", medianoche - timedelta(days=1), medianoche
     if rango_lbl == "Este mes":
-        return "this_month", "", "", medianoche.replace(day=1), None
+        return "this_month", "", "", medianoche.replace(day=1), manana
     RANGO = {
-        "Hoy": ("today", medianoche),
         "Últimos 7 días": ("last_7d", ahora - timedelta(days=7)),
         "Últimos 30 días": ("last_30d", ahora - timedelta(days=30)),
         "Máximo": ("maximum", None),
     }
-    dp, cut = RANGO.get(rango_lbl, RANGO["Hoy"])
-    return dp, "", "", cut, None
+    dp, cut = RANGO.get(rango_lbl, ("today", medianoche))
+    # Tope superior = mañana 00:00 (excepto Máximo): descarta ventas con fecha futura.
+    tope = None if rango_lbl == "Máximo" else manana
+    return dp, "", "", cut, tope
 
 
 @st.cache_data(ttl=900, show_spinner=False)

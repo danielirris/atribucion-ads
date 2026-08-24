@@ -160,7 +160,18 @@ def _parse_hora(valor, deteccion: Optional[datetime] = None):
             ts = pd.to_datetime(txt, dayfirst=False, errors="coerce")
         if pd.isna(ts):
             return deteccion
-        return ts.to_pydatetime().replace(microsecond=0)
+        dt = ts.to_pydatetime().replace(microsecond=0)
+        # En importación (deteccion=None): descarta fechas absurdas (futuras > 2 días o
+        # anteriores a 2015). Casi siempre son un error de lectura del formato.
+        if deteccion is None:
+            try:
+                ahora = db.ahora().replace(tzinfo=None)
+                d = dt.replace(tzinfo=None)
+                if d.year < 2015 or d > ahora + __import__("datetime").timedelta(days=2):
+                    return None
+            except Exception:
+                pass
+        return dt
     except Exception:
         return deteccion
 
