@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v76 · 2026-08-23"
+APP_VERSION = "v77 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -282,6 +282,40 @@ def sidebar_filtros():
     """Filtros globales que afectan al Dashboard (se guardan en session_state)."""
     st.sidebar.divider()
     st.sidebar.markdown("### Filtros")
+
+    # Controles principales (antes estaban arriba en el Dashboard; ahora aquí).
+    st.sidebar.segmented_control(
+        "Ver por", ["Campaña", "Conjunto de anuncios", "Anuncio"],
+        default=st.session_state.get("f_nivel", "Conjunto de anuncios"), key="f_nivel")
+    st.sidebar.markdown('<span class="estado-anchor"></span>', unsafe_allow_html=True)
+    st.sidebar.segmented_control(
+        "Estado", ["Activos", "Apagados", "Todos"],
+        default=st.session_state.get("f_estado", "Activos"), key="f_estado")
+    _est = st.session_state.get("f_estado") or "Activos"
+    _bg, _bd = {
+        "Activos": ("rgba(16,185,129,.2)", "rgba(16,185,129,.5)"),
+        "Apagados": ("rgba(239,68,68,.2)", "rgba(239,68,68,.5)"),
+        "Todos": ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"),
+    }.get(_est, ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"))
+    st.sidebar.markdown(
+        '<style>[data-testid="stElementContainer"]:has(.estado-anchor) + '
+        '[data-testid="stElementContainer"] '
+        'button[data-variant="segmented_control"][data-selected="true"]{'
+        f'background:{_bg} !important;border:1px solid {_bd} !important;'
+        'color:#fff !important;}</style>', unsafe_allow_html=True)
+    st.sidebar.selectbox("Rango de fechas",
+                         ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
+                          "Máximo", "Personalizado"], key="f_rango")
+    if st.session_state.get("f_rango") == "Personalizado":
+        _hoy = db.ahora().date()
+        _defv = st.session_state.get("f_rango_pers") or (_hoy - timedelta(days=7), _hoy)
+        st.sidebar.date_input("Desde – hasta", value=_defv, format="DD/MM/YYYY",
+                              key="f_rango_pers")
+    st.sidebar.text_input("Buscar", key="f_buscar", placeholder="nombre o ID…",
+                          help="Busca por fragmento en el nombre del anuncio, conjunto, "
+                               "campaña o el ID. Ej: 'BOLIS' encuentra '[18/8] p6 BOLIS'.")
+    st.sidebar.divider()
+
     todos = db.obtener_anuncios(solo_activos=False)
     conexiones = db.obtener_conexiones()
     business = sorted({_alias_conexion(a.get("conexion_id"), conexiones) for a in todos})
@@ -674,10 +708,10 @@ def seccion_por_pais():
 
 
 def _seccion_ia(filas, contexto):
-    """Asistente de IA tipo chat: preguntas en lenguaje natural sobre los anuncios."""
-    with st.expander("🤖 Asistente IA — pregúntale sobre tus anuncios", expanded=False):
+    """Asistente de IA tipo chat, en la barra lateral izquierda."""
+    with st.sidebar.expander("🤖 Asistente IA", expanded=False):
         if not ia.disponible():
-            st.info("Activa el asistente en **Configuración → IA**: elige el proveedor "
+            st.info("Actívalo en **Configuración → IA**: elige el proveedor "
                     "(OpenAI o Anthropic) y pega tu API key. (También sirve poner "
                     "OPENAI_API_KEY / ANTHROPIC_API_KEY como variable de entorno.)")
             return
@@ -714,45 +748,8 @@ def _seccion_ia(filas, contexto):
 def seccion_vista_general():
     ahora = db.ahora()
 
-    # Controles ARRIBA: nivel, estado, rango de fechas y búsqueda.
-    ct1, ct2, ct3, ct4 = st.columns([2.0, 1.5, 1.4, 1.6])
-    with ct1:
-        nivel_lbl = st.segmented_control(
-            "Ver por", ["Campaña", "Conjunto de anuncios", "Anuncio"],
-            default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
-            key="f_nivel") or "Conjunto de anuncios"
-    with ct2:
-        st.markdown('<span class="estado-anchor"></span>', unsafe_allow_html=True)
-        st.segmented_control(
-            "Estado", ["Activos", "Apagados", "Todos"],
-            default=st.session_state.get("f_estado", "Activos"), key="f_estado")
-        # Color del chip seleccionado según el estado: verde/rojo/gris (translúcido).
-        _est = st.session_state.get("f_estado") or "Activos"
-        _bg, _bd = {
-            "Activos": ("rgba(16,185,129,.2)", "rgba(16,185,129,.5)"),
-            "Apagados": ("rgba(239,68,68,.2)", "rgba(239,68,68,.5)"),
-            "Todos": ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"),
-        }.get(_est, ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"))
-        st.markdown(
-            '<style>[data-testid="stElementContainer"]:has(.estado-anchor) + '
-            '[data-testid="stElementContainer"] '
-            'button[data-variant="segmented_control"][data-selected="true"]{'
-            f'background:{_bg} !important;border:1px solid {_bd} !important;'
-            'color:#fff !important;}</style>', unsafe_allow_html=True)
-    with ct3:
-        # Selectbox normal: SIEMPRE se muestra (los popovers daban problemas).
-        st.selectbox("Rango de fechas",
-                     ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
-                      "Máximo", "Personalizado"], key="f_rango")
-    with ct4:
-        st.text_input("Buscar", key="f_buscar", placeholder="nombre o ID…")
-    # Si eligen "Personalizado", el calendario sale debajo (ancho de columna).
-    if st.session_state.get("f_rango") == "Personalizado":
-        cp, _ = st.columns([1.4, 4])
-        with cp:
-            _hoy = db.ahora().date()
-            _defv = st.session_state.get("f_rango_pers") or (_hoy - timedelta(days=7), _hoy)
-            st.date_input("Desde – hasta", value=_defv, format="DD/MM/YYYY", key="f_rango_pers")
+    # Los controles (Ver por, Estado, Rango, Buscar) están en la barra lateral.
+    nivel_lbl = st.session_state.get("f_nivel") or "Conjunto de anuncios"
     nivel = _NIVELES.get(nivel_lbl, "adset")
 
     filtro = st.session_state.get("f_estado") or "Activos"
@@ -881,11 +878,14 @@ def _cuadre_ventas(todos, ventas_agg, filas, rango_lbl):
             huerfanas += n
             huerf_detalle.append((str(ad_id), n))
     ocultas = max(0, total_rango - mostradas - huerfanas)
-    if total_rango == mostradas and huerfanas == 0:
-        return  # todo cuadra: no molestamos
     huerf_detalle.sort(key=lambda x: -x[1])
-    with st.expander(f"🧮 Cuadre de ventas — en la base hay **{total_rango}** para "
-                     f"«{rango_lbl}», el dashboard muestra **{mostradas}**", expanded=False):
+    cuadra = (total_rango == mostradas and huerfanas == 0)
+    titulo = ("🧮 Cuadre de ventas ✓" if cuadra
+              else f"🧮 Cuadre de ventas — base {total_rango} / muestra {mostradas}")
+    with st.sidebar.expander(titulo, expanded=(not cuadra)):
+        if cuadra:
+            st.success(f"Todo cuadra: {mostradas} venta(s) para «{rango_lbl}».")
+            return
         st.markdown(
             f"- **{mostradas}** se muestran (anuncios visibles con los filtros actuales).\n"
             f"- **{ocultas}** están ocultas por filtros (Estado, País, Cuenta o Buscar): "
@@ -1179,7 +1179,7 @@ def _render_lista_nativa(filas, nivel):
     sort_c = st.query_params.get("sort", "roas")
     dir_c = st.query_params.get("dir", "desc")
 
-    ACC = [0.5, 11.0, 0.55, 0.55, 0.55]
+    ACC = [0.5, 11.0, 0.55, 0.55]
     # Marcador para fijar (sticky) la fila de títulos al hacer scroll.
     st.markdown('<span class="tbl-hdr-anchor"></span>', unsafe_allow_html=True)
     hc = st.columns(ACC, vertical_alignment="center")
@@ -1196,7 +1196,6 @@ def _render_lista_nativa(filas, nivel):
                 st.rerun()
     hc[2].markdown('<div class="h2" style="text-align:center">Info</div>', unsafe_allow_html=True)
     hc[3].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
-    hc[4].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
     st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
     for f in filas:
@@ -1280,10 +1279,6 @@ def _render_lista_nativa(filas, nivel):
                         help="Modificar presupuesto"):
             st.session_state["pres_row"] = f
             _dialog_presupuesto()
-        if rc[4].button("", icon=":material/content_copy:", key=f"dupb_{f['sub']}",
-                        help="Duplicar anuncio"):
-            st.session_state["dup_row"] = f
-            _dialog_duplicar()
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
 
@@ -1764,15 +1759,14 @@ def seccion_lote():
 #  Registro rápido de venta manual (útil en despliegue online)
 # --------------------------------------------------------------------------- #
 def seccion_venta_manual():
-    st.header("Registrar venta")
-    st.caption("Registra una venta al instante (se atribuye al período de presupuesto "
-               "activo del anuncio). Alternativa al Excel para uso online.")
-    anuncios = db.obtener_anuncios(solo_activos=False)
-    opciones = {f"{a['nombre']}  ·  {a['ad_id']}": a["ad_id"] for a in anuncios}
+    """Registrar venta manual, en la barra lateral izquierda."""
+    with st.sidebar.expander("➕ Registrar venta", expanded=False):
+        st.caption("Registra una venta al instante (se atribuye al período de presupuesto "
+                   "activo del anuncio).")
+        anuncios = db.obtener_anuncios(solo_activos=False)
+        opciones = {f"{a['nombre']}  ·  {a['ad_id']}": a["ad_id"] for a in anuncios}
 
-    with st.form("form_venta_manual"):
-        c1, c2, c3 = st.columns([3, 2, 2])
-        with c1:
+        with st.form("form_venta_manual"):
             if opciones:
                 modo_libre = st.checkbox("Escribir ID manualmente", value=False)
                 if modo_libre:
@@ -1782,29 +1776,26 @@ def seccion_venta_manual():
                     ad_id = opciones[sel]
             else:
                 ad_id = st.text_input("ID_Anuncio (aún no hay anuncios cargados)")
-        with c2:
             valor = st.number_input("Valor de la venta", min_value=0.0, value=0.0, step=1.0)
-        with c3:
             usar_ahora = st.toggle("Usar hora actual", value=True)
-        hora = None
-        if not usar_ahora:
-            cf1, cf2 = st.columns(2)
-            with cf1:
+            hora = None
+            if not usar_ahora:
                 f = st.date_input("Fecha")
-            with cf2:
                 h = st.time_input("Hora")
-            hora = datetime.combine(f, h)
-        enviado = st.form_submit_button("Registrar venta", type="primary")
+                hora = datetime.combine(f, h)
+            enviado = st.form_submit_button("Registrar venta", type="primary",
+                                            use_container_width=True)
 
-    if enviado:
-        r = watcher.registrar_venta_manual(ad_id, valor, hora=hora)
-        if r["ok"]:
-            destino = f"período {r['periodo_id']}" if r["periodo_id"] else "sin período (no había presupuesto activo a esa hora)"
-            st.success(f"Venta registrada y atribuida a {destino}.")
-        else:
-            st.error(f"{r['error']}")
-        time.sleep(0.8)
-        st.rerun()
+        if enviado:
+            r = watcher.registrar_venta_manual(ad_id, valor, hora=hora)
+            if r["ok"]:
+                destino = (f"período {r['periodo_id']}" if r["periodo_id"]
+                           else "sin período (no había presupuesto activo a esa hora)")
+                st.success(f"Venta registrada y atribuida a {destino}.")
+            else:
+                st.error(f"{r['error']}")
+            time.sleep(0.8)
+            st.rerun()
 
 
 # --------------------------------------------------------------------------- #
@@ -1893,9 +1884,6 @@ def seccion_detalle():
             fig2.update_layout(xaxis_title="Hora", yaxis_title="Presupuesto diario ($)",
                                height=380, margin=dict(t=20, b=20), showlegend=False)
             st.plotly_chart(fig2, use_container_width=True)
-
-    st.divider()
-    _bloque_duplicar(ad_id, anuncio, ahora)
 
 
 # --------------------------------------------------------------------------- #
@@ -2894,25 +2882,43 @@ queda etiquetada con su país real.
 
 def pagina_configuracion():
     st.title("Configuración")
-    st.caption("Conecta tus Business, tus fuentes de ventas (Excel + Supabase), la moneda y "
-               "revisa tus cuentas.")
-    tabs = st.tabs(["Conexiones", "IA", "Excel", "Google Sheets", "Supabase", "Moneda",
-                    "Cuentas", "Diagnóstico API"])
-    with tabs[0]:
-        seccion_conexiones()
-    with tabs[1]:
+    st.caption("Organizada por tipo: de dónde entran tus ventas, cómo conectas tus Business "
+               "de Facebook, y cómo conectas la IA. Cada grupo tiene sus propias pestañas.")
+    grupos = st.tabs(["📥 Fuentes de ventas", "🔗 Conectar Business",
+                      "🤖 Inteligencia Artificial", "🛠️ Herramientas"])
+
+    # --- Grupo 1: de dónde entran las ventas ---
+    with grupos[0]:
+        st.caption("Tus ventas pueden venir de varias fuentes a la vez. Aquí las conectas y "
+                   "eliges en qué moneda vienen.")
+        t = st.tabs(["Excel", "Google Sheets", "Supabase", "Moneda de las ventas"])
+        with t[0]:
+            _panel_excel()
+        with t[1]:
+            _panel_gsheets()
+        with t[2]:
+            _panel_supabase()
+        with t[3]:
+            _panel_moneda()
+
+    # --- Grupo 2: conectar Facebook / Business ---
+    with grupos[1]:
+        st.caption("Conecta tus Business Managers (tokens) y revisa las cuentas publicitarias "
+                   "que traen.")
+        t = st.tabs(["Conexiones (tokens)", "Cuentas"])
+        with t[0]:
+            seccion_conexiones()
+        with t[1]:
+            _panel_cuentas()
+
+    # --- Grupo 3: IA ---
+    with grupos[2]:
+        st.caption("Conecta el asistente de IA (OpenAI o Anthropic) que responde preguntas "
+                   "sobre tus anuncios.")
         _panel_ia()
-    with tabs[2]:
-        _panel_excel()
-    with tabs[3]:
-        _panel_gsheets()
-    with tabs[4]:
-        _panel_supabase()
-    with tabs[5]:
-        _panel_moneda()
-    with tabs[6]:
-        _panel_cuentas()
-    with tabs[7]:
+
+    # --- Grupo 4: herramientas / diagnóstico ---
+    with grupos[3]:
         _panel_diagnostico_api()
 
 
@@ -3087,11 +3093,12 @@ def pagina_dashboard():
                 pass
             st.rerun()
 
+    # Paneles de la barra lateral (registrar venta arriba; IA y cuadre los agrega
+    # seccion_vista_general una vez calculados los datos).
+    seccion_venta_manual()
     seccion_vista_general()
     st.divider()
     seccion_por_pais()
-    st.divider()
-    seccion_venta_manual()
     st.divider()
     seccion_detalle()
     st.divider()
@@ -3110,13 +3117,15 @@ def main():
     if pagina not in _PAGINAS:
         pagina = "dashboard"
     sidebar_estado(pagina)
-    _sidebar_nav(pagina)
     if pagina == "configuracion":
         pagina_configuracion()
     elif pagina == "tutoriales":
         pagina_tutoriales()
     else:
         pagina_dashboard()
+    # La navegación va al FINAL para que quede al pie de la barra lateral,
+    # debajo de los paneles (filtros, registrar venta, IA, cuadre).
+    _sidebar_nav(pagina)
 
 
 main()
