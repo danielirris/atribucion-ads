@@ -612,6 +612,24 @@ def deduplicar_ventas_todas() -> int:
         return cur.rowcount
 
 
+def deduplicar_ventas_entre_fuentes() -> int:
+    """Dedup FUERTE: colapsa ventas iguales en (ad_id, valor, hora) aunque vengan de
+    fuentes distintas o con producto/país distinto. Sirve cuando la MISMA venta se
+    importó desde dos lados (p. ej. un Excel subido y un Google Sheet en vivo).
+    Solo actúa sobre ventas CON ad_id (las sin ad_id no se tocan aquí). Devuelve
+    cuántas filas borró."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(
+            """DELETE FROM ventas
+               WHERE ad_id IS NOT NULL AND TRIM(ad_id) <> ''
+                 AND id NOT IN (
+                   SELECT MIN(id) FROM ventas
+                   WHERE ad_id IS NOT NULL AND TRIM(ad_id) <> ''
+                   GROUP BY ad_id, valor_venta, hora_venta)""")
+        conn.commit()
+        return cur.rowcount
+
+
 def borrar_ventas_sin_adid() -> int:
     """Borra las ventas SIN ad_id (fila vacía). Útil para limpiar las que se colaron
     por importaciones antiguas con fecha/ID mal leídos."""

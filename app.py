@@ -29,7 +29,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v85 · 2026-08-23"
+APP_VERSION = "v86 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -242,12 +242,14 @@ _SIN_BIZ = "— (sin asignar)"
 
 
 def _business_por_fuente() -> dict:
-    """Mapa {fuente_de_ventas: alias_de_business}. Sirve para atribuir las ventas SIN
-    ad_id al Business de la fuente de donde salieron."""
+    """Mapa {fuente_de_ventas: [business, ...]}. Una fuente puede alimentar a VARIOS
+    Business. Sirve para atribuir las ventas SIN ad_id a los Business de su fuente."""
     try:
-        return json.loads(db.get_config("business_por_fuente", "") or "{}")
+        m = json.loads(db.get_config("business_por_fuente", "") or "{}")
     except Exception:
         return {}
+    # Compatibilidad: si un valor viejo era texto, lo volvemos lista.
+    return {k: (v if isinstance(v, list) else [v]) for k, v in m.items() if v}
 
 
 def _set_business_por_fuente(mapa: dict) -> None:
@@ -877,9 +879,9 @@ def seccion_vista_general():
         sa_num, sa_ing_nat = 0, 0.0
         for fnt, d in sin_por_fuente.items():
             if business_sel:
-                biz = mapa_biz.get(fnt)
-                if biz not in business_sel:
-                    continue   # esta fuente no es del Business filtrado
+                bizs = mapa_biz.get(fnt) or []
+                if not (set(bizs) & set(business_sel)):
+                    continue   # ninguna de sus Business está en el filtro
             sa_num += int(d.get("num") or 0)
             sa_ing_nat += float(d.get("ingreso_nat") or 0.0)
         if sa_num:
@@ -2778,16 +2780,23 @@ def _panel_excel():
                "antiguos (que reinsertaban todo o marcaban fechas mal). Aquí lo arreglas. "
                "Con la versión actual ya no vuelve a pasar.")
     d1, d2 = st.columns(2)
-    if d1.button("① Quitar duplicados (todas las fuentes)", use_container_width=True,
-                 type="primary", help="No destructivo: deja una sola de cada venta idéntica."):
+    if d1.button("① Quitar duplicados EXACTOS", use_container_width=True,
+                 type="primary", help="Deja una sola de cada venta idéntica (mismo ad_id, "
+                 "valor, hora, producto y país)."):
         borradas = db.deduplicar_ventas_todas()
         st.success(f"Listo: {borradas} venta(s) duplicada(s) eliminada(s).")
-    if d2.button("② Borrar ventas SIN ad_id", use_container_width=True,
+    if d2.button("② Quitar duplicados ENTRE FUENTES", use_container_width=True, type="primary",
+                 help="Si la MISMA venta está en dos fuentes (ej. Excel + Sheet), deja una. "
+                      "Colapsa por ad_id + valor + hora. Úsalo si ves ~el doble de ventas."):
+        borradas = db.deduplicar_ventas_entre_fuentes()
+        st.success(f"Listo: {borradas} venta(s) duplicada(s) entre fuentes eliminada(s).")
+    d3, _ = st.columns(2)
+    if d3.button("③ Borrar ventas SIN ad_id", use_container_width=True,
                  help="Quita las ventas con ID de anuncio vacío (las que inflan 'sin ad id')."):
         borradas = db.borrar_ventas_sin_adid()
         st.success(f"Listo: {borradas} venta(s) sin ad_id eliminada(s).")
     st.caption("¿Sigue descuadrado? Reset total y vuelve a importar/sincronizar tus fuentes:")
-    if st.button("③ Borrar TODAS las ventas (reset)", use_container_width=True,
+    if st.button("④ Borrar TODAS las ventas (reset)", use_container_width=True,
                  help="Borra TODO el historial de ventas. Luego re-sube el Excel o sincroniza "
                       "el Google Sheet para reconstruirlo limpio."):
         if st.session_state.get("_confirm_reset_ventas"):
@@ -2871,16 +2880,16 @@ def _panel_business_fuente():
         return
     mapa = _business_por_fuente()
     nuevo = {}
-    st.markdown("**Asigna cada fuente a un Business:**")
+    st.markdown("**Asigna cada fuente a uno o VARIOS Business:**")
     for f in fuentes:
-        actual = mapa.get(f, _SIN_BIZ)
-        idx = opciones.index(actual) if actual in opciones else 0
-        sel = st.selectbox(f"Fuente: {f}", opciones, index=idx, key=f"bizf_{f}")
-        if sel != _SIN_BIZ:
+        actual = [b for b in mapa.get(f, []) if b in business]
+        sel = st.multiselect(f"Fuente: {f}", business, default=actual, key=f"bizf_{f}",
+                             placeholder="Elige uno o varios Business")
+        if sel:
             nuevo[f] = sel
     if st.button("Guardar asignación", type="primary"):
         _set_business_por_fuente(nuevo)
-        st.success("Guardado. Las ventas sin ad_id se atribuirán al Business de su fuente.")
+        st.success("Guardado. Las ventas sin ad_id se atribuirán a los Business de su fuente.")
     st.caption("Con esto, al filtrar por un Business en el Dashboard, sus ventas sin ad_id "
                "(las de su fuente asignada) sí se cuentan; las de otras fuentes no.")
 
