@@ -568,6 +568,37 @@ def borrar_ventas(hoja_origen: str) -> int:
         return cur.rowcount
 
 
+_EXCEL_COND = "hoja_origen NOT IN ('GoogleSheets','Supabase','Manual')"
+
+
+def deduplicar_ventas_excel() -> int:
+    """
+    Elimina ventas de Excel DUPLICADAS (idénticas en ad_id, valor, hora, producto y
+    país), dejando una sola de cada grupo. Arregla los duplicados que dejaron los
+    imports antiguos (que reinsertaban todo al re-subir el archivo). Devuelve cuántas
+    filas borró. No toca Google Sheets / Supabase / ventas manuales.
+    """
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(
+            f"""DELETE FROM ventas
+                WHERE {_EXCEL_COND}
+                  AND id NOT IN (
+                    SELECT MIN(id) FROM ventas
+                    WHERE {_EXCEL_COND}
+                    GROUP BY ad_id, valor_venta, hora_venta,
+                             COALESCE(producto,''), COALESCE(pais,''))""")
+        conn.commit()
+        return cur.rowcount
+
+
+def borrar_ventas_excel() -> int:
+    """Borra TODAS las ventas provenientes de Excel (para re-importar limpio)."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(f"DELETE FROM ventas WHERE {_EXCEL_COND}")
+        conn.commit()
+        return cur.rowcount
+
+
 def resumen_ventas_fuente(hoja_origen: str) -> dict:
     """Total de ventas e ingresos de una fuente + desglose por día."""
     with _conn() as conn:

@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v75 · 2026-08-23"
+APP_VERSION = "v76 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -2618,9 +2618,25 @@ def _panel_excel():
         n = watcher.guardar_excel_subido(subido.getvalue(), reemplazar=True)
         st.success(f"{n} venta(s) nueva(s) procesada(s).")
     if c2.button("Reimportar TODO el Excel", use_container_width=True,
-                 help="Reprocesa todas las filas (útil la primera vez)."):
+                 help="Reprocesa todas las filas. Ahora es seguro: no duplica."):
         n = watcher.importar_todo()
-        st.success(f"{n} ventas importadas.")
+        st.success(f"{n} ventas importadas (sin duplicar).")
+
+    st.divider()
+    st.markdown("**🧹 Arreglar ventas duplicadas**")
+    st.caption("Si ves MÁS ventas de las que tienes en tu Excel, es por imports antiguos que "
+               "reinsertaban todo. Esto lo arregla. Ya no volverá a pasar (el dedup ahora es "
+               "estable). *Quita ventas de Excel repetidas; no toca Google Sheets ni Supabase.*")
+    d1, d2 = st.columns(2)
+    if d1.button("Quitar duplicados (recomendado)", use_container_width=True, type="primary",
+                 help="No destructivo: deja una sola de cada venta idéntica."):
+        borradas = db.deduplicar_ventas_excel()
+        st.success(f"Listo: {borradas} venta(s) duplicada(s) eliminada(s).")
+    if d2.button("Borrar TODO y re-subir", use_container_width=True,
+                 help="Borra todas las ventas de Excel; luego vuelve a subir el archivo arriba."):
+        borradas = db.borrar_ventas_excel()
+        st.warning(f"Borradas {borradas} venta(s) de Excel. Ahora sube el archivo arriba "
+                   "para re-importarlo limpio.")
 
 
 def _panel_supabase():

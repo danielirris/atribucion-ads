@@ -61,6 +61,8 @@ _ALIAS_VALOR = ["valor_venta", "valor venta", "valor", "monto", "importe", "prec
 _ALIAS_HORA = ["hora_venta", "hora venta", "hora", "fecha", "fecha_venta", "fecha venta",
                "fecha y hora", "timestamp", "date", "datetime", "fecha/hora"]
 _ALIAS_PAIS = ["pais", "país", "country", "pais_venta", "país_venta"]
+_ALIAS_PRODUCTO = ["producto", "product", "articulo", "artículo", "item", "sku",
+                   "descripcion", "descripción", "concepto"]
 
 
 def _norm(s):
@@ -107,7 +109,8 @@ def detectar_columnas(columnas):
         return None
 
     return {"id": buscar(_ALIAS_ID), "valor": buscar(_ALIAS_VALOR),
-            "hora": buscar(_ALIAS_HORA), "pais": buscar(_ALIAS_PAIS)}
+            "hora": buscar(_ALIAS_HORA), "pais": buscar(_ALIAS_PAIS),
+            "producto": buscar(_ALIAS_PRODUCTO)}
 
 
 def _log(msg: str) -> None:
@@ -144,11 +147,12 @@ def _parse_hora(valor, deteccion: datetime) -> datetime:
     txt = str(valor).strip()
     if txt == "" or txt.lower() in ("nan", "nat", "none"):
         return deteccion
-    # Intentar parsear con pandas (soporta muchos formatos).
+    # Intentar parsear con pandas. Preferimos día/mes (formato de LatAm: 23/8/2026),
+    # así fechas ambiguas como 5/8/2026 se leen 5-agosto y NO 8-mayo.
     try:
-        ts = pd.to_datetime(txt, dayfirst=False, errors="coerce")
+        ts = pd.to_datetime(txt, dayfirst=True, errors="coerce")
         if pd.isna(ts):
-            ts = pd.to_datetime(txt, dayfirst=True, errors="coerce")
+            ts = pd.to_datetime(txt, dayfirst=False, errors="coerce")
         if pd.isna(ts):
             return deteccion
         return ts.to_pydatetime().replace(microsecond=0)
@@ -173,7 +177,8 @@ def _parse_valor(valor) -> Optional[float]:
 
 
 def _procesar_fila(ad_id: str, valor: float, hora: datetime, hoja: str,
-                   pais: Optional[str] = None) -> bool:
+                   pais: Optional[str] = None, ext_id: Optional[str] = None,
+                   producto: Optional[str] = None) -> bool:
     """Atribuye y guarda una venta. Devuelve True si se insertó."""
     ad_id = str(ad_id).strip()
     if not ad_id or ad_id.lower() in ("nan", "none"):
@@ -182,7 +187,8 @@ def _procesar_fila(ad_id: str, valor: float, hora: datetime, hoja: str,
     periodo = db.periodo_para_hora(ad_id, hora)
     periodo_id = periodo["id"] if periodo else None
 
-    db.insertar_venta(ad_id, valor, hora, periodo_id, hoja, pais=pais)
+    db.insertar_venta(ad_id, valor, hora, periodo_id, hoja,
+                      ext_id=ext_id, producto=producto, pais=pais)
     if periodo_id is None:
         _log(f"Venta de {ad_id} (${valor:.2f}) guardada SIN período "
              f"(no había período de presupuesto para esa hora).")
@@ -199,8 +205,14 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
     Lee todas las hojas del Excel y procesa las filas nuevas.
     Devuelve cuántas ventas nuevas se insertaron.
 
-    solo_nuevas=False fuerza reprocesar todo (útil para primera carga controlada).
+    Dedup ESTABLE por contenido: cada venta recibe un ext_id = huella del contenido
+    (id|valor|hora|país) + un contador de ocurrencias por hoja. Así, re-subir el mismo
+    archivo (aunque el servidor se haya reiniciado y perdido el conteo de filas en
+    memoria) NO duplica ventas: las que ya están se saltan por su ext_id.
+    El parámetro `solo_nuevas` se conserva por compatibilidad pero ya no afecta el
+    dedup (siempre es seguro reprocesar).
     """
+    import hashlib
     path = path or config.EXCEL_PATH
     if not os.path.exists(path):
         _set_estado(ultimo_error=f"No existe el archivo {path}")
@@ -229,27 +241,34 @@ def procesar_excel(path: Optional[str] = None, solo_nuevas: bool = True) -> int:
                      f"y/o de valor. Columnas: {list(dff.columns)}")
                 continue
 
-            clave = f"{os.path.abspath(path)}::{nombre_hoja}"
-            vistas = _FILAS_VISTAS.get(clave, 0) if solo_nuevas else 0
-            n_filas = len(dff)
+            existentes = db.ext_ids_de_fuente(nombre_hoja)  # dedup estable (persistente)
+            nuevos = set()
+            firmas = {}  # contador de ocurrencias por huella (esta hoja)
+            cols_firma = [c for c in (cmap.get("id"), cmap.get("valor"),
+                                      cmap.get("hora"), cmap.get("pais")) if c]
+            for _, fila in dff.iterrows():
+                # Huella de contenido (crudo, no depende de la posición de la fila).
+                partes = [str(fila.get(c)).strip() for c in cols_firma]
+                firma = hashlib.md5("|".join(partes).encode("utf-8")).hexdigest()[:16]
+                n = firmas.get(firma, 0)
+                firmas[firma] = n + 1
+                ext_id = f"{nombre_hoja}:h:{firma}:{n}"
+                if ext_id in existentes or ext_id in nuevos:
+                    continue  # ya importada: no duplicar
 
-            if solo_nuevas and n_filas <= vistas:
-                _FILAS_VISTAS[clave] = n_filas
-                continue
-
-            nuevas = dff.iloc[vistas:] if solo_nuevas else dff
-            for _, fila in nuevas.iterrows():
                 valor = _parse_valor(fila.get(cmap["valor"]))
                 if valor is None:
                     continue
                 hora = _parse_hora(fila.get(cmap["hora"]) if cmap["hora"] else None, deteccion)
                 pais = fila.get(cmap["pais"]) if cmap["pais"] else None
                 pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
-                ok = _procesar_fila(limpiar_id(fila.get(cmap["id"])), valor, hora, nombre_hoja, pais=pais)
+                producto = fila.get(cmap["producto"]) if cmap.get("producto") else None
+                producto = str(producto).strip() if producto is not None and str(producto).strip().lower() not in ("nan", "none", "") else None
+                ok = _procesar_fila(limpiar_id(fila.get(cmap["id"])), valor, hora,
+                                    nombre_hoja, pais=pais, ext_id=ext_id, producto=producto)
                 if ok:
+                    nuevos.add(ext_id)
                     total += 1
-
-            _FILAS_VISTAS[clave] = n_filas
 
     if total:
         with _ESTADO_LOCK:
