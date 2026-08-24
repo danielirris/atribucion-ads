@@ -654,6 +654,18 @@ def borrar_ventas_sin_adid() -> int:
         return cur.rowcount
 
 
+def borrar_anuncios_huerfanos() -> int:
+    """Borra anuncios cuya conexion_id ya no existe (conexión eliminada). No toca los
+    de ENV (.env) (conexion_id NULL o 0)."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(
+            """DELETE FROM anuncios
+               WHERE conexion_id IS NOT NULL AND conexion_id <> 0
+                 AND conexion_id NOT IN (SELECT id FROM conexiones)""")
+        conn.commit()
+        return cur.rowcount
+
+
 def borrar_todas_ventas() -> int:
     """Borra TODAS las ventas (reset total). Después hay que re-importar/re-sincronizar."""
     with _LOCK, _conn() as conn:

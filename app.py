@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v90 · 2026-08-24"
+APP_VERSION = "v91 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -238,6 +238,7 @@ _PAGINAS = {
     "dashboard": ("Dashboard", ":material/dashboard:"),
     "tutoriales": ("Tutoriales", ":material/school:"),
     "configuracion": ("Configuración", ":material/settings:"),
+    "actividad": ("Bitácora", ":material/history:"),
 }
 
 
@@ -372,7 +373,15 @@ def sidebar_filtros():
 
     todos = db.obtener_anuncios(solo_activos=False)
     conexiones = db.obtener_conexiones()
-    business = sorted({_alias_conexion(a.get("conexion_id"), conexiones) for a in todos})
+    # Solo listamos Business REALES: ENV o una conexión que exista de verdad. Así no
+    # aparecen "Conexión N" fantasma de anuncios de una conexión ya eliminada.
+    _cx_ids = {str(c["id"]) for c in conexiones}
+
+    def _biz_real(a):
+        cid = a.get("conexion_id")
+        return cid in (None, 0, "0") or str(cid) in _cx_ids
+    business = sorted({_alias_conexion(a.get("conexion_id"), conexiones)
+                       for a in todos if _biz_real(a)})
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
     campanas = sorted({a.get("campaign_nombre") for a in todos if a.get("campaign_nombre")})
@@ -2988,6 +2997,18 @@ def _panel_cuentas():
     st.dataframe(df.style.apply(_fila_color, axis=1),
                  use_container_width=True, hide_index=True)
 
+    # Limpieza de anuncios de conexiones ya eliminadas (los que salían como "Conexión N").
+    _cx_ids = {str(c["id"]) for c in conexiones}
+    huerf = sum(1 for a in todos if a.get("conexion_id") not in (None, 0, "0")
+                and str(a.get("conexion_id")) not in _cx_ids)
+    if huerf:
+        st.warning(f"Hay **{huerf}** anuncio(s) de una conexión que ya no existe "
+                   "(aparecían como «Conexión N»). Puedes borrarlos:")
+        if st.button("🧹 Limpiar anuncios de conexiones eliminadas"):
+            n = db.borrar_anuncios_huerfanos()
+            st.success(f"Listo: {n} anuncio(s) huérfano(s) eliminado(s).")
+            st.rerun()
+
 
 def _panel_moneda():
     st.subheader("Moneda y tipo de cambio")
@@ -3172,16 +3193,18 @@ def pagina_configuracion():
 
     # --- Grupo 4: herramientas / diagnóstico ---
     with grupos[3]:
-        t = st.tabs(["Actividad (bitácora)", "Auditoría de ventas", "Limpieza de ventas",
-                     "Diagnóstico API"])
+        t = st.tabs(["Auditoría de ventas", "Limpieza de ventas", "Diagnóstico API"])
         with t[0]:
-            _panel_actividad()
-        with t[1]:
             _panel_auditoria_ventas()
-        with t[2]:
+        with t[1]:
             _panel_limpieza_ventas()
-        with t[3]:
+        with t[2]:
             _panel_diagnostico_api()
+
+
+def pagina_actividad():
+    st.title("Bitácora")
+    _panel_actividad()
 
 
 def _panel_actividad():
@@ -3482,6 +3505,8 @@ def main():
         pagina_configuracion()
     elif pagina == "tutoriales":
         pagina_tutoriales()
+    elif pagina == "actividad":
+        pagina_actividad()
     else:
         pagina_dashboard()
     # La navegación va al FINAL para que quede al pie de la barra lateral,
