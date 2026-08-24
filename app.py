@@ -28,7 +28,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v78 · 2026-08-23"
+APP_VERSION = "v79 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -288,12 +288,18 @@ def sidebar_filtros():
                                "campaña o el ID. Ej: 'BOLIS' encuentra '[18/8] p6 BOLIS'.")
     st.sidebar.selectbox("📅 Rango de fechas",
                          ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes",
-                          "Máximo", "Personalizado"], key="f_rango")
-    if st.session_state.get("f_rango") == "Personalizado":
+                          "Máximo", "Personalizado (calendario)"], key="f_rango")
+    if st.session_state.get("f_rango") == "Personalizado (calendario)":
         _hoy = db.ahora().date()
-        _defv = st.session_state.get("f_rango_pers") or (_hoy - timedelta(days=7), _hoy)
-        st.sidebar.date_input("Desde – hasta", value=_defv, format="DD/MM/YYYY",
-                              key="f_rango_pers")
+        _defv = st.session_state.get("f_rango_pers") or (_hoy, _hoy)
+        st.sidebar.date_input(
+            "Elige el día (o un rango: clic en inicio y luego en fin)",
+            value=_defv, format="DD/MM/YYYY", key="f_rango_pers",
+            help="Para UN solo día: haz clic dos veces en el mismo día. "
+                 "Para un rango: clic en el día inicial y luego en el final.")
+        _rp = st.session_state.get("f_rango_pers")
+        if isinstance(_rp, (list, tuple)) and len(_rp) == 1:
+            st.sidebar.caption("Elige también el día final (o repite el mismo para un solo día).")
 
     todos = db.obtener_anuncios(solo_activos=False)
     conexiones = db.obtener_conexiones()
@@ -609,10 +615,17 @@ def _aplicar_presupuesto_grupo(fila, nuevo_usd):
 def _rango_actual(ahora):
     """Devuelve (date_preset, since, until, cutoff, hasta) según el filtro de rango."""
     rango_lbl = st.session_state.get("f_rango", "Hoy")
-    if rango_lbl == "Personalizado":
+    if rango_lbl == "Personalizado (calendario)":
         rp = st.session_state.get("f_rango_pers")
-        if isinstance(rp, (list, tuple)) and len(rp) == 2 and rp[0] and rp[1]:
-            d, h = rp[0], rp[1]
+        d = h = None
+        if isinstance(rp, (list, tuple)):
+            if len(rp) == 2 and rp[0] and rp[1]:
+                d, h = rp[0], rp[1]
+            elif len(rp) == 1 and rp[0]:      # un solo día elegido
+                d = h = rp[0]
+        elif rp:                               # date_input devolvió una sola fecha
+            d = h = rp
+        if d and h:
             return ("today", d.strftime("%Y-%m-%d"), h.strftime("%Y-%m-%d"),
                     datetime.combine(d, datetime.min.time()),
                     datetime.combine(h, datetime.min.time()) + timedelta(days=1))
@@ -821,11 +834,12 @@ def seccion_vista_general():
                                       fuente if fuente != "meta" else "todas")
     filas = _construir_filas(anuncios, nivel, insights, ventas_agg, ahora)
 
-    # Ventas SIN ad_id (o con un ID que no coincide con ningún anuncio): se cuentan
-    # aparte y se SUMAN al total. Solo aplica cuando la fuente son tus registros.
+    # Ventas realmente SIN ad_id (POST ID vacío), SIEMPRE dentro del rango de fechas
+    # (ventas_agg ya viene filtrado por cutoff/hasta). Se suman al total. Las ventas
+    # con un ID que no coincide con ningún anuncio (huérfanas) NO se cuentan aquí:
+    # esas se explican en el "Cuadre de ventas" para no inflar el número.
     sin_adid = None
     if fuente != "meta":
-        ids_conocidos = {str(a.get("ad_id")) for a in todos}
         moneda_v = db.get_config("moneda_ventas", "auto")
         if moneda_v and moneda_v != "auto":
             rate_sa = fx.tasa_a_usd(moneda_v)
@@ -835,8 +849,8 @@ def seccion_vista_general():
             rate_sa = fx.tasa_a_usd(monc.most_common(1)[0][0] if monc else "USD")
         sa_num, sa_ing_nat = 0, 0.0
         for ad_id, v in ventas_agg.items():
-            aid = str(ad_id).strip()
-            if aid == "" or aid.lower() in ("nan", "none") or aid not in ids_conocidos:
+            aid = str(ad_id).strip().lower()
+            if aid in ("", "nan", "none"):   # SOLO vacías; no huérfanas
                 sa_num += int(v.get("num_ventas") or 0)
                 sa_ing_nat += float(v.get("ingreso_total") or 0.0)
         if sa_num:
@@ -890,44 +904,44 @@ def _ordenar_filas(filas):
 
 
 def _cuadre_ventas(todos, ventas_agg, filas, rango_lbl):
-    """Explica la diferencia entre las ventas de tus registros y las que ves en el
-    dashboard: cuántas están en la base para este rango, cuántas se muestran, cuántas
-    quedan ocultas por los filtros y cuántas son 'huérfanas' (su ad_id no coincide con
-    ningún anuncio cargado)."""
+    """Desglose de las ventas de ESTA FECHA (ventas_agg ya viene filtrado por el rango):
+    total en la base = mostradas + ocultas por filtro + sin ad id + huérfanas.
+    Todo se cuenta SOLO dentro de la fecha del filtro."""
     ids_conocidos = {str(a.get("ad_id")) for a in todos}
     total_rango = sum(int(v.get("num_ventas") or 0) for v in ventas_agg.values())
     mostradas = sum(int(f["num"] or 0) for f in filas)
-    huerfanas, huerf_detalle = 0, []
+    sin_id, huerfanas, huerf_detalle = 0, 0, []
     for ad_id, v in ventas_agg.items():
         n = int(v.get("num_ventas") or 0)
-        if str(ad_id) not in ids_conocidos:
+        aid = str(ad_id).strip()
+        if aid.lower() in ("", "nan", "none"):
+            sin_id += n
+        elif aid not in ids_conocidos:
             huerfanas += n
-            huerf_detalle.append((str(ad_id), n))
-    ocultas = max(0, total_rango - mostradas - huerfanas)
+            huerf_detalle.append((aid, n))
+    ocultas = max(0, total_rango - mostradas - sin_id - huerfanas)
     huerf_detalle.sort(key=lambda x: -x[1])
-    cuadra = (total_rango == mostradas and huerfanas == 0)
-    titulo = ("🧮 Cuadre de ventas ✓" if cuadra
-              else f"🧮 Cuadre de ventas — base {total_rango} / muestra {mostradas}")
+    cuadra = (ocultas == 0 and huerfanas == 0)
+    titulo = f"🧮 Cuadre de ventas — {total_rango} en «{rango_lbl}»"
     with st.sidebar.expander(titulo, expanded=(not cuadra)):
-        if cuadra:
-            st.success(f"Todo cuadra: {mostradas} venta(s) para «{rango_lbl}».")
-            return
         st.markdown(
-            f"- **{mostradas}** se muestran (anuncios visibles con los filtros actuales).\n"
-            f"- **{ocultas}** están ocultas por filtros (Estado, País, Cuenta o Buscar): "
-            "son ventas de anuncios que SÍ existen pero no pasan el filtro. "
-            "Pon **Estado = Todos** y **País = Todos**, y borra la búsqueda, para verlas.\n"
-            f"- **{huerfanas}** son *huérfanas*: su `ad_id` no coincide con ningún anuncio "
-            "cargado (anuncio borrado, de una cuenta/token no conectado, o el ID del "
-            "registro está mal escrito).")
+            f"**{total_rango}** venta(s) registradas en la base para **«{rango_lbl}»** "
+            "(solo esta fecha). Se reparten así:\n\n"
+            f"- ✅ **{mostradas}** se muestran en la tabla (anuncios visibles).\n"
+            f"- 🏷️ **{sin_id}** sin AD ID (fila vacía) — sí van en el total.\n"
+            f"- 🔁 **{ocultas}** ocultas por filtros (Estado/País/Cuenta/Buscar): existen "
+            "pero no pasan el filtro. Pon **Estado = Todos** y **País = Todos**.\n"
+            f"- ❓ **{huerfanas}** huérfanas: su ID no coincide con ningún anuncio cargado "
+            "(el anuncio es de una cuenta/token que no está conectado, o fue borrado). "
+            "Conecta/recarga esa cuenta para atribuirlas.")
         if huerf_detalle:
-            st.caption("ad_id sin anuncio (los que más ventas aportan):")
+            st.caption("IDs huérfanos (más ventas primero):")
             st.dataframe(
                 pd.DataFrame([{"ad_id": a, "ventas": n} for a, n in huerf_detalle[:25]]),
                 hide_index=True, use_container_width=True)
-        st.caption("¿El total en la base ya es menor que en tu Sheet/Excel? Entonces esas "
-                   "ventas no se importaron (sin ID, valor 0 ignorado o duplicado). "
-                   "Revisa el detalle en **Configuración → Google Sheets / Excel → Probar**.")
+        st.caption("Si el total aquí ya es menor que en tu Excel/Sheet, esas ventas no se "
+                   "importaron (valor 0 ignorado o duplicado). Revisa en "
+                   "**Configuración → Fuentes de ventas → Probar**.")
 
 
 def _render_totales(filas, sin_adid=None):
