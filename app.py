@@ -29,7 +29,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v86 · 2026-08-23"
+APP_VERSION = "v87 · 2026-08-23"
 
 
 # --------------------------------------------------------------------------- #
@@ -43,8 +43,13 @@ def arrancar_servicios():
     """
     db.init_db()
     fb.inicializar_api()
-    fb.iniciar_polling()      # hilo de polling de Facebook
-    watcher.iniciar_watcher() # hilo de watchdog del Excel
+    fb.iniciar_polling()      # hilo de polling de Facebook + sync de ventas (Sheets/Supabase)
+    # El watcher de Excel local queda DESACTIVADO: la fuente es Google Sheets (el Excel
+    # era una descarga del mismo Sheet y solo duplicaba). Se puede reactivar con env
+    # EXCEL_WATCHER=1 si algún día se necesita un Excel local.
+    import os as _os
+    if _os.getenv("EXCEL_WATCHER", "") == "1":
+        watcher.iniciar_watcher()
     return {"iniciado_en": db.a_texto(db.ahora())}
 
 
@@ -2724,61 +2729,10 @@ def _panel_gsheets():
                            "**Recargar** para traer los anuncios primero.")
 
 
-def _panel_excel():
-    st.subheader("Excel (ventas del socio)")
-    st.caption("Sube un Excel (.xlsx). Lee **todas las hojas de ventas** (la tabla de la "
-               "izquierda de cada una) y detecta las columnas de ID, valor, fecha y país. "
-               "Puedes **excluir** las hojas que no sean de ventas antes de importar.")
-    subido = st.file_uploader("Subir / reemplazar ventas.xlsx", type=["xlsx"], key="up_excel_cfg")
-
-    if subido is not None:
-        # Lee la lista de hojas UNA vez (cacheada por archivo) para no releer en cada rerun.
-        clave = f"{subido.name}:{subido.size}"
-        if st.session_state.get("_xls_key") != clave:
-            with st.spinner("Leyendo hojas del Excel…"):
-                st.session_state["_xls_key"] = clave
-                st.session_state["_xls_hojas"] = watcher.hojas_de_excel(subido.getvalue())
-        info = st.session_state.get("_xls_hojas", [])
-        if info:
-            st.markdown("**Hojas detectadas** — desmarca (excluye) las que NO son de ventas:")
-            nombres = [h["nombre"] for h in info]
-            sugerido_excluir = [h["nombre"] for h in info if h["ignorar_sugerido"]]
-            # Tabla informativa.
-            st.dataframe(pd.DataFrame([
-                {"Hoja": h["nombre"], "Filas": h["filas"],
-                 "¿Ventas?": "✅ sí" if h["es_ventas"] else "🚫 no",
-                 "Sugerencia": "Excluir" if h["ignorar_sugerido"] else "Importar"}
-                for h in info]), hide_index=True, use_container_width=True)
-            excluir = st.multiselect(
-                "Hojas a EXCLUIR (no se importan)", nombres,
-                default=st.session_state.get("_xls_excl_prev", sugerido_excluir),
-                key="_xls_excl",
-                help="Ya vienen marcadas las que no parecen de ventas (Data_Unificada, "
-                     "Anuncios, RETIROS…). Puedes agregar o quitar las que quieras.")
-            incluir = [n for n in nombres if n not in excluir]
-            st.caption(f"Se importarán **{len(incluir)}** hoja(s): "
-                       + (", ".join(incluir) if incluir else "ninguna"))
-            if st.button("Procesar hojas incluidas", type="primary",
-                         use_container_width=True, key="btn_proc_xls"):
-                # Guarda las exclusiones (persisten para futuras subidas y sincronizaciones).
-                st.session_state["_xls_excl_prev"] = excluir
-                db.set_config("hojas_ignorar", ",".join(excluir))
-                with st.spinner("Importando…"):
-                    n = watcher.guardar_excel_subido(subido.getvalue(), reemplazar=True)
-                st.success(f"{n} venta(s) nueva(s) procesada(s) de {len(incluir)} hoja(s). "
-                           "Las hojas excluidas quedaron guardadas para la próxima vez.")
-
-    with st.expander("Reimportar todo (avanzado)"):
-        if st.button("Reimportar TODO el Excel guardado", use_container_width=True,
-                     help="Reprocesa todas las filas del último Excel. Es seguro: no duplica."):
-            n = watcher.importar_todo()
-            st.success(f"{n} ventas importadas (sin duplicar).")
-
-    st.divider()
-    st.markdown("**🧹 Limpieza de ventas**")
-    st.caption("Si ves MÁS ventas de las que tienes en tu Excel/Sheet, son de imports "
-               "antiguos (que reinsertaban todo o marcaban fechas mal). Aquí lo arreglas. "
-               "Con la versión actual ya no vuelve a pasar.")
+def _panel_limpieza_ventas():
+    st.subheader("🧹 Limpieza de ventas")
+    st.caption("Herramientas para arreglar descuadres: duplicados (misma venta en dos "
+               "fuentes), ventas sin ad_id, o un reset total para reconstruir desde cero.")
     d1, d2 = st.columns(2)
     if d1.button("① Quitar duplicados EXACTOS", use_container_width=True,
                  type="primary", help="Deja una sola de cada venta idéntica (mismo ad_id, "
@@ -2795,15 +2749,15 @@ def _panel_excel():
                  help="Quita las ventas con ID de anuncio vacío (las que inflan 'sin ad id')."):
         borradas = db.borrar_ventas_sin_adid()
         st.success(f"Listo: {borradas} venta(s) sin ad_id eliminada(s).")
-    st.caption("¿Sigue descuadrado? Reset total y vuelve a importar/sincronizar tus fuentes:")
+    st.caption("¿Sigue descuadrado? Reset total y vuelve a sincronizar tu Google Sheet:")
     if st.button("④ Borrar TODAS las ventas (reset)", use_container_width=True,
-                 help="Borra TODO el historial de ventas. Luego re-sube el Excel o sincroniza "
-                      "el Google Sheet para reconstruirlo limpio."):
+                 help="Borra TODO el historial de ventas. Luego sincroniza el Google Sheet "
+                      "para reconstruirlo limpio."):
         if st.session_state.get("_confirm_reset_ventas"):
             borradas = db.borrar_todas_ventas()
             st.session_state["_confirm_reset_ventas"] = False
-            st.warning(f"Borradas TODAS las ventas ({borradas}). Re-sube el Excel arriba o "
-                       "sincroniza el Sheet para reconstruir.")
+            st.warning(f"Borradas TODAS las ventas ({borradas}). Ve a **Google Sheets → "
+                       "Sincronizar ahora** para reconstruir.")
         else:
             st.session_state["_confirm_reset_ventas"] = True
             st.error("⚠️ Esto borra TODO el historial de ventas. Pulsa otra vez para confirmar.")
@@ -2811,9 +2765,9 @@ def _panel_excel():
 
 def _panel_supabase():
     st.subheader("Supabase (tus ventas)")
-    st.caption("Fuente 2: una tabla de Supabase con tus ventas. Se une con el Excel en la "
-               "misma tabla de ventas. Las credenciales van en variables de entorno "
-               "(SUPABASE_URL / SUPABASE_KEY).")
+    st.caption("Fuente alternativa: una tabla de Supabase con tus ventas. Se une con "
+               "Google Sheets en la misma tabla de ventas. Las credenciales van en "
+               "variables de entorno (SUPABASE_URL / SUPABASE_KEY).")
     if not config.supabase_configurado():
         st.warning("Faltan **SUPABASE_URL** y **SUPABASE_KEY** en las variables de entorno "
                    "de EasyPanel. Agrégalas y redespliega.")
@@ -3124,17 +3078,15 @@ def pagina_configuracion():
     with grupos[0]:
         st.caption("Tus ventas pueden venir de varias fuentes a la vez. Aquí las conectas y "
                    "eliges en qué moneda vienen.")
-        t = st.tabs(["Excel", "Google Sheets", "Supabase", "Business por fuente",
+        t = st.tabs(["Google Sheets", "Supabase", "Business por fuente",
                      "Moneda de las ventas"])
         with t[0]:
-            _panel_excel()
-        with t[1]:
             _panel_gsheets()
-        with t[2]:
+        with t[1]:
             _panel_supabase()
-        with t[3]:
+        with t[2]:
             _panel_business_fuente()
-        with t[4]:
+        with t[3]:
             _panel_moneda()
 
     # --- Grupo 2: conectar Facebook / Business ---
@@ -3155,10 +3107,12 @@ def pagina_configuracion():
 
     # --- Grupo 4: herramientas / diagnóstico ---
     with grupos[3]:
-        t = st.tabs(["Auditoría de ventas", "Diagnóstico API"])
+        t = st.tabs(["Auditoría de ventas", "Limpieza de ventas", "Diagnóstico API"])
         with t[0]:
             _panel_auditoria_ventas()
         with t[1]:
+            _panel_limpieza_ventas()
+        with t[2]:
             _panel_diagnostico_api()
 
 
