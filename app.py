@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v93 · 2026-08-24"
+APP_VERSION = "v94 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -134,18 +134,22 @@ def _spark_svg(serie, color="#22c55e", w=78, h=26):
             f'stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>')
 
 
-def _spark_bars(serie, color="#10b981", w=82, h=28):
-    """Mini-gráfica de BARRAS (una barra por día) para la facturación diaria.
-    Más clara que una línea para 'cuánto facturó cada día'. Los días en 0 se
-    dibujan como una barra mínima gris para que se vea que ese día no vendió."""
+def _spark_bars(serie, color="#10b981", w=82, h=28, linea=None, linea_color="#c4b5fd"):
+    """Mini-gráfica de BARRAS (una barra por día) para la facturación diaria, con
+    una LÍNEA opcional encima (p. ej. el gasto). Barras y línea comparten la misma
+    escala (el máximo de ambas series), así se ven a la par: si la línea de gasto
+    queda por DEBAJO de las barras, el anuncio va en ganancia ese día. Los días en
+    0 de facturación se dibujan como una barra mínima gris."""
     vals = [max(0.0, float(x or 0)) for x in (serie or [])]
-    if not vals:
+    lvals = [max(0.0, float(x or 0)) for x in (linea or [])] if linea is not None else []
+    n = max(len(vals), len(lvals))
+    if n == 0:
         return f'<svg width="{w}" height="{h}"></svg>'
-    hi = max(vals)
-    n = len(vals)
+    hi = max((vals + lvals) or [0.0])
     gap = 2.0
     bw = (w - gap * (n - 1)) / n
-    barras = []
+    partes = []
+    # Barras: facturación por día.
     for i, v in enumerate(vals):
         x = i * (bw + gap)
         if hi > 0 and v > 0:
@@ -154,11 +158,20 @@ def _spark_bars(serie, color="#10b981", w=82, h=28):
         else:
             bh = 2.0                      # día sin ventas: barrita gris al piso
             fill = "rgba(255,255,255,.14)"
-        y = h - bh
-        barras.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" '
+        partes.append(f'<rect x="{x:.1f}" y="{h - bh:.1f}" width="{bw:.1f}" '
                       f'height="{bh:.1f}" rx="1" fill="{fill}"/>')
+    # Línea: gasto por día (por el centro de cada barra).
+    if lvals and hi > 0:
+        pts = []
+        for i, v in enumerate(lvals):
+            cx = i * (bw + gap) + bw / 2
+            cy = h - 1 - (v / hi) * (h - 3)
+            pts.append(f"{cx:.1f},{cy:.1f}")
+        partes.append(f'<polyline points="{" ".join(pts)}" fill="none" '
+                      f'stroke="{linea_color}" stroke-width="1.5" '
+                      f'stroke-linejoin="round" stroke-linecap="round"/>')
     return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
-            f'{"".join(barras)}</svg>')
+            f'{"".join(partes)}</svg>')
 
 
 def _fecha_corta(iso):
@@ -186,6 +199,13 @@ def _insights_cache(date_preset: str, nivel: str = "ad",
     except Exception:
         pass
     return res
+
+
+@st.cache_data(ttl=INSIGHTS_TTL, show_spinner=False)
+def _gasto_diario_cache(date_preset: str = "last_7d"):
+    """Cachea el gasto diario por anuncio (últimos 7 días) para el mini gráfico
+    de cada fila. Misma frescura que los insights (FB_INSIGHTS_TTL)."""
+    return fb.gasto_diario_todos(date_preset)
 
 
 def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
@@ -228,6 +248,7 @@ def _recargar_facebook():
         r = fb.cargar_todo()
         try:
             _insights_cache.clear()
+            _gasto_diario_cache.clear()
         except Exception:
             pass
     if r["num_anuncios"]:
@@ -541,6 +562,9 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
     # para el mini gráfico de barras "salud/facturación 7d" de cada fila.
     _dias7 = [(ahora - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
     _diario7 = db.ingresos_diarios_por_ad(ahora - timedelta(days=7))
+    # Gasto diario por anuncio (Facebook) para dibujar la LÍNEA de gasto sobre las
+    # barras. Vacío si no hay conexión; se cachea aparte (una llamada por cuenta).
+    _gastodia7 = _gasto_diario_cache("last_7d") if hay_conexion else {}
 
     grupos = {}
     for a in anuncios:
@@ -659,12 +683,20 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         # Serie de facturación de los últimos 7 días (en USD) para el mini gráfico.
         # Suma, por día, lo facturado por todos los anuncios del grupo.
         serie7 = []
+        # Solo dibujamos la línea de gasto si hay datos de Facebook (si no, quedaría
+        # una línea plana en 0 que confunde).
+        gasto7 = [] if not _gastodia7 else None
+        _g_tmp = []
         for _d in _dias7:
-            _tot = sum(_diario7.get(aid, {}).get(_d, 0.0) for aid in ad_ids_grupo)
-            serie7.append(round(_tot * rate_v, 2))
+            _ing = sum(_diario7.get(aid, {}).get(_d, 0.0) for aid in ad_ids_grupo)
+            serie7.append(round(_ing * rate_v, 2))
+            _gas = sum(_gastodia7.get(aid, {}).get(_d, 0.0) for aid in ad_ids_grupo)
+            _g_tmp.append(round(_gas * rate_c, 2))
+        if gasto7 is None:
+            gasto7 = _g_tmp
 
         filas.append({
-            "serie7": serie7, "dias7": _dias7,
+            "serie7": serie7, "gasto7": gasto7, "dias7": _dias7,
             "nombre": g["nombre"], "sub": g["sub"], "cuenta": g["cuenta"],
             "moneda": moneda_cuenta, "rate_c": rate_c,
             "activos": activos, "total": len(ads),
@@ -1372,7 +1404,8 @@ def _render_lista_nativa(filas, nivel):
               "C/venta": "Costo por venta", "Ingr.": "Ingresos",
               "Util.": "Utilidad (ganancia)", "Conv.": "Conversaciones",
               "ROAS": "Retorno sobre la inversión",
-              "Fact. 7d": "Facturación de los últimos 7 días (una barra por día)"}
+              "Fact. 7d": ("Últimos 7 días: barras = facturación, línea lila = gasto. "
+                           "Si la línea va por debajo de las barras, ese día hubo ganancia.")}
     st.markdown(
         '<style>.meta-mini{font-size:9.5px;color:#7f8b9c;line-height:1.25;margin-top:1px;}'
         '.meta-mini b{color:#9fb0c2;font-weight:600;}'
@@ -1473,14 +1506,23 @@ def _render_lista_nativa(filas, nivel):
         # Mini gráfico de barras: facturación de los últimos 7 días (una barra/día).
         # El color sigue la salud del anuncio (verde ROAS>2, amarillo 1-2, rojo <1).
         serie7 = f.get("serie7") or []
+        gasto7 = f.get("gasto7") or []
         dias7 = f.get("dias7") or []
         tot7 = sum(serie7)
-        spark7 = _spark_bars(serie7, color=_roas_color(f["roas"]))
-        # Tooltip con el detalle día por día (MM-DD: $monto).
-        _tip = " · ".join(f'{d[5:]}: {_usd(v)}' for d, v in zip(dias7, serie7))
+        totg7 = sum(gasto7)
+        spark7 = _spark_bars(serie7, color=_roas_color(f["roas"]),
+                             linea=(gasto7 or None))
+        # Tooltip día por día: facturación (barra) vs gasto (línea).
+        _tip = " · ".join(
+            f'{d[5:]}: fact {_usd(i)} / gasto {_usd(g)}'
+            for d, i, g in zip(dias7, serie7, (gasto7 or [0] * len(serie7))))
+        # Total facturado (verde) y, si hay línea, total gastado (lila) debajo.
+        _gasto_lbl = (f'<span style="color:#c4b5fd"> · {_usd(totg7)}</span>'
+                      if gasto7 else '')
         spark_cell = (
-            f'<div title="Facturación últimos 7 días — {esc(_tip)}">{spark7}'
-            f'<div class="sub" style="font-size:10.5px;margin-top:1px">{_usd(tot7)}</div></div>')
+            f'<div title="Últimos 7 días — {esc(_tip)}">{spark7}'
+            f'<div class="sub" style="font-size:10.5px;margin-top:1px">'
+            f'{_usd(tot7)}{_gasto_lbl}</div></div>')
         cells = [
             nombre_html,
             f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>'

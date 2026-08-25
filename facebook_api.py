@@ -712,6 +712,47 @@ def serie_diaria(obj_id: str, nivel: str, conexion_id: Optional[int] = None,
         return []
 
 
+def gasto_diario_todos(date_preset: str = "last_7d") -> dict:
+    """Gasto por DÍA y por anuncio de todas las conexiones/cuentas (para el mini
+    gráfico por fila). Una sola llamada de insights por cuenta (level=ad,
+    time_increment=1). Devuelve {ad_id: {"YYYY-MM-DD": spend_nativo}}. Nunca lanza.
+
+    El gasto viene en la moneda de la cuenta; el llamador lo pasa a USD."""
+    if not SDK_DISPONIBLE:
+        return {}
+    cons = _conexiones_efectivas()
+    resultado: dict = {}
+    for con in cons:
+        try:
+            api = _api_desde(con["token"], con["app_id"], con["app_secret"])
+            cuentas = _descubrir_cuentas(api, con.get("env_account"))
+        except Exception as e:
+            _log(f"Gasto diario: fallo en {con['alias']}: {e}")
+            continue
+        for idx, cta in enumerate(cuentas):
+            if idx:
+                _dormir(STAGGER_SEG)  # espaciar cuentas para no golpear el límite
+            try:
+                _contar_llamado()
+                filas = AdAccount(cta["act_id"], api=api).get_insights(
+                    params={"level": "ad", "limit": 500,
+                            "date_preset": date_preset, "time_increment": 1},
+                    fields=["ad_id", "spend"])
+            except Exception as e:
+                if _es_rate_limit(e):
+                    _marcar_throttle(e, cta["name"])
+                    break  # salto el resto de cuentas de esta conexión este ciclo
+                _log(f"Gasto diario {cta['name']}: {e}")
+                continue
+            for row in filas:
+                ad_id = row.get("ad_id")
+                dia = row.get("date_start")
+                if not ad_id or not dia:
+                    continue
+                resultado.setdefault(str(ad_id), {})[dia] = _to_float(row.get("spend"))
+    return resultado
+
+
 def gasto_por_pais(date_preset: str = "today", time_range: Optional[dict] = None) -> list:
     """
     Gasto REAL por país usando el desglose (breakdown) de Facebook, a nivel de
