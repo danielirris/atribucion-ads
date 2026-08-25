@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v94 · 2026-08-24"
+APP_VERSION = "v95 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -134,6 +134,17 @@ def _spark_svg(serie, color="#22c55e", w=78, h=26):
             f'stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>')
 
 
+def _salud_color_vivo(r):
+    """Color vivo (alto contraste) para las barras del mini-gráfico según salud."""
+    if r is None:
+        return "#c3ccd6"
+    if r >= 2:
+        return "#2ee6a0"      # verde neón
+    if r >= 1:
+        return "#ffcf3f"      # ámbar brillante
+    return "#ff6b6b"          # rojo brillante
+
+
 def _spark_bars(serie, color="#10b981", w=82, h=28, linea=None, linea_color="#c4b5fd"):
     """Mini-gráfica de BARRAS (una barra por día) para la facturación diaria, con
     una LÍNEA opcional encima (p. ej. el gasto). Barras y línea comparten la misma
@@ -148,18 +159,25 @@ def _spark_bars(serie, color="#10b981", w=82, h=28, linea=None, linea_color="#c4
     hi = max((vals + lvals) or [0.0])
     gap = 2.0
     bw = (w - gap * (n - 1)) / n
-    partes = []
-    # Barras: facturación por día.
+    # Fondo oscuro redondeado: hace que las barras de color resalten (más contraste).
+    partes = [f'<rect x="0" y="0" width="{w}" height="{h}" rx="4" '
+              f'fill="rgba(6,8,16,.55)"/>']
+    # Track tenue detrás de cada barra (altura completa) para dar cuerpo visual.
+    for i, v in enumerate(vals):
+        x = i * (bw + gap)
+        partes.append(f'<rect x="{x:.1f}" y="1" width="{bw:.1f}" height="{h - 2:.1f}" '
+                      f'rx="1.5" fill="rgba(255,255,255,.05)"/>')
+    # Barras: facturación por día (color vivo, borde sutil para separar del fondo).
     for i, v in enumerate(vals):
         x = i * (bw + gap)
         if hi > 0 and v > 0:
-            bh = max(2.0, (v / hi) * (h - 2))
+            bh = max(3.0, (v / hi) * (h - 3))
             fill = color
         else:
             bh = 2.0                      # día sin ventas: barrita gris al piso
-            fill = "rgba(255,255,255,.14)"
-        partes.append(f'<rect x="{x:.1f}" y="{h - bh:.1f}" width="{bw:.1f}" '
-                      f'height="{bh:.1f}" rx="1" fill="{fill}"/>')
+            fill = "rgba(255,255,255,.22)"
+        partes.append(f'<rect x="{x:.1f}" y="{h - 1 - bh:.1f}" width="{bw:.1f}" '
+                      f'height="{bh:.1f}" rx="1.5" fill="{fill}"/>')
     # Línea: gasto por día (por el centro de cada barra).
     if lvals and hi > 0:
         pts = []
@@ -1510,7 +1528,7 @@ def _render_lista_nativa(filas, nivel):
         dias7 = f.get("dias7") or []
         tot7 = sum(serie7)
         totg7 = sum(gasto7)
-        spark7 = _spark_bars(serie7, color=_roas_color(f["roas"]),
+        spark7 = _spark_bars(serie7, color=_salud_color_vivo(f["roas"]),
                              linea=(gasto7 or None))
         # Tooltip día por día: facturación (barra) vs gasto (línea).
         _tip = " · ".join(
