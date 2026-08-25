@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v92 · 2026-08-24"
+APP_VERSION = "v93 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -1442,6 +1442,8 @@ def _render_lista_nativa(filas, nivel):
             est_col = "#ff8b84"
         else:
             est_col = "#f5c451"
+        est_txt = ("Activo" if est_col == "#10b981"
+                   else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
         # Fecha de creación (se mantiene bajo Cuenta).
         creado = _fecha_corta(f.get("creado"))
         creado_mini = f'<div class="meta-mini" title="Fecha de creación">Creado <b>{creado}</b></div>'
@@ -1453,9 +1455,15 @@ def _render_lista_nativa(filas, nivel):
         # Nombre coloreado por ESTADO (verde activo / rojo apagado / amarillo mixto);
         # acento verde a la izquierda si ROAS > 5.
         borde = "border-left:3px solid #10b981;padding-left:8px;" if roas_alto else ""
+        # Punto de estado JUNTO al nombre (verde activo / rojo apagado / amarillo mixto).
+        dot_html = (f'<span title="{est_txt}" style="color:{est_col};font-size:12px;'
+                    f'margin-right:7px;vertical-align:middle;line-height:1">●</span>')
+        # Identificador del anuncio/conjunto/campaña, en chico, debajo del nombre.
+        id_html = (f'<div class="sub" style="font-size:11px;color:#7f8b9c;'
+                   f'margin-top:1px;letter-spacing:.02em">{esc(str(f["sub"]))}</div>')
         nombre_html = (f'<div class="ad-name" style="{borde}color:{est_col};font-weight:700;'
-                       f'font-size:16.5px;line-height:1.25;white-space:normal;word-break:break-word">'
-                       f'{esc(str(f["nombre"]))[:120]}</div>')
+                       f'font-size:15px;line-height:1.2;white-space:normal;word-break:break-word">'
+                       f'{dot_html}{esc(str(f["nombre"]))[:120]}</div>{id_html}')
         if muy_mal:
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
                            f'debajo de 1x con gasto. Considera pausar o ajustar.">'
@@ -1490,15 +1498,9 @@ def _render_lista_nativa(filas, nivel):
             _roas_pill(f["roas"] or 0.0),
             spark_cell,
         ]
-        est_txt = ("Activo" if est_col == "#10b981"
-                   else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
         rc = st.columns(ACC, vertical_alignment="center")
         rc[0].checkbox(" ", key=f"sel_{f['sub']}", label_visibility="collapsed",
                        help="Seleccionar para modificar en conjunto (varios a la vez)")
-        rc[0].markdown(
-            f'<div title="{est_txt}" style="text-align:center;color:{est_col};'
-            f'font-size:15px;line-height:1;margin-bottom:-6px">●</div>',
-            unsafe_allow_html=True)
         rc[0].toggle(" ", value=(f["activos"] > 0), key=f"tg_{f['sub']}",
                      on_change=_toggle_estado_cb, args=(f,),
                      label_visibility="collapsed",
@@ -1783,7 +1785,7 @@ table.ads tbody tr:hover td { background:linear-gradient(90deg, rgba(140,210,215
 .up { color:#5ee7a0; } .down { color:#ff8b84; } .flat { color:#9ca3af; }
 .hcol { color:#8fd6db; font-size:10px; font-weight:700; text-transform:uppercase;
     letter-spacing:.06em; padding:4px 0 2px; }
-hr.rowline { margin:6px 0; border:none; border-top:1px solid rgba(255,255,255,.06); }
+hr.rowline { margin:2px 0; border:none; border-top:1px solid rgba(255,255,255,.06); }
 /* Fija (sticky) la fila de títulos de la tabla al hacer scroll hacia abajo.
    El hermano siguiente al marcador puede ser stLayoutWrapper o stHorizontalBlock. */
 [data-testid="stElementContainer"]:has(.tbl-hdr-anchor) + *{
