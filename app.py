@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v95 · 2026-08-24"
+APP_VERSION = "v96 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -1038,16 +1038,11 @@ def seccion_vista_general():
 
     _render_totales(filas, sin_adid)
 
-    # Frescura del gasto de Facebook + aviso si hubo freno (gasto puede quedar corto).
-    _ins_ts = db.a_fecha(db.get_config("ultima_insights_ts", "") or "")
-    _frase = (f"Gasto de Facebook actualizado **{_fmt_hace(_ins_ts, ahora)}** "
-              f"(se refresca cada ~{INSIGHTS_TTL // 60} min; pulsa **↻ Actualizar** para "
-              "traerlo ahora)." if _ins_ts else "")
+    # Solo mostramos aviso si Facebook frenó (el gasto puede quedar corto). La frescura
+    # rutinaria del gasto ya no se muestra (ruido); el botón ↻ Actualizar la refresca.
     if fb._throttled_reciente():
-        _frase += ("  ⚠️ Facebook frenó hace poco: puede que el gasto de algunas cuentas "
+        st.caption("⚠️ Facebook frenó hace poco: puede que el gasto de algunas cuentas "
                    "esté **incompleto**. Al liberarse se corrige solo.")
-    if _frase:
-        st.caption(_frase)
 
     _cuadre_ventas(todos, ventas_agg, filas, rango_lbl, cutoff, hasta_dt)
 
@@ -1065,10 +1060,6 @@ def seccion_vista_general():
 
     filas = _ordenar_filas(filas)
     st.markdown(_TABLA_CSS, unsafe_allow_html=True)
-    cta_a, _ = st.columns([1.6, 4])
-    cta_a.toggle("Nombres más anchos", key="f_ancho_nombre",
-                 help="Ensancha la columna del nombre para leer completos los nombres "
-                      "largos de conjuntos/anuncios (a costa de un poco de las otras columnas).")
     _barra_acciones_conjunto(filas)
     _render_lista_nativa(filas, nivel)
 
@@ -1117,9 +1108,8 @@ def _cuadre_ventas(todos, ventas_agg, filas, rango_lbl, cutoff=None, hasta=None)
             huerf_detalle.append((aid, n))
     ocultas = max(0, total_rango - mostradas - sin_id - huerfanas)
     huerf_detalle.sort(key=lambda x: -x[1])
-    cuadra = (ocultas == 0 and huerfanas == 0)
     titulo = f"🧮 Cuadre de ventas — {total_rango} en «{rango_lbl}»"
-    with st.sidebar.expander(titulo, expanded=(not cuadra)):
+    with st.sidebar.expander(titulo, expanded=False):
         st.markdown(
             f"**{total_rango}** venta(s) registradas en la base para **«{rango_lbl}»** "
             "(solo esta fecha). Se reparten así:\n\n"
@@ -1209,17 +1199,14 @@ def _render_totales(filas, sin_adid=None):
         'color:#475569;margin-top:4px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
 
-    # Fila explícita de ventas sin ad_id (no atribuibles a ningún anuncio).
+    # Nota chica de ventas sin ad_id (van incluidas en el total de arriba).
     if sa_num:
         st.markdown(
-            f'<div style="display:flex;align-items:center;gap:10px;margin:-4px 0 10px;'
-            'padding:8px 14px;border:1px dashed rgba(245,196,81,.5);border-radius:12px;'
-            'background:rgba(245,196,81,.08);">'
-            '<span style="font-size:13px;color:#f5c451;font-weight:700;">🏷️ VENTAS SIN AD ID</span>'
-            f'<span style="font-size:13px;color:#e6e7ee;">{sa_num} venta(s) · {_usd(sa_ing)}</span>'
-            '<span style="font-size:11.5px;color:#94a3b8;">— sí están incluidas en el total de '
-            'arriba; no se pudieron atribuir a un anuncio (fila sin POST ID o ID que no coincide).'
-            '</span></div>', unsafe_allow_html=True)
+            f'<div style="font-size:11px;color:#94a3b8;margin:-4px 0 10px;" '
+            f'title="Sí están incluidas en el total; no se pudieron atribuir a un anuncio '
+            f'(fila sin POST ID o ID que no coincide).">'
+            f'🏷️ Sin ad id: <b style="color:#f5c451;">{sa_num}</b> venta(s) · {_usd(sa_ing)}'
+            f'</div>', unsafe_allow_html=True)
 
 
 _GRID_TMPL = ("3.2fr .9fr .8fr .9fr .55fr .85fr .8fr .55fr .85fr .95fr .85fr .6fr")
@@ -1346,8 +1333,6 @@ def _barra_acciones_conjunto(filas):
     """Barra de acciones para modificar VARIOS anuncios a la vez (los seleccionados)."""
     sel = [f for f in filas if st.session_state.get(f"sel_{f['sub']}")]
     if not sel:
-        st.caption("💡 Marca la casilla ☐ (izquierda) de varios anuncios para modificarlos "
-                   "en conjunto: bajarles el presupuesto, pausarlos o activarlos a la vez.")
         return
     with st.container(border=True):
         st.markdown(f"**{len(sel)} seleccionado(s)** — acción en conjunto")
