@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v96 · 2026-08-24"
+APP_VERSION = "v97 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -273,6 +273,27 @@ def _recargar_facebook():
         st.toast(f"{r['num_anuncios']} anuncios de {r['num_cuentas']} cuenta(s).", icon="✅")
     if r["errores"]:
         st.error("Errores: " + "; ".join(r["errores"])[:300])
+    st.rerun()
+
+
+def _leer_ventas_sheet():
+    """Lee las filas de Google Sheets e importa las ventas NUEVAS (dedup por id).
+    Útil cuando registras o editas una venta a mano en el Sheet y quieres verla ya."""
+    with st.spinner("Leyendo ventas de Google Sheets..."):
+        try:
+            r = gs.sincronizar()
+        except Exception as e:
+            st.error(f"No pude leer el Sheet: {e}")
+            return
+    if not r.get("ok"):
+        st.error(r.get("error") or "No se pudo leer Google Sheets. "
+                 "Revisa la URL en Configuración → Fuentes de ventas.")
+        return
+    n = r.get("insertadas", 0)
+    if n:
+        st.toast(f"{n} venta(s) nueva(s) importada(s) del Sheet.", icon="🧾")
+    else:
+        st.toast("El Sheet ya estaba al día (sin ventas nuevas).", icon="✅")
     st.rerun()
 
 
@@ -3567,25 +3588,36 @@ def _panel_sync_ventas():
 
 
 def pagina_dashboard():
-    top1, top2 = st.columns([3.4, 1.6])
+    top1, top2 = st.columns([2.5, 2.5])
     with top1:
         st.title("Dashboard")
         _timer_actualizacion()
     with top2:
         st.write("")
-        # Los DOS botones de datos, arriba a la derecha, mismo estilo (gradiente).
-        b1, b2 = st.columns(2)
-        if b1.button("🔄 Recargar", use_container_width=True, type="primary",
-                     help="Trae datos NUEVOS de Facebook (anuncios, gasto, CPM). Es lo más "
-                          "pesado; la app ya lo hace sola cada 30 min."):
+        # Tres botones de datos, arriba a la derecha, mismo estilo (gradiente).
+        b1, b2, b3 = st.columns(3)
+        if b1.button("🔄 Recargar Facebook", use_container_width=True, type="primary",
+                     help="COMPLETO y pesado (unos segundos): vuelve a descubrir cuentas, "
+                          "re-lista TODOS los anuncios/conjuntos/campañas y refresca el gasto. "
+                          "Úsalo cuando creaste, duplicaste, prendiste/apagaste o cambiaste algo "
+                          "en el Administrador de Anuncios y quieres que aparezca aquí. La app "
+                          "también lo hace sola cada 30 min."):
             _recargar_facebook()
-        if b2.button("↻ Actualizar", use_container_width=True, type="primary",
-                     help="RÁPIDO: recalcula los números con lo ya guardado (no llama a Facebook)."):
+        if b2.button("↻ Actualizar cifras", use_container_width=True, type="primary",
+                     help="RÁPIDO: refresca solo el gasto/CPM/conversaciones y recalcula la "
+                          "tabla, SIN volver a descubrir cuentas ni re-listar anuncios. Úsalo "
+                          "para ver cifras al día sin la espera del Recargar completo."):
             try:
                 _insights_cache.clear()
+                _gasto_diario_cache.clear()
             except Exception:
                 pass
             st.rerun()
+        if b3.button("🧾 Leer ventas del Sheet", use_container_width=True, type="primary",
+                     help="Lee Google Sheets e importa las ventas NUEVAS (no toca Facebook). "
+                          "Úsalo cuando registras o editas una venta a mano en el Sheet y quieres "
+                          "verla al instante, sin esperar la sincronización automática."):
+            _leer_ventas_sheet()
 
     # Paneles de la barra lateral (registrar venta arriba; el cuadre lo agrega
     # seccion_vista_general una vez calculados los datos).
