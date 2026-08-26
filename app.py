@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v108 · 2026-08-24"
+APP_VERSION = "v109 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1517,7 +1517,7 @@ def _render_lista_nativa(filas, nivel):
     sort_c = st.query_params.get("sort", "roas")
     dir_c = st.query_params.get("dir", "desc")
 
-    ACC = [0.5, 11.0, 0.55, 0.55]
+    ACC = [0.5, 10.5, 0.55, 0.55, 0.55]
     vigilados = _get_vigilados()
     # Marcador para fijar (sticky) la fila de títulos al hacer scroll.
     st.markdown('<span class="tbl-hdr-anchor"></span>', unsafe_allow_html=True)
@@ -1544,6 +1544,7 @@ def _render_lista_nativa(filas, nivel):
                 st.rerun()
     hc[2].markdown('<div class="h2" style="text-align:center">Info</div>', unsafe_allow_html=True)
     hc[3].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
+    hc[4].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
     st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
     for f in filas:
@@ -1680,6 +1681,12 @@ def _render_lista_nativa(filas, nivel):
                         help="Modificar presupuesto"):
             st.session_state["pres_row"] = f
             _dialog_presupuesto()
+        # Duplicar el anuncio/conjunto/campaña (según la vista actual).
+        rc[4].markdown('<span class="iconbtn-anchor"></span>', unsafe_allow_html=True)
+        if rc[4].button("", icon=":material/content_copy:", key=f"dupb_{f['sub']}",
+                        help="Duplicar"):
+            st.session_state["dup_row"] = f
+            _dialog_duplicar()
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
 
