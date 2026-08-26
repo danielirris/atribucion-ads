@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v109 · 2026-08-24"
+APP_VERSION = "v110 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1654,7 +1654,10 @@ def _render_lista_nativa(filas, nivel):
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
             f'<div class="big" style="color:{"#1F8A4C" if g>=0 else "#E11D48"};font-weight:700">'
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
-            _roas_pill(f["roas"] or 0.0),
+            _roas_pill(f["roas"] or 0.0)
+            + (f'<div class="sub" style="font-size:11px;margin-top:3px" '
+               f'title="Anuncios activos ahora mismo (de {f["total"]} en total)">'
+               f'{f["activos"]}/{f["total"]} activos</div>'),
             ultmod_cell,
             spark_cell,
         ]
