@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v111 · 2026-08-24"
+APP_VERSION = "v112 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -2226,6 +2226,45 @@ def seccion_venta_manual():
             st.rerun()
 
 
+def seccion_corregir_ventas():
+    """Corregir/borrar una venta puntual mal importada (p. ej. 9000 en vez de 90)."""
+    with st.sidebar.expander("🩹 Corregir venta", expanded=False):
+        st.caption("¿Se subió una venta con el valor equivocado (ej. 9000 en vez de 90)? "
+                   "Corrige el valor aquí mismo, o bórrala y vuelve a leer el Excel/Sheet "
+                   "ya corregido.")
+        recientes = db.ventas_recientes(25)
+        if not recientes:
+            st.caption("Aún no hay ventas registradas.")
+            return
+        etiquetas = {}
+        for v in recientes:
+            fch = str(v.get("hora_venta") or "")[:16].replace("T", " ")
+            aid = (str(v.get("ad_id") or "").strip() or "(sin ad_id)")[:14]
+            etq = (f"#{v['id']} · {_num(v['valor_venta'])} · {aid} · {fch} · "
+                   f"{v.get('hoja_origen') or '—'}")
+            etiquetas[etq] = v
+        sel = st.selectbox("Venta a corregir (más recientes primero)", list(etiquetas.keys()),
+                           key="corr_sel")
+        v = etiquetas[sel]
+        nuevo = st.number_input("Valor correcto (en la moneda de la venta)", min_value=0.0,
+                                value=float(v.get("valor_venta") or 0.0), step=1.0,
+                                key=f"corr_val_{v['id']}")
+        c1, c2 = st.columns(2)
+        if c1.button("Guardar valor", type="primary", use_container_width=True, key="corr_save"):
+            db.actualizar_valor_venta(v["id"], nuevo)
+            db.set_config("ventas_cambio", db.a_texto(db.ahora()))  # refresca el dashboard
+            st.success(f"Venta #{v['id']} corregida a {_num(nuevo)}.")
+            time.sleep(0.6)
+            st.rerun()
+        if c2.button("Borrar venta", use_container_width=True, key="corr_del"):
+            db.borrar_venta(v["id"])
+            db.set_config("ventas_cambio", db.a_texto(db.ahora()))
+            st.warning(f"Venta #{v['id']} borrada. Si la corriges en el Excel/Sheet y "
+                       "vuelves a **Leer ventas del Sheet**, entrará ya corregida.")
+            time.sleep(0.9)
+            st.rerun()
+
+
 # --------------------------------------------------------------------------- #
 #  Sección 2 — Detalle por anuncio
 # --------------------------------------------------------------------------- #
@@ -3756,6 +3795,7 @@ def pagina_dashboard():
     # Paneles de la barra lateral (registrar venta arriba; el cuadre lo agrega
     # seccion_vista_general una vez calculados los datos).
     seccion_venta_manual()
+    seccion_corregir_ventas()
     seccion_vista_general()
     st.divider()
     seccion_por_pais()

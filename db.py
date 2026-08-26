@@ -877,6 +877,31 @@ def ingresos_diarios_por_ad(desde: datetime,
     return out
 
 
+def ventas_recientes(limite: int = 40) -> list:
+    """Últimas ventas insertadas (más recientes primero), para corregir errores."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM ventas ORDER BY id DESC LIMIT ?", (int(limite),))
+        return [dict(r) for r in rows]
+
+
+def borrar_venta(venta_id: int) -> int:
+    """Borra UNA venta por su id. Devuelve 1 si borró, 0 si no existía."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute("DELETE FROM ventas WHERE id = ?", (int(venta_id),))
+        conn.commit()
+        return cur.rowcount
+
+
+def actualizar_valor_venta(venta_id: int, nuevo_valor: float) -> int:
+    """Corrige el valor de UNA venta por su id. Devuelve 1 si actualizó."""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute("UPDATE ventas SET valor_venta = ? WHERE id = ?",
+                           (float(nuevo_valor), int(venta_id)))
+        conn.commit()
+        return cur.rowcount
+
+
 def obtener_ventas(ad_id: Optional[str] = None) -> list:
     with _conn() as conn:
         if ad_id:
