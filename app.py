@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v110 · 2026-08-24"
+APP_VERSION = "v111 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline

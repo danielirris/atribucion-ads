@@ -1137,7 +1137,18 @@ def duplicar_objeto(nivel: str, obj_id: str, num_copias: int, presupuesto: float
             resultado["exitosas"].append({"id": nuevo, "nivel": nivel})
             _log(f"Copia de {etiqueta} creada desde {obj_id}: {nuevo}.")
         except FacebookRequestError as e:
-            resultado["fallidas"].append({"nombre": f"{etiqueta} {i}", "error": _fmt_fb_error(e)})
+            msg = _fmt_fb_error(e)
+            # Pista específica: no se puede copiar un CONJUNTO cuando la campaña lleva
+            # el presupuesto (CBO/Advantage+). La solución es duplicar la CAMPAÑA.
+            try:
+                sub = e.api_error_subcode()
+            except Exception:
+                sub = None
+            if nivel == "adset" and sub == 3858504:
+                msg += (" · Suele ser porque la campaña maneja el presupuesto (CBO) o es "
+                        "Advantage+. Prueba: cambia arriba 'Ver por' a Campaña y duplica la "
+                        "CAMPAÑA completa en vez del conjunto.")
+            resultado["fallidas"].append({"nombre": f"{etiqueta} {i}", "error": msg})
         except Exception as e:
             resultado["fallidas"].append({"nombre": f"{etiqueta} {i}", "error": str(e)})
     return resultado
@@ -1361,7 +1372,19 @@ def _fmt_fb_error(e) -> str:
         msg = e.api_error_message() or ""
         code = e.api_error_code()
         sub = e.api_error_subcode()
+        # Mensaje HUMANO de Facebook (error_user_title/msg): explica la causa real,
+        # mucho más útil que el genérico "Invalid parameter".
+        user_title = user_msg = ""
+        try:
+            body = e.body() if callable(getattr(e, "body", None)) else getattr(e, "_body", None)
+            err = (body or {}).get("error", {}) if isinstance(body, dict) else {}
+            user_title = (err.get("error_user_title") or "").strip()
+            user_msg = (err.get("error_user_msg") or "").strip()
+        except Exception:
+            pass
+        humano = " — ".join([p for p in (user_title, user_msg) if p])
+        base = humano or msg
         extra = f"(code {code}" + (f"/{sub}" if sub else "") + ")"
-        return " ".join([p for p in [msg, extra] if p]).strip() or str(e)
+        return " ".join([p for p in [base, extra] if p]).strip() or str(e)
     except Exception:
         return str(e)
