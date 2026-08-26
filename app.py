@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v103 · 2026-08-24"
+APP_VERSION = "v104 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -58,14 +58,14 @@ _WAVES_SVG = (
     "<defs><linearGradient id='f' x1='0' y1='0' x2='0' y2='1'>"
     "<stop offset='0.35' stop-color='white'/><stop offset='1' stop-color='black'/>"
     "</linearGradient><mask id='m'><rect width='1440' height='400' fill='url(#f)'/></mask></defs>"
-    "<g fill='none' stroke='#D7FF3A' stroke-width='0.5' mask='url(#m)'>"
-    "<path d='M0 80 C 240 20 480 150 720 85 S 1200 20 1440 95' opacity='0.22'/>"
-    "<path d='M0 120 C 260 60 520 190 760 115 S 1220 60 1440 135' opacity='0.20'/>"
-    "<path d='M0 160 C 300 100 560 230 820 155 S 1240 100 1440 175' opacity='0.18'/>"
-    "<path d='M0 200 C 220 140 500 270 760 195 S 1180 140 1440 215' opacity='0.16'/>"
-    "<path d='M0 245 C 320 185 600 315 880 235 S 1260 185 1440 260' opacity='0.15'/>"
-    "<path d='M0 295 C 260 235 540 365 800 285 S 1220 235 1440 310' opacity='0.15'/>"
-    "<path d='M0 345 C 300 290 580 410 840 335 S 1250 285 1440 360' opacity='0.13'/>"
+    "<g fill='none' stroke='#B6E400' stroke-width='0.8' mask='url(#m)'>"
+    "<path d='M0 80 C 240 20 480 150 720 85 S 1200 20 1440 95' opacity='0.55'/>"
+    "<path d='M0 120 C 260 60 520 190 760 115 S 1220 60 1440 135' opacity='0.50'/>"
+    "<path d='M0 160 C 300 100 560 230 820 155 S 1240 100 1440 175' opacity='0.45'/>"
+    "<path d='M0 200 C 220 140 500 270 760 195 S 1180 140 1440 215' opacity='0.42'/>"
+    "<path d='M0 245 C 320 185 600 315 880 235 S 1260 185 1440 260' opacity='0.38'/>"
+    "<path d='M0 295 C 260 235 540 365 800 285 S 1220 235 1440 310' opacity='0.34'/>"
+    "<path d='M0 345 C 300 290 580 410 840 335 S 1250 285 1440 360' opacity='0.30'/>"
     "</g></svg>"
 )
 _WAVES_URI = "data:image/svg+xml," + _urlparse.quote(_WAVES_SVG)
@@ -130,7 +130,7 @@ def _roas_color(r):
     if r is None:
         return "#9a968c"
     if r >= 2:
-        return "#18181B"      # bueno → tinta (limpio y legible)
+        return "#1F8A4C"      # bueno → verde normal
     if r >= 1:
         return C_WARN         # medio → ámbar
     return C_BAD              # malo → crimson
@@ -140,11 +140,11 @@ def _roas_pill(r):
     """Badge tipo pill para el ROAS sobre papel: verde / ámbar / rojo (tinta legible)."""
     r = r or 0.0
     if r > 2:
-        bg, c = "rgba(215,255,58,.6)", "#18181B"     # bueno/excelente → neón + texto negro
+        bg, c = "rgba(31,138,76,.15)", "#1F8A4C"     # bueno → verde normal
     elif r >= 1:
-        bg, c = "rgba(180,83,9,.14)", C_WARN
+        bg, c = "rgba(245,158,11,.16)", C_WARN
     else:
-        bg, c = "rgba(192,57,43,.14)", C_BAD
+        bg, c = "rgba(225,29,72,.14)", C_BAD
     return (f'<span style="display:inline-block;padding:3px 9px;border-radius:8px;'
             f'background:{bg};color:{c};font-weight:700;font-size:15px">{r:.2f}x</span>')
 
@@ -173,7 +173,7 @@ def _salud_color_vivo(r):
     if r is None:
         return "#9a968c"
     if r >= 2:
-        return "#D7FF3A"      # neón (mismo verde de los botones)
+        return "#1F8A4C"      # bueno → verde normal
     if r >= 1:
         return C_WARN         # ámbar
     return C_BAD              # rojo
@@ -1220,13 +1220,13 @@ def _render_totales(filas, sin_adid=None):
     # semáforo (ámbar/crimson) solo para señalar. Sin neón como texto, sin efectos.
     tarjetas = [
         ("Gasto total", _usd(gasto), "#1D4ED8"),          # cobalto = inversión
-        ("Ventas", f"{num:,}".replace(",", "."), "#18181B"),  # tinta
-        ("Ingresos", _usd(ingresos), "#18181B"),          # tinta
-        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo
-        ("Costo/venta", _usd(costo_venta), "#18181B"),    # tinta
-        ("Costo/conv", _usd(costo_conv), "#18181B"),      # tinta
+        ("Ventas", f"{num:,}".replace(",", "."), "#6D28D9"),  # púrpura
+        ("Ingresos", _usd(ingresos), "#1F8A4C"),          # verde
+        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo (verde bueno)
+        ("Costo/venta", _usd(costo_venta), "#F59E0B"),    # ámbar
+        ("Costo/conv", _usd(costo_conv), "#06B6D4"),      # cian
         ("Ganancia", ("+" if ganancia >= 0 else "") + _usd(ganancia),
-         "#18181B" if ganancia >= 0 else "#E11D48"),      # tinta / crimson
+         "#1F8A4C" if ganancia >= 0 else "#E11D48"),      # verde / crimson
     ]
     cards = "".join(
         f'<div class="tcard"><div class="tlbl">{t}</div>'
@@ -1591,7 +1591,7 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big">{f["num"]}</div>',
             costov,
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
-            f'<div class="big" style="color:{"#18181B" if g>=0 else "#E11D48"};font-weight:700">'
+            f'<div class="big" style="color:{"#1F8A4C" if g>=0 else "#E11D48"};font-weight:700">'
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0),
             spark_cell,
@@ -1698,7 +1698,7 @@ def _dialog_info():
     fig = go.Figure()
     fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#18181B"))
     fig.add_trace(go.Scatter(x=etiquetas, y=ingresos, name="Ingresos (USD)", mode="lines+markers",
-                             line=dict(color=C_OK, width=3)))
+                             line=dict(color="#1F8A4C", width=3)))
     fig.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10),
                       legend=dict(orientation="h", y=1.15),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -1862,7 +1862,7 @@ table.ads td { padding:11px 12px; border-bottom:1px solid #EAE6DD; vertical-alig
 table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
 .big { font-size:17px; font-weight:600; color:#18181B; line-height:1.15; }
 .sub { font-size:13.5px; color:#71717A; }
-.m-mint{ color:#18181B; } .m-lav{ color:#18181B; } .m-peri{ color:#18181B; }
+.m-mint{ color:#1F8A4C; } .m-lav{ color:#18181B; } .m-peri{ color:#18181B; }
 /* Alerta: solo el nombre, con difuminado rojo hacia la derecha */
 .name-alert{ background:linear-gradient(90deg, rgba(192,57,43,.16), rgba(192,57,43,0) 88%);
     border-radius:8px; padding:3px 10px; margin:-3px -10px; }
@@ -2624,18 +2624,15 @@ def _inject_css():
         --p1:#18181B; --p2:#18181B; --ok:#5E8C00; --warn:#E11D48; --plight:#18181B;
         --signal:#D7FF3A;
     }
+    /* Base crema en body/stApp; los contenedores TRANSPARENTES para que se vea el
+       fondo (verde difuminado + ondas) que va en .stApp::before / ::after (2º inject). */
     html, body{ background:#F3F1EC; }
-    /* Fondo verde MUY difuminado HORNEADO en el contenedor (siempre visible, no plano) */
-    .stApp, [data-testid="stAppViewContainer"]{ color:var(--txt) !important;
-        background:
-          radial-gradient(52% 46% at 10% 6%, rgba(215,255,58,.24) 0%, transparent 60%),
-          radial-gradient(48% 46% at 90% 16%, rgba(94,140,0,.18) 0%, transparent 62%),
-          radial-gradient(58% 55% at 72% 92%, rgba(120,190,120,.20) 0%, transparent 64%),
-          radial-gradient(44% 42% at 26% 84%, rgba(14,116,105,.14) 0%, transparent 60%),
-          #F3F1EC !important;
-        background-attachment:fixed !important; }
+    .stApp{ background:#F3F1EC !important; color:var(--txt) !important; }
+    [data-testid="stAppViewContainer"], [data-testid="stMain"],
+    [data-testid="stMainBlockContainer"], .block-container,
     [data-testid="stHeader"]{ background:transparent !important; }
-    [data-testid="stMain"]{ background:transparent !important; }
+    [data-testid="stMainBlockContainer"], .block-container{ position:relative; z-index:1; }
+    [data-testid="stSidebar"]{ position:relative; z-index:1; }
 
     /* Scrollbar delgado neutro */
     ::-webkit-scrollbar{ width:9px; height:9px; }
@@ -2785,7 +2782,7 @@ def _inject_css():
         background:#C7C2B8 !important; transition:background .2s ease, box-shadow .2s ease;
     }
     [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type{
-        background:#D7FF3A !important; border:1px solid #18181B !important; box-shadow:none !important;
+        background:#D7FF3A !important; border:none !important; box-shadow:none !important;
     }
     [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type > div{
         background:#18181B !important;
@@ -2805,17 +2802,20 @@ def _inject_css():
     </style>
     """, unsafe_allow_html=True)
 
-    # Fondo definitivo: ONDAS SVG neón arriba (marca de agua) + verde muy difuminado
-    # + papel. Va en un 2º inject (f-string) para poder incrustar el data-URI.
+    # Fondo definitivo con pseudo-elementos FIJOS de .stApp (siempre visibles detrás
+    # del contenido): ::before = verde muy difuminado; ::after = ONDAS SVG arriba.
     st.markdown(
-        "<style>.stApp, [data-testid=\"stAppViewContainer\"]{"
-        f"background:"
-        f"url(\"{_WAVES_URI}\") top center / 100% 440px no-repeat,"
-        "radial-gradient(52% 46% at 10% 8%, rgba(215,255,58,.20) 0%, transparent 60%),"
-        "radial-gradient(50% 46% at 90% 18%, rgba(94,140,0,.15) 0%, transparent 62%),"
-        "radial-gradient(58% 55% at 72% 92%, rgba(120,190,120,.16) 0%, transparent 64%),"
-        "#F3F1EC !important;"
-        "background-attachment:scroll, fixed, fixed, fixed !important;}</style>",
+        "<style>"
+        ".stApp::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;"
+        "background:"
+        "radial-gradient(50% 44% at 8% 4%, rgba(182,228,0,.30) 0%, transparent 58%),"
+        "radial-gradient(48% 44% at 92% 14%, rgba(94,140,0,.22) 0%, transparent 60%),"
+        "radial-gradient(60% 55% at 74% 94%, rgba(120,190,120,.24) 0%, transparent 64%),"
+        "radial-gradient(42% 40% at 24% 82%, rgba(14,116,105,.18) 0%, transparent 60%);}"
+        ".stApp::after{content:'';position:fixed;top:0;left:0;right:0;height:460px;z-index:0;"
+        "pointer-events:none;"
+        f"background:url(\"{_WAVES_URI}\") top center / 100% 460px no-repeat;}}"
+        "</style>",
         unsafe_allow_html=True)
 
 
