@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v99 · 2026-08-24"
+APP_VERSION = "v101 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -45,7 +45,7 @@ C_INK = "#111111"       # texto principal (tinta)
 C_MUTED = "#6B6B6B"     # texto secundario
 C_LINE = "#DED9D0"      # bordes/hairlines sobre papel
 C_SIGNAL = "#D7FF3A"    # acento neón (lima)
-C_OK = "#1F8A4C"        # verde legible sobre papel
+C_OK = "#5E8C00"        # verde legible sobre papel
 C_WARN = "#B45309"      # ámbar/naranja legible sobre papel
 C_BAD = "#C0392B"       # rojo legible sobre papel
 
@@ -119,7 +119,7 @@ def _roas_pill(r):
     if r >= 5:
         bg, c = "rgba(215,255,58,.55)", "#111111"   # excelente → acento neón
     elif r > 2:
-        bg, c = "rgba(31,138,76,.14)", C_OK
+        bg, c = "rgba(94,140,0,.14)", C_OK
     elif r >= 1:
         bg, c = "rgba(180,83,9,.14)", C_WARN
     else:
@@ -1198,7 +1198,7 @@ def _render_totales(filas, sin_adid=None):
     tarjetas = [
         ("Gasto total", _usd(gasto), "#7C3AED"),          # violeta
         ("Ventas", f"{num:,}".replace(",", "."), "#2563EB"),  # azul
-        ("Ingresos", _usd(ingresos), "#1F8A4C"),          # verde
+        ("Ingresos", _usd(ingresos), "#5E8C00"),          # verde
         ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo
         ("Costo/venta", _usd(costo_venta), "#B45309"),    # ámbar
         ("Costo/conv", _usd(costo_conv), "#0E7490"),      # teal
@@ -1837,7 +1837,7 @@ table.ads td { padding:11px 12px; border-bottom:1px solid #EAE6DD; vertical-alig
 table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
 .big { font-size:15px; font-weight:600; color:#111111; line-height:1.2; }
 .sub { font-size:12px; color:#6B6B6B; }
-.m-mint{ color:#1F8A4C; } .m-lav{ color:#111111; } .m-peri{ color:#111111; }
+.m-mint{ color:#5E8C00; } .m-lav{ color:#111111; } .m-peri{ color:#111111; }
 /* Alerta: solo el nombre, con difuminado rojo hacia la derecha */
 .name-alert{ background:linear-gradient(90deg, rgba(192,57,43,.16), rgba(192,57,43,0) 88%);
     border-radius:8px; padding:3px 10px; margin:-3px -10px; }
@@ -1845,10 +1845,10 @@ table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
     width:20px; height:20px; border-radius:50%; background:#C0392B; color:#fff;
     font-weight:800; font-size:12px; cursor:help; }
 .ok-dot{ display:inline-block; width:8px; height:8px; border-radius:50%;
-    background:rgba(31,138,76,.6); }
+    background:rgba(94,140,0,.6); }
 .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px;
     border-radius:999px; font-size:10.5px; font-weight:600; }
-.pill-run { background:rgba(31,138,76,.14); color:#1F8A4C; }
+.pill-run { background:rgba(94,140,0,.14); color:#5E8C00; }
 .pill-off { background:rgba(17,17,17,.07); color:#6B6B6B; }
 .dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
 .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px;
@@ -1857,7 +1857,7 @@ table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
 .bar > span { display:block; height:100%; background:#111111; }
 .chip { display:inline-block; background:rgba(215,255,58,.5); color:#111111; border-radius:6px;
     padding:2px 8px; font-size:10px; font-weight:600; }
-.up { color:#1F8A4C; } .down { color:#C0392B; } .flat { color:#6B6B6B; }
+.up { color:#5E8C00; } .down { color:#C0392B; } .flat { color:#6B6B6B; }
 .hcol { color:#6B6B6B; font-size:10px; font-weight:700; text-transform:uppercase;
     letter-spacing:.06em; padding:4px 0 2px; }
 hr.rowline { margin:2px 0; border:none; border-top:1px solid #EAE6DD; }
@@ -2326,7 +2326,7 @@ _LOGIN_CSS = """
 .login-bg{ position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background:#F3F1EC; }
 .login-bg .aurora{ position:absolute; inset:-40%;
     background:
-      radial-gradient(45% 45% at 26% 26%, rgba(31,138,76,.20) 0%, transparent 60%),
+      radial-gradient(45% 45% at 26% 26%, rgba(94,140,0,.20) 0%, transparent 60%),
       radial-gradient(40% 40% at 74% 52%, rgba(14,116,105,.16) 0%, transparent 60%),
       radial-gradient(52% 52% at 50% 82%, rgba(120,190,120,.18) 0%, transparent 62%),
       radial-gradient(35% 35% at 82% 20%, rgba(215,255,58,.22) 0%, transparent 60%);
@@ -2339,10 +2339,10 @@ _LOGIN_CSS = """
     mask:radial-gradient(circle at 50% 42%, #000 0%, transparent 78%); }
 .login-bg .blob{ position:absolute; width:460px; height:460px; border-radius:50%;
     filter:blur(90px); opacity:.22; }
-.login-bg .blob-1{ background:#1F8A4C; top:-140px; left:-120px; animation:blob1 20s ease-in-out infinite alternate; }
+.login-bg .blob-1{ background:#5E8C00; top:-140px; left:-120px; animation:blob1 20s ease-in-out infinite alternate; }
 .login-bg .blob-2{ background:#0E7469; bottom:-150px; right:-120px; animation:blob2 26s ease-in-out infinite alternate; }
 .login-bg .particles span{ position:absolute; width:3px; height:3px; border-radius:50%;
-    background:#1F8A4C; opacity:.22; animation:floaty linear infinite; }
+    background:#5E8C00; opacity:.22; animation:floaty linear infinite; }
 @keyframes aurora{
     0%{ transform:translate(-4%,-3%) rotate(0deg) scale(1.1); }
     50%{ transform:translate(4%,3%) rotate(7deg) scale(1.28); }
@@ -2405,12 +2405,12 @@ div[data-testid="stVerticalBlockBorderWrapper"]::before{
     margin:20px auto 0; animation:fadeInUp .6s ease .7s both; }
 .login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#6B6B6B;
     font-family:'Space Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; }
-.login-feats2 .feat svg{ width:15px; height:15px; stroke:#1F8A4C; opacity:.9; }
+.login-feats2 .feat svg{ width:15px; height:15px; stroke:#5E8C00; opacity:.9; }
 .login-feats2 .sep{ width:1px; height:14px; background:#DED9D0; }
 .login-foot{ position:fixed; left:0; right:0; bottom:14px; text-align:center;
     font-family:'Space Mono',monospace; color:#9a968c; font-size:11px; z-index:3; line-height:1.7; }
 .login-foot .ver{ color:#b3ac9e; font-size:10.5px; }
-.login-foot .hp{ color:#1F8A4C; }
+.login-foot .hp{ color:#5E8C00; }
 
 @keyframes fadeInDown{ 0%{opacity:0; transform:translateY(-18px)} 100%{opacity:1; transform:translateY(0)} }
 @keyframes fadeInUp{ 0%{opacity:0; transform:translateY(18px)} 100%{opacity:1; transform:translateY(0)} }
@@ -2596,7 +2596,7 @@ def _inject_css():
     :root{
         --bg:#F3F1EC; --card:#FFFFFF; --card-brd:#DED9D0;
         --txt:#111111; --sub:#6B6B6B; --ter:#9a968c;
-        --p1:#111111; --p2:#111111; --ok:#1F8A4C; --warn:#C0392B; --plight:#111111;
+        --p1:#111111; --p2:#111111; --ok:#5E8C00; --warn:#C0392B; --plight:#111111;
         --signal:#D7FF3A;
     }
     html, body, .stApp, [data-testid="stAppViewContainer"]{ color:var(--txt); background:var(--bg) !important; }
@@ -2606,7 +2606,7 @@ def _inject_css():
     .app-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:#F3F1EC; }
     .app-bg .aurora{ position:absolute; inset:-35%; opacity:.9;
         background:
-          radial-gradient(40% 40% at 18% 22%, rgba(31,138,76,.16) 0%, transparent 62%),
+          radial-gradient(40% 40% at 18% 22%, rgba(94,140,0,.16) 0%, transparent 62%),
           radial-gradient(38% 38% at 78% 30%, rgba(14,116,105,.13) 0%, transparent 62%),
           radial-gradient(46% 46% at 62% 82%, rgba(120,190,120,.15) 0%, transparent 64%),
           radial-gradient(30% 30% at 88% 68%, rgba(215,255,58,.16) 0%, transparent 60%);
@@ -2760,7 +2760,7 @@ def _inject_css():
         background:#C7C2B8 !important; transition:background .2s ease, box-shadow .2s ease;
     }
     [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type{
-        background:#1F8A4C !important; box-shadow:none !important;
+        background:#5E8C00 !important; box-shadow:none !important;
     }
 
     /* Tabs (Configuración) */
