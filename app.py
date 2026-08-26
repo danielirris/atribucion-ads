@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v113 · 2026-08-24"
+APP_VERSION = "v114 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1754,13 +1754,18 @@ def _dialog_info():
         }
         st.table(pd.DataFrame(list(ver.items()), columns=["Métrica", "Valor"]))
 
-    # Gráfica de los últimos 7 días: gasto (Facebook) e ingresos (tus ventas).
+    # Gráfica: gasto (Facebook) e ingresos (tus ventas). Rango de días configurable.
     ahora = db.ahora()
-    dias = [(ahora - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
+    _rangos = {"7 días": (7, "last_7d"), "14 días": (14, "last_14d"),
+               "30 días": (30, "last_30d"), "90 días": (90, "last_90d")}
+    _sel = st.segmented_control("Días de la gráfica", list(_rangos.keys()),
+                                default="7 días", key=f"chart_dias_{f.get('sub')}") or "7 días"
+    ndias, preset = _rangos[_sel]
+    dias = [(ahora - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(ndias - 1, -1, -1)]
     serie = fb.serie_diaria(f.get("status_obj_id"), f.get("status_nivel", "ad"),
-                            f.get("conexion_id"))
+                            f.get("conexion_id"), date_preset=preset)
     gasto_por_dia = {s["date"]: s["spend"] * rate for s in serie if s.get("date")}
-    vd = db.ventas_diarias(f["ad_ids"], ahora - timedelta(days=7))
+    vd = db.ventas_diarias(f["ad_ids"], ahora - timedelta(days=ndias))
     ing_por_dia = {d: v["ingreso_nat"] * rate for d, v in vd.items()}
 
     gastos = [round(gasto_por_dia.get(d, 0.0), 2) for d in dias]
