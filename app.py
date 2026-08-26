@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v98 · 2026-08-24"
+APP_VERSION = "v99 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -960,22 +960,10 @@ def seccion_vista_general():
             default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
             key="f_nivel") or "Conjunto de anuncios"
     with ct2:
-        st.markdown('<span class="estado-anchor"></span>', unsafe_allow_html=True)
+        # "Estado" usa el MISMO estilo neón que "Ver por" (unificado con toda la app).
         st.segmented_control(
             "Estado", ["Activos", "Apagados", "Todos"],
             default=st.session_state.get("f_estado", "Activos"), key="f_estado")
-        _est = st.session_state.get("f_estado") or "Activos"
-        _bg, _bd = {
-            "Activos": ("rgba(31,138,76,.18)", "rgba(31,138,76,.55)"),
-            "Apagados": ("rgba(192,57,43,.16)", "rgba(192,57,43,.5)"),
-            "Todos": ("rgba(215,255,58,.55)", "#111111"),
-        }.get(_est, ("rgba(215,255,58,.55)", "#111111"))
-        st.markdown(
-            '<style>[data-testid="stElementContainer"]:has(.estado-anchor) + '
-            '[data-testid="stElementContainer"] '
-            'button[data-variant="segmented_control"][data-selected="true"]{'
-            f'background:{_bg} !important;border:1px solid {_bd} !important;'
-            'color:#111111 !important;}</style>', unsafe_allow_html=True)
     nivel = _NIVELES.get(nivel_lbl, "adset")
 
     filtro = st.session_state.get("f_estado") or "Activos"
@@ -1208,17 +1196,17 @@ def _render_totales(filas, sin_adid=None):
         nat = {}
 
     tarjetas = [
-        ("Gasto total", _usd(gasto), C_INK),
-        ("Ventas", f"{num:,}".replace(",", "."), C_INK),
-        ("Ingresos", _usd(ingresos), C_INK),
-        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),
-        ("Costo/venta", _usd(costo_venta), C_INK),
-        ("Costo/conv", _usd(costo_conv), C_INK),
+        ("Gasto total", _usd(gasto), "#7C3AED"),          # violeta
+        ("Ventas", f"{num:,}".replace(",", "."), "#2563EB"),  # azul
+        ("Ingresos", _usd(ingresos), "#1F8A4C"),          # verde
+        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo
+        ("Costo/venta", _usd(costo_venta), "#B45309"),    # ámbar
+        ("Costo/conv", _usd(costo_conv), "#0E7490"),      # teal
         ("Ganancia", ("+" if ganancia >= 0 else "") + _usd(ganancia),
-         C_OK if ganancia >= 0 else C_BAD),
+         C_OK if ganancia >= 0 else C_BAD),               # verde/rojo
     ]
     cards = "".join(
-        f'<div class="tcard"><div class="tlbl">{t}</div>'
+        f'<div class="tcard" style="--acc:{c}"><div class="tlbl">{t}</div>'
         f'<div class="tval" style="color:{c}">{v}</div>'
         + (f'<div class="tnat">{nat.get(t)}</div>' if nat.get(t) else '')
         + '</div>'
@@ -2325,37 +2313,36 @@ def seccion_manual():
 # --------------------------------------------------------------------------- #
 _LOGIN_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="collapsedControl"], header[data-testid="stHeader"], [data-testid="stToolbar"]{ display:none !important; }
-[data-testid="stAppViewContainer"], .stApp{ background:#080810 !important; overflow:hidden; }
+[data-testid="stAppViewContainer"], .stApp{ background:#F3F1EC !important; overflow:hidden; }
 /* Centrado perfecto: una sola columna en el centro exacto */
 [data-testid="stMain"]{ display:flex !important; align-items:center !important; justify-content:center !important; min-height:100vh; }
 [data-testid="stMainBlockContainer"], .block-container{ max-width:420px !important; width:100%;
     padding:2.5vh 1.1rem !important; position:relative; z-index:2; }
 
-/* ---------- Fondo animado (aurora + grid + blobs + partículas) ---------- */
-.login-bg{ position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background:#080810; }
+/* ---------- Fondo papel con verde MUY difuminado (patrón suave) ---------- */
+.login-bg{ position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background:#F3F1EC; }
 .login-bg .aurora{ position:absolute; inset:-40%;
     background:
-      radial-gradient(45% 45% at 30% 30%, #1a0533 0%, transparent 60%),
-      radial-gradient(40% 40% at 72% 55%, #020818 0%, transparent 60%),
-      radial-gradient(50% 50% at 50% 80%, #14082e 0%, transparent 62%),
-      radial-gradient(35% 35% at 82% 22%, #0a1a3a 0%, transparent 60%);
-    filter:blur(40px); animation:aurora 22s ease-in-out infinite alternate; }
+      radial-gradient(45% 45% at 26% 26%, rgba(31,138,76,.20) 0%, transparent 60%),
+      radial-gradient(40% 40% at 74% 52%, rgba(14,116,105,.16) 0%, transparent 60%),
+      radial-gradient(52% 52% at 50% 82%, rgba(120,190,120,.18) 0%, transparent 62%),
+      radial-gradient(35% 35% at 82% 20%, rgba(215,255,58,.22) 0%, transparent 60%);
+    filter:blur(70px); animation:aurora 22s ease-in-out infinite alternate; }
 .login-bg .grid{ position:absolute; inset:0;
-    background-image:linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+    background-image:linear-gradient(rgba(17,17,17,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(17,17,17,.03) 1px, transparent 1px);
     background-size:46px 46px;
     -webkit-mask:radial-gradient(circle at 50% 42%, #000 0%, transparent 78%);
     mask:radial-gradient(circle at 50% 42%, #000 0%, transparent 78%); }
-.login-bg .blob{ position:absolute; width:440px; height:440px; border-radius:50%;
-    filter:blur(80px); opacity:.15; }
-.login-bg .blob-1{ background:#7c3aed; top:-130px; left:-120px; animation:blob1 20s ease-in-out infinite alternate; }
-.login-bg .blob-2{ background:#2563eb; bottom:-140px; right:-120px; animation:blob2 26s ease-in-out infinite alternate; }
+.login-bg .blob{ position:absolute; width:460px; height:460px; border-radius:50%;
+    filter:blur(90px); opacity:.22; }
+.login-bg .blob-1{ background:#1F8A4C; top:-140px; left:-120px; animation:blob1 20s ease-in-out infinite alternate; }
+.login-bg .blob-2{ background:#0E7469; bottom:-150px; right:-120px; animation:blob2 26s ease-in-out infinite alternate; }
 .login-bg .particles span{ position:absolute; width:3px; height:3px; border-radius:50%;
-    background:#c9d3ff; opacity:.35; box-shadow:0 0 6px rgba(201,211,255,.6);
-    animation:floaty linear infinite; }
+    background:#1F8A4C; opacity:.22; animation:floaty linear infinite; }
 @keyframes aurora{
     0%{ transform:translate(-4%,-3%) rotate(0deg) scale(1.1); }
     50%{ transform:translate(4%,3%) rotate(7deg) scale(1.28); }
@@ -2363,71 +2350,67 @@ _LOGIN_CSS = """
 @keyframes blob1{ 0%{transform:translate(0,0) scale(1)} 100%{transform:translate(60px,50px) scale(1.15)} }
 @keyframes blob2{ 0%{transform:translate(0,0) scale(1)} 100%{transform:translate(-50px,-40px) scale(1.1)} }
 @keyframes floaty{ 0%{transform:translate(0,0); opacity:0}
-    10%{opacity:.4} 90%{opacity:.4} 100%{transform:translate(14px,-120px); opacity:0} }
+    10%{opacity:.3} 90%{opacity:.3} 100%{transform:translate(14px,-120px); opacity:0} }
 
 /* ---------- Logo + título ---------- */
 .login-brand{ text-align:center; margin:0 0 22px; animation:fadeInDown .6s cubic-bezier(.2,.7,.3,1) both; }
 .login-logo{ width:76px; height:76px; margin:0 auto 20px; border-radius:22px;
-    background:linear-gradient(150deg,#7c3aed,#2563eb); display:flex; align-items:center; justify-content:center;
-    animation:logoPulse 2.6s ease-in-out infinite; }
+    background:#111111; display:flex; align-items:center; justify-content:center; }
 .login-logo svg{ width:40px; height:40px; }
-.login-title{ font-family:'Geist',sans-serif; font-weight:800; font-size:33px; line-height:1.1; margin:0;
-    background:linear-gradient(92deg,#ffffff 30%,#a855f7 100%);
-    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
-.login-sub{ font-family:'Inter',sans-serif; color:#9aa3b8; font-size:14px; margin:10px 0 0; }
-@keyframes logoPulse{
-    0%,100%{ box-shadow:0 0 22px 4px rgba(124,58,237,.35), 0 0 44px 10px rgba(37,99,235,.18); }
-    50%{ box-shadow:0 0 40px 10px rgba(124,58,237,.6), 0 0 70px 18px rgba(37,99,235,.38); } }
+.login-title{ font-family:'Anton',sans-serif; font-weight:400; font-size:40px; line-height:.92; margin:0;
+    text-transform:uppercase; letter-spacing:-.02em; color:#111111; }
+.login-sub{ font-family:'Space Mono',monospace; color:#6B6B6B; font-size:12px; margin:12px 0 0;
+    text-transform:uppercase; letter-spacing:.12em; }
 
-/* ---------- Tarjeta glass ---------- */
+/* ---------- Tarjeta blanca ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"]{
     position:relative; overflow:hidden;
-    background:rgba(255,255,255,.03) !important; backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
-    border:1px solid rgba(255,255,255,.08) !important; border-radius:20px !important;
-    box-shadow:0 30px 80px rgba(0,0,0,.5);
+    background:#FFFFFF !important; backdrop-filter:none;
+    border:1px solid #DED9D0 !important; border-radius:20px !important;
+    box-shadow:0 24px 60px -30px rgba(17,17,17,.25);
     animation:fadeInUp .8s cubic-bezier(.2,.7,.3,1) .15s both; }
 div[data-testid="stVerticalBlockBorderWrapper"]::before{
-    content:""; position:absolute; top:0; left:0; right:0; height:2px;
-    background:linear-gradient(90deg,#7c3aed,#2563eb); }
-.login-cardtitle{ font-family:'Geist',sans-serif; font-weight:700; font-size:28px; color:#fff; margin:4px 0 14px; }
+    content:""; position:absolute; top:0; left:0; right:0; height:3px;
+    background:#D7FF3A; }
+.login-cardtitle{ font-family:'Anton',sans-serif; font-weight:400; font-size:26px; color:#111111;
+    text-transform:uppercase; letter-spacing:-.01em; margin:4px 0 14px; }
 
 /* Campos */
 .stTextInput{ animation:fadeInUp .5s ease both; }
 .stTextInput:nth-of-type(1){ animation-delay:.30s; }
 .stTextInput:nth-of-type(2){ animation-delay:.40s; }
-.stTextInput label p, .stTextInput label{ color:#8a93a6 !important; font-family:'Inter',sans-serif;
-    font-size:11px !important; font-weight:600 !important; text-transform:uppercase; letter-spacing:.09em; }
-.stTextInput div[data-baseweb="input"], .stTextInput input{ background:rgba(255,255,255,.05) !important;
+.stTextInput label p, .stTextInput label{ color:#6B6B6B !important; font-family:'Space Mono',monospace;
+    font-size:11px !important; font-weight:400 !important; text-transform:uppercase; letter-spacing:.1em; }
+.stTextInput div[data-baseweb="input"], .stTextInput input{ background:#FBFAF7 !important;
     border-radius:10px !important; }
-.stTextInput input{ border:1px solid rgba(255,255,255,.1) !important; color:#fff !important;
+.stTextInput input{ border:1px solid #CDC8BE !important; color:#111111 !important;
     padding:13px 14px !important; font-family:'Inter',sans-serif; }
-.stTextInput input:focus{ border-color:#7c3aed !important;
-    box-shadow:0 0 0 3px rgba(124,58,237,.25), 0 0 18px rgba(124,58,237,.35) !important; }
+.stTextInput input:focus{ border-color:#111111 !important;
+    box-shadow:0 0 0 3px rgba(215,255,58,.55) !important; }
 .stTextInput div[data-baseweb="input"]{ border:none !important; }
 
-/* Botón con shimmer */
+/* Botón: PÍLDORA neón lima (mismo look que el resto de la app) */
 .stButton{ animation:fadeInUp .5s ease .5s both; }
-.stButton>button{ position:relative; overflow:hidden; width:100%; border:none !important; border-radius:10px !important;
-    background:linear-gradient(90deg,#7c3aed,#2563eb) !important; color:#fff !important;
-    font-family:'Geist',sans-serif; font-weight:700 !important; padding:12px 0 !important;
-    box-shadow:0 8px 26px rgba(124,58,237,.35) !important; transition:box-shadow .25s, transform .1s; }
-.stButton>button:hover{ box-shadow:0 0 34px rgba(124,58,237,.65) !important; transform:translateY(-1px); }
-.stButton>button::after{ content:""; position:absolute; top:0; left:-70%; width:45%; height:100%;
-    background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent); transform:skewX(-20deg); }
-.stButton>button:hover::after{ animation:shimmer .9s ease; }
-@keyframes shimmer{ 0%{left:-70%} 100%{left:150%} }
+.stButton>button{ position:relative; overflow:hidden; width:100%;
+    border:1px solid #111111 !important; border-radius:9999px !important;
+    background:#D7FF3A !important; color:#111111 !important;
+    font-family:'Space Mono',monospace; font-weight:700 !important; text-transform:uppercase;
+    letter-spacing:.06em; padding:12px 0 !important;
+    box-shadow:none !important; transition:transform .3s ease-out, box-shadow .3s ease-out; }
+.stButton>button:hover{ transform:translateY(-2px); box-shadow:0 10px 22px -10px rgba(17,17,17,.4) !important; }
+.stButton>button p{ color:#111111 !important; }
 
 /* Features abajo */
 .login-feats2{ display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
     margin:20px auto 0; animation:fadeInUp .6s ease .7s both; }
-.login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#8a93a6;
-    font-family:'Inter',sans-serif; font-size:11.5px; }
-.login-feats2 .feat svg{ width:15px; height:15px; stroke:#a855f7; opacity:.9; }
-.login-feats2 .sep{ width:1px; height:14px; background:rgba(255,255,255,.12); }
+.login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#6B6B6B;
+    font-family:'Space Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; }
+.login-feats2 .feat svg{ width:15px; height:15px; stroke:#1F8A4C; opacity:.9; }
+.login-feats2 .sep{ width:1px; height:14px; background:#DED9D0; }
 .login-foot{ position:fixed; left:0; right:0; bottom:14px; text-align:center;
-    font-family:'Inter',sans-serif; color:#5a6478; font-size:11.5px; z-index:3; line-height:1.7; }
-.login-foot .ver{ color:#4a5265; font-size:11px; }
-.login-foot .hp{ color:#a855f7; }
+    font-family:'Space Mono',monospace; color:#9a968c; font-size:11px; z-index:3; line-height:1.7; }
+.login-foot .ver{ color:#b3ac9e; font-size:10.5px; }
+.login-foot .hp{ color:#1F8A4C; }
 
 @keyframes fadeInDown{ 0%{opacity:0; transform:translateY(-18px)} 100%{opacity:1; transform:translateY(0)} }
 @keyframes fadeInUp{ 0%{opacity:0; transform:translateY(18px)} 100%{opacity:1; transform:translateY(0)} }
@@ -2619,6 +2602,25 @@ def _inject_css():
     html, body, .stApp, [data-testid="stAppViewContainer"]{ color:var(--txt); background:var(--bg) !important; }
     [data-testid="stHeader"]{ background:transparent !important; }
 
+    /* ---------- Fondo papel con verde MUY difuminado (no plano) ---------- */
+    .app-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:#F3F1EC; }
+    .app-bg .aurora{ position:absolute; inset:-35%; opacity:.9;
+        background:
+          radial-gradient(40% 40% at 18% 22%, rgba(31,138,76,.16) 0%, transparent 62%),
+          radial-gradient(38% 38% at 78% 30%, rgba(14,116,105,.13) 0%, transparent 62%),
+          radial-gradient(46% 46% at 62% 82%, rgba(120,190,120,.15) 0%, transparent 64%),
+          radial-gradient(30% 30% at 88% 68%, rgba(215,255,58,.16) 0%, transparent 60%);
+        filter:blur(80px); animation:paperAurora 30s ease-in-out infinite alternate; }
+    .app-bg .grain{ position:absolute; inset:0; opacity:.5;
+        background-image:linear-gradient(rgba(17,17,17,.022) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(17,17,17,.022) 1px, transparent 1px);
+        background-size:52px 52px;
+        -webkit-mask:radial-gradient(circle at 50% 20%, #000, transparent 92%);
+        mask:radial-gradient(circle at 50% 20%, #000, transparent 92%); }
+    @keyframes paperAurora{ 0%{transform:translate(-2%,-1%) scale(1.05)} 100%{transform:translate(2%,3%) scale(1.15)} }
+    [data-testid="stAppViewContainer"] .main .block-container{ position:relative; z-index:1; }
+    [data-testid="stSidebar"]{ position:relative; z-index:1; }
+
     /* Scrollbar delgado neutro */
     ::-webkit-scrollbar{ width:9px; height:9px; }
     ::-webkit-scrollbar-thumb{ background:rgba(17,17,17,.18); border-radius:8px; }
@@ -2657,27 +2659,37 @@ def _inject_css():
         letter-spacing:.16em; color:var(--sub); -webkit-text-fill-color:var(--sub); margin-top:4px; }
     [data-testid="stSidebar"] h3{ color:var(--sub); text-transform:uppercase; font-size:12px;
         letter-spacing:.12em; font-weight:600; font-family:'Space Mono',monospace; }
+    /* "Letras" de la columna izquierda: etiquetas de filtros/inputs en mono editorial */
+    [data-testid="stSidebar"] label, [data-testid="stSidebar"] label p{
+        font-family:'Space Mono',monospace !important; text-transform:uppercase;
+        letter-spacing:.08em; font-size:11px !important; font-weight:400 !important; color:#4a4a4a !important; }
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"], [data-testid="stSidebar"] small{
+        font-family:'Space Mono',monospace; color:var(--sub) !important; }
+    /* Encabezados de expanders del sidebar (Filtros, Cuadre…): mono uppercase */
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary p{
+        font-family:'Space Mono',monospace !important; text-transform:uppercase;
+        letter-spacing:.06em; font-size:12px !important; font-weight:700 !important; }
+    /* Navegación del pie (Dashboard/Config/Bitácora): mono uppercase */
+    [data-testid="stSidebar"] .stButton>button p{ font-family:'Space Mono',monospace !important;
+        text-transform:uppercase; letter-spacing:.05em; font-size:12px !important; }
     [data-testid="stStatusWidget"]{ display:none !important; }
 
-    /* Botones secundarios: PÍLDORA delineada sobre papel, se eleva al hover */
-    .stButton>button, .stDownloadButton>button, .stFormSubmitButton>button{
-        border-radius:9999px !important; font-weight:500; color:var(--txt) !important;
-        transition:all .3s ease-out; background:transparent !important;
-        border:1px solid #CDC8BE !important;
-    }
-    .stButton>button:hover, .stDownloadButton>button:hover, .stFormSubmitButton>button:hover{
-        border-color:#111111 !important; transform:translateY(-2px);
-        box-shadow:0 8px 18px -10px rgba(17,17,17,.35);
-    }
-    /* Botones primarios: PÍLDORA tinta sólida (negra) */
+    /* TODOS los botones: PÍLDORA neón lima con borde y texto negro
+       (mismo look que el segmentado activo "CONJUNTO DE ANUNCIOS"). Se eleva al hover. */
+    .stButton>button, .stDownloadButton>button, .stFormSubmitButton>button,
     .stButton>button[kind="primary"], .stFormSubmitButton>button[kind="primary"]{
-        background:#111111 !important; color:#ffffff !important;
-        border:1px solid #111111 !important; border-radius:9999px !important; box-shadow:none !important;
+        border-radius:9999px !important; font-weight:700 !important; color:#111111 !important;
+        transition:all .3s ease-out; background:var(--signal) !important;
+        border:1px solid #111111 !important; box-shadow:none !important;
+        font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.04em;
     }
+    .stButton>button:hover, .stDownloadButton>button:hover, .stFormSubmitButton>button:hover,
     .stButton>button[kind="primary"]:hover, .stFormSubmitButton>button[kind="primary"]:hover{
-        transform:translateY(-2px); box-shadow:0 10px 22px -10px rgba(17,17,17,.5) !important;
+        border-color:#111111 !important; transform:translateY(-2px);
+        box-shadow:0 10px 22px -10px rgba(17,17,17,.45) !important; filter:brightness(1.03);
     }
-    .stButton>button[kind="primary"] p, .stFormSubmitButton>button[kind="primary"] p{ color:#ffffff !important; }
+    .stButton>button p, .stDownloadButton>button p, .stFormSubmitButton>button p,
+    .stButton>button[kind="primary"] p{ color:#111111 !important; }
 
     /* Inputs y selects: fondo blanco, borde línea, foco tinta con anillo neón sutil */
     .stTextInput input, .stNumberInput input, [data-baseweb="textarea"] textarea{
@@ -2717,7 +2729,7 @@ def _inject_css():
     /* KPI cards: acento superior neón (clase .tcard de _render_totales) */
     .tcard{ position:relative; overflow:hidden; transition:border-color .2s ease, box-shadow .2s ease; }
     .tcard::before{ content:""; position:absolute; top:0; left:0; right:0; height:3px;
-        background:var(--signal); }
+        background:var(--acc, var(--signal)); }
     .tcard:hover{ border-color:#111111 !important; box-shadow:0 12px 26px -14px rgba(17,17,17,.22); }
 
     /* Botones de acción de la tabla (Info/Pres/Dup): píldora clara y visible. */
@@ -2763,6 +2775,7 @@ def _inject_css():
         letter-spacing:.08em; color:var(--sub); }
     hr{ border-color:var(--card-brd) !important; }
     </style>
+    <div class="app-bg"><div class="aurora"></div><div class="grain"></div></div>
     """, unsafe_allow_html=True)
 
 
