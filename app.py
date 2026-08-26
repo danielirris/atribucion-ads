@@ -10,6 +10,7 @@ import os
 import time
 import json
 import html as _html
+import urllib.parse as _urlparse
 from datetime import datetime, timedelta
 
 # Frescura del gasto/insights de Facebook (segundos). Configurable por entorno.
@@ -34,20 +35,42 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v102 · 2026-08-24"
+APP_VERSION = "v103 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
 #  generados desde Python. Los estilos globales viven en _inject_css().
 # --------------------------------------------------------------------------- #
 C_PAPER = "#F3F1EC"     # fondo papel
-C_INK = "#111111"       # texto principal (tinta)
-C_MUTED = "#6B6B6B"     # texto secundario
+C_INK = "#18181B"       # texto principal (tinta)
+C_MUTED = "#71717A"     # texto secundario
 C_LINE = "#DED9D0"      # bordes/hairlines sobre papel
 C_SIGNAL = "#D7FF3A"    # acento neón (lima)
 C_OK = "#5E8C00"        # verde legible sobre papel
-C_WARN = "#B45309"      # ámbar/naranja legible sobre papel
-C_BAD = "#C0392B"       # rojo legible sobre papel
+
+# --------------------------------------------------------------------------- #
+#  Patrón de ondas SVG (marca de agua tecnológica en la parte superior).
+#  Líneas Bézier finas en neón a baja opacidad, con máscara que las desvanece
+#  hacia abajo. Se codifica como data-URI para usarlo como capa de background.
+# --------------------------------------------------------------------------- #
+_WAVES_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 400' preserveAspectRatio='none'>"
+    "<defs><linearGradient id='f' x1='0' y1='0' x2='0' y2='1'>"
+    "<stop offset='0.35' stop-color='white'/><stop offset='1' stop-color='black'/>"
+    "</linearGradient><mask id='m'><rect width='1440' height='400' fill='url(#f)'/></mask></defs>"
+    "<g fill='none' stroke='#D7FF3A' stroke-width='0.5' mask='url(#m)'>"
+    "<path d='M0 80 C 240 20 480 150 720 85 S 1200 20 1440 95' opacity='0.22'/>"
+    "<path d='M0 120 C 260 60 520 190 760 115 S 1220 60 1440 135' opacity='0.20'/>"
+    "<path d='M0 160 C 300 100 560 230 820 155 S 1240 100 1440 175' opacity='0.18'/>"
+    "<path d='M0 200 C 220 140 500 270 760 195 S 1180 140 1440 215' opacity='0.16'/>"
+    "<path d='M0 245 C 320 185 600 315 880 235 S 1260 185 1440 260' opacity='0.15'/>"
+    "<path d='M0 295 C 260 235 540 365 800 285 S 1220 235 1440 310' opacity='0.15'/>"
+    "<path d='M0 345 C 300 290 580 410 840 335 S 1250 285 1440 360' opacity='0.13'/>"
+    "</g></svg>"
+)
+_WAVES_URI = "data:image/svg+xml," + _urlparse.quote(_WAVES_SVG)
+C_WARN = "#F59E0B"      # ámbar/naranja legible sobre papel
+C_BAD = "#E11D48"       # rojo legible sobre papel
 
 
 # --------------------------------------------------------------------------- #
@@ -107,23 +130,23 @@ def _roas_color(r):
     if r is None:
         return "#9a968c"
     if r >= 2:
-        return "#D7FF3A"      # neón (el verde de los botones); en números grandes va con contorno
+        return "#18181B"      # bueno → tinta (limpio y legible)
     if r >= 1:
-        return C_WARN
-    return C_BAD
+        return C_WARN         # medio → ámbar
+    return C_BAD              # malo → crimson
 
 
 def _roas_pill(r):
     """Badge tipo pill para el ROAS sobre papel: verde / ámbar / rojo (tinta legible)."""
     r = r or 0.0
     if r > 2:
-        bg, c = "rgba(215,255,58,.6)", "#111111"     # bueno/excelente → neón + texto negro
+        bg, c = "rgba(215,255,58,.6)", "#18181B"     # bueno/excelente → neón + texto negro
     elif r >= 1:
         bg, c = "rgba(180,83,9,.14)", C_WARN
     else:
         bg, c = "rgba(192,57,43,.14)", C_BAD
     return (f'<span style="display:inline-block;padding:3px 9px;border-radius:8px;'
-            f'background:{bg};color:{c};font-weight:700;font-size:13px">{r:.2f}x</span>')
+            f'background:{bg};color:{c};font-weight:700;font-size:15px">{r:.2f}x</span>')
 
 
 def _spark_svg(serie, color="#22c55e", w=78, h=26):
@@ -156,7 +179,7 @@ def _salud_color_vivo(r):
     return C_BAD              # rojo
 
 
-def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color="#111111"):
+def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color="#18181B"):
     """Mini-gráfica de BARRAS (una barra por día) para la facturación diaria, con
     una LÍNEA opcional encima (p. ej. el gasto). Barras y línea comparten la misma
     escala (el máximo de ambas series), así se ven a la par: si la línea de gasto
@@ -1193,22 +1216,21 @@ def _render_totales(filas, sin_adid=None):
     else:
         nat = {}
 
+    # Paleta uniforme: tinta para números de venta, cobalto para inversión (Gasto),
+    # semáforo (ámbar/crimson) solo para señalar. Sin neón como texto, sin efectos.
     tarjetas = [
-        ("Gasto total", _usd(gasto), "#7C3AED"),          # violeta
-        ("Ventas", f"{num:,}".replace(",", "."), "#2563EB"),  # azul
-        ("Ingresos", _usd(ingresos), "#D7FF3A"),          # verde neón
-        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo (verde = neón)
-        ("Costo/venta", _usd(costo_venta), "#B45309"),    # ámbar
-        ("Costo/conv", _usd(costo_conv), "#0E7490"),      # teal
+        ("Gasto total", _usd(gasto), "#1D4ED8"),          # cobalto = inversión
+        ("Ventas", f"{num:,}".replace(",", "."), "#18181B"),  # tinta
+        ("Ingresos", _usd(ingresos), "#18181B"),          # tinta
+        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo
+        ("Costo/venta", _usd(costo_venta), "#18181B"),    # tinta
+        ("Costo/conv", _usd(costo_conv), "#18181B"),      # tinta
         ("Ganancia", ("+" if ganancia >= 0 else "") + _usd(ganancia),
-         "#D7FF3A" if ganancia >= 0 else C_BAD),          # verde neón / rojo
+         "#18181B" if ganancia >= 0 else "#E11D48"),      # tinta / crimson
     ]
-    # Los verdes neón llevan un contorno oscuro (clase .g) para que se lean sobre blanco.
-    def _cls(color):
-        return "tval g" if str(color).upper() == "#D7FF3A" else "tval"
     cards = "".join(
-        f'<div class="tcard" style="--acc:{c}"><div class="tlbl">{t}</div>'
-        f'<div class="{_cls(c)}" style="color:{c}">{v}</div>'
+        f'<div class="tcard"><div class="tlbl">{t}</div>'
+        f'<div class="tval" style="color:{c}">{v}</div>'
         + (f'<div class="tnat">{nat.get(t)}</div>' if nat.get(t) else '')
         + '</div>'
         for t, v, c in tarjetas)
@@ -1217,10 +1239,8 @@ def _render_totales(filas, sin_adid=None):
         '.tcard{flex:1;min-width:120px;background:#FFFFFF;'
         'border:1px solid #DED9D0;border-radius:16px;padding:16px 16px 14px;}'
         ".tlbl{font-family:'Space Mono',monospace;font-size:10.5px;text-transform:uppercase;"
-        'letter-spacing:.1em;color:#6B6B6B;font-weight:400;}'
-        ".tval{font-family:Anton,sans-serif;font-weight:400;font-size:34px;margin-top:8px;line-height:1;}"
-        # Contorno oscuro para el neón sobre fondo blanco (se lee nítido).
-        '.tval.g{-webkit-text-stroke:1px #3a4a00;text-shadow:0 1px 0 rgba(0,0,0,.25);}'
+        'letter-spacing:.1em;color:#71717A;font-weight:400;}'
+        ".tval{font-family:Anton,sans-serif;font-weight:400;font-size:39px;margin-top:8px;line-height:1;}"
         ".tnat{font-family:'Space Mono',monospace;font-size:11px;font-weight:400;"
         'color:#9a968c;margin-top:6px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
@@ -1228,7 +1248,7 @@ def _render_totales(filas, sin_adid=None):
     # Nota chica de ventas sin ad_id (van incluidas en el total de arriba).
     if sa_num:
         st.markdown(
-            f'<div style="font-size:11px;color:#6B6B6B;margin:-4px 0 10px;'
+            f'<div style="font-size:11px;color:#71717A;margin:-4px 0 10px;'
             f"font-family:'Space Mono',monospace;\" "
             f'title="Sí están incluidas en el total; no se pudieron atribuir a un anuncio '
             f'(fila sin POST ID o ID que no coincide).">'
@@ -1427,7 +1447,7 @@ def _render_lista_nativa(filas, nivel):
     keys = ["nombre", "cuenta", "presupuesto", "gasto", "conv", "costo_conv",
             "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas", "serie7"]
     # Ancho de la columna del conjunto/anuncio (ampliable con el toggle).
-    name_w = 5.2 if st.session_state.get("f_ancho_nombre") else 3.0
+    name_w = 5.2 if st.session_state.get("f_ancho_nombre") else 2.6
     GRID_W = [name_w, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6, 1.1]
     ayudas = {"Presup.": "Presupuesto diario", "Gastado": "Importe gastado",
               "C/conv": "Costo por conversación", "CPM": "CPM / CTR",
@@ -1437,25 +1457,25 @@ def _render_lista_nativa(filas, nivel):
               "Fact. 7d": ("Últimos 7 días: barras = facturación, línea = gasto. "
                            "Si la línea va por debajo de las barras, ese día hubo ganancia.")}
     st.markdown(
-        "<style>.meta-mini{font-size:9.5px;color:#6B6B6B;line-height:1.25;margin-top:1px;"
+        "<style>.meta-mini{font-size:11px;color:#71717A;line-height:1.25;margin-top:1px;"
         "font-family:'Space Mono',monospace;}"
-        '.meta-mini b{color:#111111;font-weight:600;}'
+        '.meta-mini b{color:#18181B;font-weight:600;}'
         # Datos centrados en cada columna (igual que sus títulos).
         '.gcell,.gcell .big,.gcell .sub,.gcell .meta-mini{text-align:center !important;}'
         # Botones de encabezado (ordenar) CENTRADOS, igual que los valores, sin recuadro.
         '.stButton button[kind="tertiary"]{padding:0 !important;min-height:0 !important;'
-        'color:#6B6B6B !important;letter-spacing:0;line-height:1.1;'
+        'color:#71717A !important;letter-spacing:0;line-height:1.1;'
         'justify-content:center !important;text-align:center !important;'
         'border:none !important;box-shadow:none !important;background:transparent !important;}'
         '.stButton button[kind="tertiary"]:focus,.stButton button[kind="tertiary"]:active,'
         '.stButton button[kind="tertiary"]:focus-visible{box-shadow:none !important;'
-        'outline:none !important;border:none !important;color:#6B6B6B !important;}'
+        'outline:none !important;border:none !important;color:#71717A !important;}'
         '.stButton button[kind="tertiary"] div[data-testid="stMarkdownContainer"]'
         '{width:100% !important;text-align:center !important;}'
         ".stButton button[kind=\"tertiary\"] p{font-size:10px !important;font-weight:700 !important;"
         "font-family:'Space Mono',monospace;"
         'text-transform:uppercase;margin:0 !important;white-space:nowrap;text-align:center !important;}'
-        '.stButton button[kind="tertiary"]:hover p{color:#111111 !important;}</style>',
+        '.stButton button[kind="tertiary"]:hover p{color:#18181B !important;}</style>',
         unsafe_allow_html=True)
 
     # Encabezados clicables (botones nativos): reordenan SIN recargar la página.
@@ -1475,7 +1495,7 @@ def _render_lista_nativa(filas, nivel):
                 col.markdown(
                     f'<div style="text-align:center;font-size:10px;font-weight:700;'
                     f'font-family:\'Space Mono\',monospace;'
-                    f'color:#6B6B6B;text-transform:uppercase;letter-spacing:.06em" '
+                    f'color:#71717A;text-transform:uppercase;letter-spacing:.06em" '
                     f'title="{esc(ayudas.get(label, ""))}">{esc(label)}</div>',
                     unsafe_allow_html=True)
                 continue
@@ -1527,11 +1547,11 @@ def _render_lista_nativa(filas, nivel):
         dot_html = (f'<span title="{est_txt}" style="color:{est_col};font-size:12px;'
                     f'margin-right:7px;vertical-align:middle;line-height:1">●</span>')
         # Identificador del anuncio/conjunto/campaña, en chico (mono), debajo del nombre.
-        id_html = (f'<div class="sub" style="font-size:10.5px;color:#9a968c;'
+        id_html = (f'<div class="sub" style="font-size:12px;color:#9a968c;'
                    f"font-family:'Space Mono',monospace;"
                    f'margin-top:2px;letter-spacing:.02em">{esc(str(f["sub"]))}</div>')
         nombre_html = (f'<div class="ad-name" style="{borde}color:{nombre_col};font-weight:600;'
-                       f'font-size:15px;line-height:1.2;white-space:normal;word-break:break-word">'
+                       f'font-size:17px;line-height:1.18;white-space:normal;word-break:break-word">'
                        f'{dot_html}{esc(str(f["nombre"]))[:120]}</div>{id_html}')
         if muy_mal:
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
@@ -1553,7 +1573,7 @@ def _render_lista_nativa(filas, nivel):
             f'{d[5:]}: fact {_usd(i)} / gasto {_usd(g)}'
             for d, i, g in zip(dias7, serie7, (gasto7 or [0] * len(serie7))))
         # Total facturado y, si hay línea, total gastado (tinta tenue) debajo.
-        _gasto_lbl = (f'<span style="color:#6B6B6B"> · {_usd(totg7)}</span>'
+        _gasto_lbl = (f'<span style="color:#71717A"> · {_usd(totg7)}</span>'
                       if gasto7 else '')
         spark_cell = (
             f'<div title="Últimos 7 días — {esc(_tip)}">{spark7}'
@@ -1571,11 +1591,8 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big">{f["num"]}</div>',
             costov,
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
-            (f'<div class="big" style="color:#D7FF3A;font-weight:700;'
-             f'text-shadow:0 0 1px #2e3b00,0 1px 1px rgba(0,0,0,.3)">'
-             if g >= 0 else
-             f'<div class="big" style="color:{C_BAD};font-weight:700">')
-            + f'{"+" if g>=0 else ""}{_usd(g)}</div>',
+            f'<div class="big" style="color:{"#18181B" if g>=0 else "#E11D48"};font-weight:700">'
+            f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0),
             spark_cell,
         ]
@@ -1590,12 +1607,14 @@ def _render_lista_nativa(filas, nivel):
             dcols = st.columns(GRID_W, gap="small", vertical_alignment="top")
             for col, cell in zip(dcols, cells):
                 col.markdown(f'<div class="gcell">{cell}</div>', unsafe_allow_html=True)
+        rc[2].markdown('<span class="iconbtn-anchor"></span>', unsafe_allow_html=True)
         if rc[2].button("", icon=":material/info:", key=f"info_{f['sub']}",
                         help=_perf_help_text(f, ahora)):
             st.session_state["info_row"] = f
             _dialog_info()
         # Presupuesto y Duplicar: botones (no popovers) que abren un diálogo —
         # los popovers no se renderizaban en columnas angostas.
+        rc[3].markdown('<span class="iconbtn-anchor"></span>', unsafe_allow_html=True)
         if rc[3].button("", icon=":material/edit:", key=f"presb_{f['sub']}",
                         help="Modificar presupuesto"):
             st.session_state["pres_row"] = f
@@ -1677,13 +1696,13 @@ def _dialog_info():
     etiquetas = [d[5:] for d in dias]  # MM-DD
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#111111"))
+    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#18181B"))
     fig.add_trace(go.Scatter(x=etiquetas, y=ingresos, name="Ingresos (USD)", mode="lines+markers",
                              line=dict(color=C_OK, width=3)))
     fig.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10),
                       legend=dict(orientation="h", y=1.15),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                      font=dict(color="#111111"),
+                      font=dict(color="#18181B"),
                       xaxis=dict(gridcolor="#DED9D0"), yaxis=dict(gridcolor="#DED9D0"))
     st.plotly_chart(fig, use_container_width=True)
     if not serie:
@@ -1833,40 +1852,38 @@ _TABLA_CSS = """
 <style>
 .tbl-wrap { overflow-x:auto; border:1px solid #DED9D0; border-radius:18px;
     background:#FBFAF7; box-shadow:none; }
-table.ads { width:100%; border-collapse:collapse; font-size:12px; color:#111111;
+table.ads { width:100%; border-collapse:collapse; font-size:12px; color:#18181B;
     background:transparent; min-width:1080px; }
-table.ads thead th { text-align:left; font-weight:700; color:#6B6B6B; font-size:10px;
+table.ads thead th { text-align:left; font-weight:700; color:#71717A; font-size:10px;
     text-transform:uppercase; letter-spacing:.08em; padding:12px 12px; white-space:nowrap;
     font-family:'Space Mono',monospace;
     background:transparent; border-bottom:1px solid #DED9D0; }
 table.ads td { padding:11px 12px; border-bottom:1px solid #EAE6DD; vertical-align:middle; }
 table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
-.big { font-size:15px; font-weight:600; color:#111111; line-height:1.2; }
-.sub { font-size:12px; color:#6B6B6B; }
-.m-mint{ color:#D7FF3A; text-shadow:0 0 1px #2e3b00, 0 1px 1px rgba(0,0,0,.3); }
-.m-lav{ color:#111111; } .m-peri{ color:#111111; }
+.big { font-size:17px; font-weight:600; color:#18181B; line-height:1.15; }
+.sub { font-size:13.5px; color:#71717A; }
+.m-mint{ color:#18181B; } .m-lav{ color:#18181B; } .m-peri{ color:#18181B; }
 /* Alerta: solo el nombre, con difuminado rojo hacia la derecha */
 .name-alert{ background:linear-gradient(90deg, rgba(192,57,43,.16), rgba(192,57,43,0) 88%);
     border-radius:8px; padding:3px 10px; margin:-3px -10px; }
 .alert-badge{ display:inline-flex; align-items:center; justify-content:center;
-    width:20px; height:20px; border-radius:50%; background:#C0392B; color:#fff;
+    width:20px; height:20px; border-radius:50%; background:#E11D48; color:#fff;
     font-weight:800; font-size:12px; cursor:help; }
 .ok-dot{ display:inline-block; width:8px; height:8px; border-radius:50%;
     background:rgba(94,140,0,.6); }
 .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px;
     border-radius:999px; font-size:10.5px; font-weight:600; }
-.pill-run { background:rgba(215,255,58,.55); color:#111111; }
-.pill-off { background:rgba(17,17,17,.07); color:#6B6B6B; }
+.pill-run { background:rgba(215,255,58,.55); color:#18181B; }
+.pill-off { background:rgba(17,17,17,.07); color:#71717A; }
 .dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
 .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px;
-    font-weight:700; color:#111111; }
+    font-weight:700; color:#18181B; }
 .bar { height:5px; background:rgba(17,17,17,.08); border-radius:4px; margin-top:5px; overflow:hidden; }
-.bar > span { display:block; height:100%; background:#111111; }
-.chip { display:inline-block; background:rgba(215,255,58,.5); color:#111111; border-radius:6px;
+.bar > span { display:block; height:100%; background:#18181B; }
+.chip { display:inline-block; background:rgba(215,255,58,.5); color:#18181B; border-radius:6px;
     padding:2px 8px; font-size:10px; font-weight:600; }
-.up { color:#D7FF3A; text-shadow:0 0 1px #2e3b00, 0 1px 1px rgba(0,0,0,.3); }
-.down { color:#C0392B; } .flat { color:#6B6B6B; }
-.hcol { color:#6B6B6B; font-size:10px; font-weight:700; text-transform:uppercase;
+.up { color:#18181B; } .down { color:#E11D48; } .flat { color:#71717A; }
+.hcol { color:#71717A; font-size:10px; font-weight:700; text-transform:uppercase;
     letter-spacing:.06em; padding:4px 0 2px; }
 hr.rowline { margin:2px 0; border:none; border-top:1px solid #EAE6DD; }
 /* Fija (sticky) la fila de títulos de la tabla al hacer scroll hacia abajo.
@@ -1881,17 +1898,17 @@ hr.rowline { margin:2px 0; border:none; border-top:1px solid #EAE6DD; }
     margin-top:5px; border:1px solid transparent; }
 .perf-block.perf-alert{ border:1px solid rgba(192,57,43,.45); }
 .perf-line{ font-size:10.5px; color:#333333; line-height:1.35; }
-.perf-line b{ color:#111111; font-weight:600; }
-.perf-time{ color:#6B6B6B; }
+.perf-line b{ color:#18181B; font-weight:600; }
+.perf-time{ color:#71717A; }
 .perf-sep{ color:#b3ac9e; margin:0 1px; }
 .perf-warn{ margin-right:5px; animation:perfBlink 1s steps(1) infinite; }
 @keyframes perfBlink{ 50%{ opacity:.15; } }
 .perf-bar{ position:relative; height:5px; border-radius:3px;
     background:rgba(17,17,17,.08); margin-top:5px; }
 .perf-fill{ height:100%; border-radius:3px;
-    background:#111111; transition:width .4s ease; }
+    background:#18181B; transition:width .4s ease; }
 .perf-marker{ position:absolute; top:-1px; left:66.6%; width:2px; height:7px;
-    background:#111111; opacity:.8; border-radius:1px; }
+    background:#18181B; opacity:.8; border-radius:1px; }
 </style>
 """
 
@@ -2363,11 +2380,11 @@ _LOGIN_CSS = """
 /* ---------- Logo + título ---------- */
 .login-brand{ text-align:center; margin:0 0 22px; animation:fadeInDown .6s cubic-bezier(.2,.7,.3,1) both; }
 .login-logo{ width:76px; height:76px; margin:0 auto 20px; border-radius:22px;
-    background:#111111; display:flex; align-items:center; justify-content:center; }
+    background:#18181B; display:flex; align-items:center; justify-content:center; }
 .login-logo svg{ width:40px; height:40px; }
 .login-title{ font-family:'Anton',sans-serif; font-weight:400; font-size:40px; line-height:.92; margin:0;
-    text-transform:uppercase; letter-spacing:-.02em; color:#111111; }
-.login-sub{ font-family:'Space Mono',monospace; color:#6B6B6B; font-size:12px; margin:12px 0 0;
+    text-transform:uppercase; letter-spacing:-.02em; color:#18181B; }
+.login-sub{ font-family:'Space Mono',monospace; color:#71717A; font-size:12px; margin:12px 0 0;
     text-transform:uppercase; letter-spacing:.12em; }
 
 /* ---------- Tarjeta blanca ---------- */
@@ -2380,38 +2397,38 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
 div[data-testid="stVerticalBlockBorderWrapper"]::before{
     content:""; position:absolute; top:0; left:0; right:0; height:3px;
     background:#D7FF3A; }
-.login-cardtitle{ font-family:'Anton',sans-serif; font-weight:400; font-size:26px; color:#111111;
+.login-cardtitle{ font-family:'Anton',sans-serif; font-weight:400; font-size:26px; color:#18181B;
     text-transform:uppercase; letter-spacing:-.01em; margin:4px 0 14px; }
 
 /* Campos */
 .stTextInput{ animation:fadeInUp .5s ease both; }
 .stTextInput:nth-of-type(1){ animation-delay:.30s; }
 .stTextInput:nth-of-type(2){ animation-delay:.40s; }
-.stTextInput label p, .stTextInput label{ color:#6B6B6B !important; font-family:'Space Mono',monospace;
+.stTextInput label p, .stTextInput label{ color:#71717A !important; font-family:'Space Mono',monospace;
     font-size:11px !important; font-weight:400 !important; text-transform:uppercase; letter-spacing:.1em; }
 .stTextInput div[data-baseweb="input"], .stTextInput input{ background:#FBFAF7 !important;
     border-radius:10px !important; }
-.stTextInput input{ border:1px solid #CDC8BE !important; color:#111111 !important;
+.stTextInput input{ border:1px solid #CDC8BE !important; color:#18181B !important;
     padding:13px 14px !important; font-family:'Inter',sans-serif; }
-.stTextInput input:focus{ border-color:#111111 !important;
+.stTextInput input:focus{ border-color:#18181B !important;
     box-shadow:0 0 0 3px rgba(215,255,58,.55) !important; }
 .stTextInput div[data-baseweb="input"]{ border:none !important; }
 
 /* Botón: PÍLDORA neón lima (mismo look que el resto de la app) */
 .stButton{ animation:fadeInUp .5s ease .5s both; }
 .stButton>button{ position:relative; overflow:hidden; width:100%;
-    border:1px solid #111111 !important; border-radius:9999px !important;
-    background:#D7FF3A !important; color:#111111 !important;
+    border:1px solid #18181B !important; border-radius:9999px !important;
+    background:#D7FF3A !important; color:#18181B !important;
     font-family:'Space Mono',monospace; font-weight:700 !important; text-transform:uppercase;
     letter-spacing:.06em; padding:12px 0 !important;
     box-shadow:none !important; transition:transform .3s ease-out, box-shadow .3s ease-out; }
 .stButton>button:hover{ transform:translateY(-2px); box-shadow:0 10px 22px -10px rgba(17,17,17,.4) !important; }
-.stButton>button p{ color:#111111 !important; }
+.stButton>button p{ color:#18181B !important; }
 
 /* Features abajo */
 .login-feats2{ display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
     margin:20px auto 0; animation:fadeInUp .6s ease .7s both; }
-.login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#6B6B6B;
+.login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#71717A;
     font-family:'Space Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; }
 .login-feats2 .feat svg{ width:15px; height:15px; stroke:#5E8C00; opacity:.9; }
 .login-feats2 .sep{ width:1px; height:14px; background:#DED9D0; }
@@ -2603,8 +2620,8 @@ def _inject_css():
     @import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
     :root{
         --bg:#F3F1EC; --card:#FFFFFF; --card-brd:#DED9D0;
-        --txt:#111111; --sub:#6B6B6B; --ter:#9a968c;
-        --p1:#111111; --p2:#111111; --ok:#5E8C00; --warn:#C0392B; --plight:#111111;
+        --txt:#18181B; --sub:#71717A; --ter:#9a968c;
+        --p1:#18181B; --p2:#18181B; --ok:#5E8C00; --warn:#E11D48; --plight:#18181B;
         --signal:#D7FF3A;
     }
     html, body{ background:#F3F1EC; }
@@ -2650,10 +2667,10 @@ def _inject_css():
     /* Marca ACC arriba a la izquierda */
     .acc-brand{ display:flex; align-items:center; gap:11px; padding:2px 2px 8px; }
     .acc-logo{ width:42px; height:42px; border-radius:12px; flex:none;
-        background:#111111; display:flex; align-items:center; justify-content:center; }
+        background:#18181B; display:flex; align-items:center; justify-content:center; }
     .acc-logo svg{ width:23px; height:23px; }
     .acc-name{ font-family:'Anton',sans-serif; font-weight:400; font-size:18px; line-height:1;
-        text-transform:uppercase; letter-spacing:-.01em; color:#111111; }
+        text-transform:uppercase; letter-spacing:-.01em; color:#18181B; }
     .acc-name small{ display:block; font-family:'Space Mono',monospace; font-size:8.5px; font-weight:400;
         letter-spacing:.16em; color:var(--sub); -webkit-text-fill-color:var(--sub); margin-top:4px; }
     [data-testid="stSidebar"] h3{ color:var(--sub); text-transform:uppercase; font-size:12px;
@@ -2680,19 +2697,19 @@ def _inject_css():
     [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-secondary"],
     [data-testid="baseButton-primary"], [data-testid="baseButton-secondary"],
     button[kind="primary"], button[kind="secondary"]{
-        border-radius:9999px !important; font-weight:700 !important; color:#111111 !important;
+        border-radius:9999px !important; font-weight:700 !important; color:#18181B !important;
         transition:all .3s ease-out; background:#D7FF3A !important; background-color:#D7FF3A !important;
-        border:1px solid #111111 !important; box-shadow:none !important;
+        border:1px solid #18181B !important; box-shadow:none !important;
         font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.04em;
     }
     .stButton button:hover, .stDownloadButton button:hover, .stFormSubmitButton button:hover,
     [data-testid="stBaseButton-primary"]:hover, [data-testid="stBaseButton-secondary"]:hover,
     button[kind="primary"]:hover, button[kind="secondary"]:hover{
-        border-color:#111111 !important; transform:translateY(-2px);
+        border-color:#18181B !important; transform:translateY(-2px);
         box-shadow:0 10px 22px -10px rgba(17,17,17,.45) !important; filter:brightness(1.03);
     }
     .stButton button p, .stDownloadButton button p, .stFormSubmitButton button p,
-    button[kind="primary"] p, button[kind="secondary"] p{ color:#111111 !important; }
+    button[kind="primary"] p, button[kind="secondary"] p{ color:#18181B !important; }
 
     /* Inputs y selects: fondo blanco, borde línea, foco tinta con anillo neón sutil */
     .stTextInput input, .stNumberInput input, [data-baseweb="textarea"] textarea{
@@ -2700,7 +2717,7 @@ def _inject_css():
         border-radius:10px !important; color:var(--txt) !important;
     }
     .stTextInput input:focus, .stNumberInput input:focus{
-        border-color:#111111 !important;
+        border-color:#18181B !important;
         box-shadow:0 0 0 3px rgba(215,255,58,.55) !important;
     }
     input::placeholder{ color:var(--ter) !important; }
@@ -2715,7 +2732,7 @@ def _inject_css():
         box-shadow:none; transition:border-color .2s ease;
     }
     [data-testid="stExpander"]:hover, div[data-testid="stVerticalBlockBorderWrapper"]:hover{
-        border-color:#111111 !important;
+        border-color:#18181B !important;
     }
 
     /* Controles segmentados (Ver por / Estado): SIN recuadro, activo tinta + neón */
@@ -2724,39 +2741,43 @@ def _inject_css():
     button[data-variant="segmented_control"]{ color:var(--sub) !important;
         background:transparent !important; border:1px solid transparent !important; border-radius:9999px !important;
         font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.06em; font-size:12px; }
-    button[data-variant="segmented_control"]:hover{ color:#111111 !important; background:rgba(17,17,17,.05) !important; }
+    button[data-variant="segmented_control"]:hover{ color:#18181B !important; background:rgba(17,17,17,.05) !important; }
     button[data-variant="segmented_control"][data-selected="true"]{
-        background:var(--signal) !important; border:1px solid #111111 !important;
-        color:#111111 !important; }
+        background:var(--signal) !important; border:1px solid #18181B !important;
+        color:#18181B !important; }
 
     /* KPI cards: acento superior neón (clase .tcard de _render_totales) */
     .tcard{ position:relative; overflow:hidden; transition:border-color .2s ease, box-shadow .2s ease; }
     .tcard::before{ content:""; position:absolute; top:0; left:0; right:0; height:3px;
         background:var(--acc, var(--signal)); }
-    .tcard:hover{ border-color:#111111 !important; box-shadow:0 12px 26px -14px rgba(17,17,17,.22); }
+    .tcard:hover{ border-color:#18181B !important; box-shadow:0 12px 26px -14px rgba(17,17,17,.22); }
 
-    /* Botones de acción de la tabla (Info/Pres/Dup): píldora clara y visible. */
-    [data-testid="stPopoverButton"], .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)):not([kind="tertiary"]){
-        background:#ffffff !important; border:1px solid #CDC8BE !important;
-        border-radius:9px !important; color:#111111 !important; min-height:0 !important;
+    /* Botones de acción de la tabla (Info/Editar presupuesto): blancos, cuadrados
+       redondeados, NO píldora neón. Se identifican por un ANCLA (.iconbtn-anchor)
+       que se emite justo antes de cada botón -> selector de hermano, 100% fiable. */
+    [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button,
+    [data-testid="stPopoverButton"]{
+        background:#ffffff !important; background-color:#ffffff !important;
+        border:1px solid #CDC8BE !important; border-radius:9px !important;
+        color:#18181B !important; min-height:0 !important;
         padding:6px 8px !important; transition:all .15s ease;
     }
-    [data-testid="stPopoverButton"]:hover, .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)):not([kind="tertiary"]):hover{
-        background:var(--signal) !important; border-color:#111111 !important;
+    [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button:hover,
+    [data-testid="stPopoverButton"]:hover{
+        background:#D7FF3A !important; background-color:#D7FF3A !important; border-color:#18181B !important;
     }
-    [data-testid="stPopoverButton"] [data-testid="stIconMaterial"],
-    .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)) [data-testid="stIconMaterial"]{
-        color:#111111 !important;
+    [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button [data-testid="stIconMaterial"]{
+        color:#18181B !important;
     }
     /* El popover de "Rango de fechas": dropdown claro y visible (con su "📅 Hoy"). */
     [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]{
         padding:9px 12px !important; min-height:38px !important; width:100% !important;
         justify-content:space-between !important; font-size:14px !important;
         background:#ffffff !important; border:1px solid #CDC8BE !important;
-        color:#111111 !important; border-radius:10px !important;
+        color:#18181B !important; border-radius:10px !important;
     }
     [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]:hover{
-        border-color:#111111 !important;
+        border-color:#18181B !important;
     }
     /* Toggle On/Off: OFF gris claro, ON neón lima (mismo verde de los botones);
        perilla oscura para que se vea sobre el neón. */
@@ -2764,25 +2785,38 @@ def _inject_css():
         background:#C7C2B8 !important; transition:background .2s ease, box-shadow .2s ease;
     }
     [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type{
-        background:#D7FF3A !important; border:1px solid #111111 !important; box-shadow:none !important;
+        background:#D7FF3A !important; border:1px solid #18181B !important; box-shadow:none !important;
     }
     [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type > div{
-        background:#111111 !important;
+        background:#18181B !important;
     }
 
     /* Tabs (Configuración) */
     .stTabs [data-baseweb="tab-list"]{ gap:6px; border-bottom:1px solid var(--card-brd); }
     .stTabs [data-baseweb="tab"]{ border-radius:10px 10px 0 0; color:var(--sub); }
-    .stTabs [aria-selected="true"]{ color:#111111 !important; }
-    .stTabs [data-baseweb="tab-highlight"]{ background:#111111 !important; height:3px; }
+    .stTabs [aria-selected="true"]{ color:#18181B !important; }
+    .stTabs [data-baseweb="tab-highlight"]{ background:#18181B !important; height:3px; }
 
     [data-testid="stAlert"]{ border-radius:14px; }
-    [data-testid="stMetricValue"]{ font-family:'Anton',sans-serif; color:#111111; }
+    [data-testid="stMetricValue"]{ font-family:'Anton',sans-serif; color:#18181B; }
     [data-testid="stMetricLabel"]{ font-family:'Space Mono',monospace; text-transform:uppercase;
         letter-spacing:.08em; color:var(--sub); }
     hr{ border-color:var(--card-brd) !important; }
     </style>
     """, unsafe_allow_html=True)
+
+    # Fondo definitivo: ONDAS SVG neón arriba (marca de agua) + verde muy difuminado
+    # + papel. Va en un 2º inject (f-string) para poder incrustar el data-URI.
+    st.markdown(
+        "<style>.stApp, [data-testid=\"stAppViewContainer\"]{"
+        f"background:"
+        f"url(\"{_WAVES_URI}\") top center / 100% 440px no-repeat,"
+        "radial-gradient(52% 46% at 10% 8%, rgba(215,255,58,.20) 0%, transparent 60%),"
+        "radial-gradient(50% 46% at 90% 18%, rgba(94,140,0,.15) 0%, transparent 62%),"
+        "radial-gradient(58% 55% at 72% 92%, rgba(120,190,120,.16) 0%, transparent 64%),"
+        "#F3F1EC !important;"
+        "background-attachment:scroll, fixed, fixed, fixed !important;}</style>",
+        unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -3532,7 +3566,7 @@ def _timer_actualizacion():
     st.markdown(
         '<style>.tb-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:2px 0 4px;}'
         '.tb-pill{background:#FFFFFF;border:1px solid #DED9D0;'
-        "border-radius:7px;padding:2px 9px;font-size:11px;color:#6B6B6B;font-family:'Space Mono',monospace;}"
+        "border-radius:7px;padding:2px 9px;font-size:11px;color:#71717A;font-family:'Space Mono',monospace;}"
         '.tb-dot{color:#b3ac9e;margin:0 2px;}</style>'
         f'<div class="tb-row">{pills}</div>', unsafe_allow_html=True)
 
