@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v114 · 2026-08-24"
+APP_VERSION = "v115 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -357,7 +357,7 @@ def sidebar_estado(pagina: str = "dashboard"):
 # Páginas de la app (para la navegación propia en el pie de la barra lateral).
 _PAGINAS = {
     "dashboard": ("Dashboard", ":material/dashboard:"),
-    "ventas": ("Ventas (2 días)", ":material/receipt_long:"),
+    "ventas": ("Ventas (3 días)", ":material/receipt_long:"),
     "tutoriales": ("Tutoriales", ":material/school:"),
     "configuracion": ("Configuración", ":material/settings:"),
     "actividad": ("Bitácora", ":material/history:"),
@@ -3511,22 +3511,22 @@ def pagina_configuracion():
 
 
 def pagina_ventas():
-    """Historial de TODAS las ventas de los últimos 2 días (todas las fuentes)."""
-    st.title("Ventas — últimos 2 días")
+    """Historial de TODAS las ventas de los últimos 3 días (todas las fuentes)."""
+    st.title("Ventas — últimos 3 días")
     ahora = db.ahora()
-    # 2 días calendario: desde ayer 00:00 hasta ahora (hoy + ayer).
-    cutoff = ahora.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    # 3 días calendario: desde anteayer 00:00 hasta ahora (hoy + ayer + anteayer).
+    cutoff = ahora.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=2)
     ventas = db.ventas_en_rango(cutoff)
     st.caption(f"Todas las ventas registradas desde **{cutoff.strftime('%d/%m %H:%M')}** hasta ahora "
                "(todas las fuentes: Excel, Google Sheets, Supabase y manuales). "
                "Para corregir una venta mal subida usa **🩹 Corregir venta** en el Dashboard.")
     if not ventas:
-        st.info("No hay ventas registradas en los últimos 2 días.")
+        st.info("No hay ventas registradas en los últimos 3 días.")
         return
     nombres = {a["ad_id"]: a.get("nombre") for a in db.obtener_anuncios(solo_activos=False)}
     total = sum(float(v.get("valor_venta") or 0) for v in ventas)
     c1, c2 = st.columns(2)
-    c1.metric("Ventas (2 días)", f"{len(ventas)}")
+    c1.metric("Ventas (3 días)", f"{len(ventas)}")
     c2.metric("Total (moneda local)", _num(total))
 
     filas = []
@@ -3548,7 +3548,7 @@ def pagina_ventas():
     st.dataframe(df, hide_index=True, use_container_width=True, height=520,
                  column_config={"Valor": st.column_config.NumberColumn(format="%.2f")})
     st.download_button("⬇️ Descargar CSV", df.to_csv(index=False).encode("utf-8"),
-                       "ventas_2dias.csv", "text/csv")
+                       "ventas_3dias.csv", "text/csv")
 
 
 def pagina_actividad():
