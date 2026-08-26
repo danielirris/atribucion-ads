@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v104 · 2026-08-24"
+APP_VERSION = "v105 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -752,6 +752,10 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         _periodos = db.obtener_periodos(rep["ad_id"])
         presup_anterior = ((float(_periodos[-2]["presupuesto"]) * rate_c)
                            if len(_periodos) >= 2 else None)
+        _ncambios = max(0, len(_periodos) - 1)
+        # Clave de orden para "Últ. cambio": ISO del último cambio (vacío = sin cambios,
+        # queda al fondo). Ordena de más reciente a más antiguo.
+        _ultmod_ts = inicio_mod.isoformat() if (inicio_mod and _ncambios > 0) else ""
 
         # Serie de facturación de los últimos 7 días (en USD) para el mini gráfico.
         # Suma, por día, lo facturado por todos los anuncios del grupo.
@@ -781,6 +785,7 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "num": num, "ingresos": ingresos, "ingresos_nat": ingresos_nat,
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
             "creado": rep.get("fecha_creacion"), "ult_mod": inicio_mod,
+            "num_cambios": _ncambios, "ult_mod_ts": _ultmod_ts,
             "roas_mod": roas_mod, "ingresos_mod": imod_nat * rate_v,
             "gasto_mod": gmod_nat * rate_c, "ventas_mod": ventas_mod,
             "conv": ins.get("conversaciones"),
@@ -1114,6 +1119,7 @@ _COLS_SORT = {
     "ingresos": ("ingresos", False), "ganancia": ("ganancia", False),
     "roas": ("roas", False), "conv": ("conv", False), "costo_conv": ("costo_conv", False),
     "costo_venta": ("costo_venta", False), "cuenta": ("cuenta", True),
+    "ult_mod": ("ult_mod_ts", True),
 }
 
 
@@ -1443,17 +1449,19 @@ def _render_lista_nativa(filas, nivel):
     primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
     # Encabezado y datos usan la MISMA rejilla de columnas nativas -> alineación exacta.
     labels = [primera, "Cuenta", "Presup.", "Gastado", "Conv.", "C/conv",
-              "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS", "Fact. 7d"]
+              "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS", "Últ. cambio", "Fact. 7d"]
     keys = ["nombre", "cuenta", "presupuesto", "gasto", "conv", "costo_conv",
-            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas", "serie7"]
+            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas", "ult_mod", "serie7"]
     # Ancho de la columna del conjunto/anuncio (ampliable con el toggle).
     name_w = 5.2 if st.session_state.get("f_ancho_nombre") else 2.6
-    GRID_W = [name_w, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6, 1.1]
+    GRID_W = [name_w, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6, 1.05, 1.1]
     ayudas = {"Presup.": "Presupuesto diario", "Gastado": "Importe gastado",
               "C/conv": "Costo por conversación", "CPM": "CPM / CTR",
               "C/venta": "Costo por venta", "Ingr.": "Ingresos",
               "Util.": "Utilidad (ganancia)", "Conv.": "Conversaciones",
               "ROAS": "Retorno sobre la inversión",
+              "Últ. cambio": ("Fecha del último cambio de presupuesto y cuántos cambios lleva. "
+                              "Ordena por esta columna para ver los que más has modificado (más recientes primero)."),
               "Fact. 7d": ("Últimos 7 días: barras = facturación, línea = gasto. "
                            "Si la línea va por debajo de las barras, ese día hubo ganancia.")}
     st.markdown(
@@ -1579,6 +1587,16 @@ def _render_lista_nativa(filas, nivel):
             f'<div title="Últimos 7 días — {esc(_tip)}">{spark7}'
             f'<div class="sub" style="font-size:10.5px;margin-top:1px">'
             f'{_usd(tot7)}{_gasto_lbl}</div></div>')
+        # Celda "Últ. cambio": fecha del último cambio de presupuesto + nº de cambios.
+        _ult = f.get("ult_mod")
+        _nc = int(f.get("num_cambios") or 0)
+        if _ult is not None and _nc > 0:
+            _cambios_txt = f'{_nc} cambio{"s" if _nc != 1 else ""}'
+            ultmod_cell = (
+                f'<div class="big" style="font-size:13.5px">{_fecha_corta(_ult.isoformat())}</div>'
+                f'<div class="sub" style="font-size:11px">{_hace_amigable(_ult, ahora)} · {_cambios_txt}</div>')
+        else:
+            ultmod_cell = '<div class="sub" style="font-size:12px">Sin cambios</div>'
         cells = [
             nombre_html,
             f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>'
@@ -1594,6 +1612,7 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big" style="color:{"#1F8A4C" if g>=0 else "#E11D48"};font-weight:700">'
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0),
+            ultmod_cell,
             spark_cell,
         ]
         rc = st.columns(ACC, vertical_alignment="center")
