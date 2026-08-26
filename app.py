@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v106 · 2026-08-24"
+APP_VERSION = "v107 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1818,36 +1818,41 @@ def _pop_presupuesto(f):
                                 value=actual, step=1.0, key=f"pres_{f['sub']}")
     if (f["moneda"] or "USD").upper() != "USD":
         st.caption(f"Se enviará a Facebook ≈ {_num(nuevo / (f['rate_c'] or 1))} {f['moneda']}")
-    # VIGILANCIA: por defecto SIN marcar → el cambio de presupuesto quita la vigilancia.
-    # Si lo marcas, el anuncio sigue subrayado (vigilado) tras el cambio.
     _vig_now = any(str(a) in _get_vigilados() for a in f.get("ad_ids", []))
     if _vig_now:
         st.caption("👁️ Este anuncio está **en vigilancia** ahora mismo.")
-    vig_chk = st.checkbox("👁️ Seguir vigilando este anuncio después del cambio",
-                          value=False, key=f"vigchk_{f['sub']}",
-                          help="Si lo marcas, queda subrayado (vigilancia). Si NO lo marcas, "
-                               "la vigilancia se quita con este cambio de presupuesto.")
-    if st.button("Aplicar", type="primary", key=f"presbtn_{f['sub']}",
-                 use_container_width=True):
+
+    def _aplicar_cambio(vigilar: bool):
         # Rápido: aplica local al instante y empuja a Facebook en SEGUNDO PLANO.
         rate = f.get("rate_c") or 1.0
         nativo = (nuevo / rate) if rate else nuevo
         for aid in f["ad_ids"]:
             db.cambiar_periodo(aid, nativo)
-        _set_vigilancia(f["ad_ids"], vig_chk)     # marca/quita vigilancia según el check
+        _set_vigilancia(f["ad_ids"], vigilar)     # vigila o quita según el botón
         _bitacora_presupuesto(f, actual, nuevo)   # registra en la bitácora
+        _ojo = " · 👁️ en vigilancia" if vigilar else ""
         hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
         if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
             fb.actualizar_presupuesto_async(
                 f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
                 f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40])
             st.session_state["_estado_msg"] = (
-                "ok", f"Presupuesto de '{str(f['nombre'])[:35]}' → {_usd(nuevo)}. "
+                "ok", f"Presupuesto de '{str(f['nombre'])[:35]}' → {_usd(nuevo)}.{_ojo} "
                 "Aplicándose en Facebook en segundo plano.")
         else:
             st.session_state["_estado_msg"] = (
-                "ok", "Presupuesto guardado localmente (sin conexión de Facebook).")
+                "ok", f"Presupuesto guardado localmente (sin conexión de Facebook).{_ojo}")
         st.rerun()
+
+    # DOS botones: cambiar sin más, o vigilar (subrayar) + cambiar.
+    cbt1, cbt2 = st.columns([1, 1.25])
+    if cbt1.button("Cambiar presupuesto", type="primary", key=f"presbtn_{f['sub']}",
+                   use_container_width=True):
+        _aplicar_cambio(False)
+    if cbt2.button("👁️ Vigilar y cambiar presupuesto", key=f"presbtnvig_{f['sub']}",
+                   use_container_width=True,
+                   help="Cambia el presupuesto Y deja el anuncio subrayado en vigilancia."):
+        _aplicar_cambio(True)
 
 
 def _pop_duplicar(f):
