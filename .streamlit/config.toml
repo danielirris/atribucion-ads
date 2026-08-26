@@ -17,5 +17,9 @@ enableStaticServing = true
 gatherUsageStats = false
 
 [theme]
-base = "dark"
-primaryColor = "#3b82f6"
+base = "light"
+primaryColor = "#111111"
+backgroundColor = "#F3F1EC"
+secondaryBackgroundColor = "#FAF9F6"
+textColor = "#111111"
+font = "sans serif"
