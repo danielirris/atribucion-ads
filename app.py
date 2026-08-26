@@ -34,7 +34,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v101 · 2026-08-24"
+APP_VERSION = "v102 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -107,7 +107,7 @@ def _roas_color(r):
     if r is None:
         return "#9a968c"
     if r >= 2:
-        return C_OK
+        return "#D7FF3A"      # neón (el verde de los botones); en números grandes va con contorno
     if r >= 1:
         return C_WARN
     return C_BAD
@@ -116,10 +116,8 @@ def _roas_color(r):
 def _roas_pill(r):
     """Badge tipo pill para el ROAS sobre papel: verde / ámbar / rojo (tinta legible)."""
     r = r or 0.0
-    if r >= 5:
-        bg, c = "rgba(215,255,58,.55)", "#111111"   # excelente → acento neón
-    elif r > 2:
-        bg, c = "rgba(94,140,0,.14)", C_OK
+    if r > 2:
+        bg, c = "rgba(215,255,58,.6)", "#111111"     # bueno/excelente → neón + texto negro
     elif r >= 1:
         bg, c = "rgba(180,83,9,.14)", C_WARN
     else:
@@ -148,11 +146,11 @@ def _spark_svg(serie, color="#22c55e", w=78, h=26):
 
 
 def _salud_color_vivo(r):
-    """Color de las barras del mini-gráfico según salud (legible sobre papel)."""
+    """Color de las barras del mini-gráfico según salud."""
     if r is None:
         return "#9a968c"
     if r >= 2:
-        return C_OK           # verde
+        return "#D7FF3A"      # neón (mismo verde de los botones)
     if r >= 1:
         return C_WARN         # ámbar
     return C_BAD              # rojo
@@ -1198,16 +1196,19 @@ def _render_totales(filas, sin_adid=None):
     tarjetas = [
         ("Gasto total", _usd(gasto), "#7C3AED"),          # violeta
         ("Ventas", f"{num:,}".replace(",", "."), "#2563EB"),  # azul
-        ("Ingresos", _usd(ingresos), "#5E8C00"),          # verde
-        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo
+        ("Ingresos", _usd(ingresos), "#D7FF3A"),          # verde neón
+        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo (verde = neón)
         ("Costo/venta", _usd(costo_venta), "#B45309"),    # ámbar
         ("Costo/conv", _usd(costo_conv), "#0E7490"),      # teal
         ("Ganancia", ("+" if ganancia >= 0 else "") + _usd(ganancia),
-         C_OK if ganancia >= 0 else C_BAD),               # verde/rojo
+         "#D7FF3A" if ganancia >= 0 else C_BAD),          # verde neón / rojo
     ]
+    # Los verdes neón llevan un contorno oscuro (clase .g) para que se lean sobre blanco.
+    def _cls(color):
+        return "tval g" if str(color).upper() == "#D7FF3A" else "tval"
     cards = "".join(
         f'<div class="tcard" style="--acc:{c}"><div class="tlbl">{t}</div>'
-        f'<div class="tval" style="color:{c}">{v}</div>'
+        f'<div class="{_cls(c)}" style="color:{c}">{v}</div>'
         + (f'<div class="tnat">{nat.get(t)}</div>' if nat.get(t) else '')
         + '</div>'
         for t, v, c in tarjetas)
@@ -1218,6 +1219,8 @@ def _render_totales(filas, sin_adid=None):
         ".tlbl{font-family:'Space Mono',monospace;font-size:10.5px;text-transform:uppercase;"
         'letter-spacing:.1em;color:#6B6B6B;font-weight:400;}'
         ".tval{font-family:Anton,sans-serif;font-weight:400;font-size:34px;margin-top:8px;line-height:1;}"
+        # Contorno oscuro para el neón sobre fondo blanco (se lee nítido).
+        '.tval.g{-webkit-text-stroke:1px #3a4a00;text-shadow:0 1px 0 rgba(0,0,0,.25);}'
         ".tnat{font-family:'Space Mono',monospace;font-size:11px;font-weight:400;"
         'color:#9a968c;margin-top:6px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
@@ -1568,8 +1571,11 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big">{f["num"]}</div>',
             costov,
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
-            f'<div class="big" style="color:{C_OK if g>=0 else C_BAD};font-weight:700">'
-            f'{"+" if g>=0 else ""}{_usd(g)}</div>',
+            (f'<div class="big" style="color:#D7FF3A;font-weight:700;'
+             f'text-shadow:0 0 1px #2e3b00,0 1px 1px rgba(0,0,0,.3)">'
+             if g >= 0 else
+             f'<div class="big" style="color:{C_BAD};font-weight:700">')
+            + f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0),
             spark_cell,
         ]
@@ -1837,7 +1843,8 @@ table.ads td { padding:11px 12px; border-bottom:1px solid #EAE6DD; vertical-alig
 table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
 .big { font-size:15px; font-weight:600; color:#111111; line-height:1.2; }
 .sub { font-size:12px; color:#6B6B6B; }
-.m-mint{ color:#5E8C00; } .m-lav{ color:#111111; } .m-peri{ color:#111111; }
+.m-mint{ color:#D7FF3A; text-shadow:0 0 1px #2e3b00, 0 1px 1px rgba(0,0,0,.3); }
+.m-lav{ color:#111111; } .m-peri{ color:#111111; }
 /* Alerta: solo el nombre, con difuminado rojo hacia la derecha */
 .name-alert{ background:linear-gradient(90deg, rgba(192,57,43,.16), rgba(192,57,43,0) 88%);
     border-radius:8px; padding:3px 10px; margin:-3px -10px; }
@@ -1848,7 +1855,7 @@ table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
     background:rgba(94,140,0,.6); }
 .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px;
     border-radius:999px; font-size:10.5px; font-weight:600; }
-.pill-run { background:rgba(94,140,0,.14); color:#5E8C00; }
+.pill-run { background:rgba(215,255,58,.55); color:#111111; }
 .pill-off { background:rgba(17,17,17,.07); color:#6B6B6B; }
 .dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
 .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px;
@@ -1857,7 +1864,8 @@ table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
 .bar > span { display:block; height:100%; background:#111111; }
 .chip { display:inline-block; background:rgba(215,255,58,.5); color:#111111; border-radius:6px;
     padding:2px 8px; font-size:10px; font-weight:600; }
-.up { color:#5E8C00; } .down { color:#C0392B; } .flat { color:#6B6B6B; }
+.up { color:#D7FF3A; text-shadow:0 0 1px #2e3b00, 0 1px 1px rgba(0,0,0,.3); }
+.down { color:#C0392B; } .flat { color:#6B6B6B; }
 .hcol { color:#6B6B6B; font-size:10px; font-weight:700; text-transform:uppercase;
     letter-spacing:.06em; padding:4px 0 2px; }
 hr.rowline { margin:2px 0; border:none; border-top:1px solid #EAE6DD; }
@@ -2599,27 +2607,18 @@ def _inject_css():
         --p1:#111111; --p2:#111111; --ok:#5E8C00; --warn:#C0392B; --plight:#111111;
         --signal:#D7FF3A;
     }
-    html, body, .stApp, [data-testid="stAppViewContainer"]{ color:var(--txt); background:var(--bg) !important; }
-    [data-testid="stHeader"]{ background:transparent !important; }
-
-    /* ---------- Fondo papel con verde MUY difuminado (no plano) ---------- */
-    .app-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:#F3F1EC; }
-    .app-bg .aurora{ position:absolute; inset:-35%; opacity:.9;
+    html, body{ background:#F3F1EC; }
+    /* Fondo verde MUY difuminado HORNEADO en el contenedor (siempre visible, no plano) */
+    .stApp, [data-testid="stAppViewContainer"]{ color:var(--txt) !important;
         background:
-          radial-gradient(40% 40% at 18% 22%, rgba(94,140,0,.16) 0%, transparent 62%),
-          radial-gradient(38% 38% at 78% 30%, rgba(14,116,105,.13) 0%, transparent 62%),
-          radial-gradient(46% 46% at 62% 82%, rgba(120,190,120,.15) 0%, transparent 64%),
-          radial-gradient(30% 30% at 88% 68%, rgba(215,255,58,.16) 0%, transparent 60%);
-        filter:blur(80px); animation:paperAurora 30s ease-in-out infinite alternate; }
-    .app-bg .grain{ position:absolute; inset:0; opacity:.5;
-        background-image:linear-gradient(rgba(17,17,17,.022) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(17,17,17,.022) 1px, transparent 1px);
-        background-size:52px 52px;
-        -webkit-mask:radial-gradient(circle at 50% 20%, #000, transparent 92%);
-        mask:radial-gradient(circle at 50% 20%, #000, transparent 92%); }
-    @keyframes paperAurora{ 0%{transform:translate(-2%,-1%) scale(1.05)} 100%{transform:translate(2%,3%) scale(1.15)} }
-    [data-testid="stAppViewContainer"] .main .block-container{ position:relative; z-index:1; }
-    [data-testid="stSidebar"]{ position:relative; z-index:1; }
+          radial-gradient(52% 46% at 10% 6%, rgba(215,255,58,.24) 0%, transparent 60%),
+          radial-gradient(48% 46% at 90% 16%, rgba(94,140,0,.18) 0%, transparent 62%),
+          radial-gradient(58% 55% at 72% 92%, rgba(120,190,120,.20) 0%, transparent 64%),
+          radial-gradient(44% 42% at 26% 84%, rgba(14,116,105,.14) 0%, transparent 60%),
+          #F3F1EC !important;
+        background-attachment:fixed !important; }
+    [data-testid="stHeader"]{ background:transparent !important; }
+    [data-testid="stMain"]{ background:transparent !important; }
 
     /* Scrollbar delgado neutro */
     ::-webkit-scrollbar{ width:9px; height:9px; }
@@ -2675,21 +2674,25 @@ def _inject_css():
     [data-testid="stStatusWidget"]{ display:none !important; }
 
     /* TODOS los botones: PÍLDORA neón lima con borde y texto negro
-       (mismo look que el segmentado activo "CONJUNTO DE ANUNCIOS"). Se eleva al hover. */
-    .stButton>button, .stDownloadButton>button, .stFormSubmitButton>button,
-    .stButton>button[kind="primary"], .stFormSubmitButton>button[kind="primary"]{
+       (mismo look que el segmentado activo "CONJUNTO DE ANUNCIOS"). Se eleva al hover.
+       Selectores amplios + color hardcodeado para ganarle al tema primario negro. */
+    .stButton button, .stDownloadButton button, .stFormSubmitButton button,
+    [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-secondary"],
+    [data-testid="baseButton-primary"], [data-testid="baseButton-secondary"],
+    button[kind="primary"], button[kind="secondary"]{
         border-radius:9999px !important; font-weight:700 !important; color:#111111 !important;
-        transition:all .3s ease-out; background:var(--signal) !important;
+        transition:all .3s ease-out; background:#D7FF3A !important; background-color:#D7FF3A !important;
         border:1px solid #111111 !important; box-shadow:none !important;
         font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.04em;
     }
-    .stButton>button:hover, .stDownloadButton>button:hover, .stFormSubmitButton>button:hover,
-    .stButton>button[kind="primary"]:hover, .stFormSubmitButton>button[kind="primary"]:hover{
+    .stButton button:hover, .stDownloadButton button:hover, .stFormSubmitButton button:hover,
+    [data-testid="stBaseButton-primary"]:hover, [data-testid="stBaseButton-secondary"]:hover,
+    button[kind="primary"]:hover, button[kind="secondary"]:hover{
         border-color:#111111 !important; transform:translateY(-2px);
         box-shadow:0 10px 22px -10px rgba(17,17,17,.45) !important; filter:brightness(1.03);
     }
-    .stButton>button p, .stDownloadButton>button p, .stFormSubmitButton>button p,
-    .stButton>button[kind="primary"] p{ color:#111111 !important; }
+    .stButton button p, .stDownloadButton button p, .stFormSubmitButton button p,
+    button[kind="primary"] p, button[kind="secondary"] p{ color:#111111 !important; }
 
     /* Inputs y selects: fondo blanco, borde línea, foco tinta con anillo neón sutil */
     .stTextInput input, .stNumberInput input, [data-baseweb="textarea"] textarea{
@@ -2755,12 +2758,16 @@ def _inject_css():
     [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]:hover{
         border-color:#111111 !important;
     }
-    /* Toggle On/Off: OFF gris claro, ON verde (transición suave) */
+    /* Toggle On/Off: OFF gris claro, ON neón lima (mismo verde de los botones);
+       perilla oscura para que se vea sobre el neón. */
     [data-testid="stCheckbox"] label > div:first-of-type{
         background:#C7C2B8 !important; transition:background .2s ease, box-shadow .2s ease;
     }
     [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type{
-        background:#5E8C00 !important; box-shadow:none !important;
+        background:#D7FF3A !important; border:1px solid #111111 !important; box-shadow:none !important;
+    }
+    [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type > div{
+        background:#111111 !important;
     }
 
     /* Tabs (Configuración) */
@@ -2775,7 +2782,6 @@ def _inject_css():
         letter-spacing:.08em; color:var(--sub); }
     hr{ border-color:var(--card-brd) !important; }
     </style>
-    <div class="app-bg"><div class="aurora"></div><div class="grain"></div></div>
     """, unsafe_allow_html=True)
 
 
