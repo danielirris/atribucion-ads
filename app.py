@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v115 · 2026-08-24"
+APP_VERSION = "v116 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3545,10 +3545,44 @@ def pagina_ventas():
             "Fuente": v.get("hoja_origen") or "",
         })
     df = pd.DataFrame(filas)
-    st.dataframe(df, hide_index=True, use_container_width=True, height=520,
-                 column_config={"Valor": st.column_config.NumberColumn(format="%.2f")})
-    st.download_button("⬇️ Descargar CSV", df.to_csv(index=False).encode("utf-8"),
-                       "ventas_3dias.csv", "text/csv")
+    st.caption("✏️ Editable: corrige el **Valor** de cualquier venta, o borra filas con el icono "
+               "🗑️ de la izquierda. Luego pulsa **Guardar cambios**.")
+    edited = st.data_editor(
+        df, hide_index=True, use_container_width=True, height=520, num_rows="dynamic",
+        key="ventas_editor",
+        disabled=["#", "Fecha/hora", "Anuncio", "ad_id", "Producto", "País", "Fuente"],
+        column_config={"Valor": st.column_config.NumberColumn(
+            "Valor", format="%.2f", min_value=0.0, help="Corrige aquí el valor mal importado.")})
+
+    cga, cgb = st.columns([1.2, 3])
+    if cga.button("💾 Guardar cambios", type="primary", use_container_width=True):
+        orig = {int(r["#"]): float(r["Valor"]) for r in filas if r.get("#") is not None}
+        vistos, n_upd = set(), 0
+        for _, row in edited.iterrows():
+            vid = row.get("#")
+            if vid is None or (isinstance(vid, float) and pd.isna(vid)):
+                continue  # fila agregada a mano: no se inserta desde aquí
+            vid = int(vid)
+            vistos.add(vid)
+            try:
+                nuevo = float(row.get("Valor") or 0)
+            except (TypeError, ValueError):
+                continue
+            if vid in orig and abs(nuevo - orig[vid]) > 1e-9:
+                db.actualizar_valor_venta(vid, nuevo)
+                n_upd += 1
+        borradas = set(orig) - vistos      # filas eliminadas en el editor
+        for vid in borradas:
+            db.borrar_venta(vid)
+        if n_upd or borradas:
+            db.set_config("ventas_cambio", db.a_texto(db.ahora()))  # refresca el dashboard
+            st.success(f"Guardado: {n_upd} corregida(s), {len(borradas)} borrada(s).")
+            time.sleep(0.8)
+            st.rerun()
+        else:
+            st.info("No hubo cambios que guardar.")
+    cgb.download_button("⬇️ Descargar CSV", df.to_csv(index=False).encode("utf-8"),
+                        "ventas_3dias.csv", "text/csv", use_container_width=True)
 
 
 def pagina_actividad():
