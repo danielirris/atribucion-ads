@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v107 · 2026-08-24"
+APP_VERSION = "v108 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -518,6 +518,10 @@ def sidebar_filtros():
     n_act = sum(bool(st.session_state.get(k)) for k in
                 ("f_business", "f_cuenta", "f_campana", "f_producto")) \
         + (1 if st.session_state.get("f_pais", "Todos") not in ("Todos", None) else 0)
+    # Filtro rápido: mostrar solo los anuncios en vigilancia.
+    n_vig = len(_get_vigilados())
+    st.sidebar.toggle(f"👁️ Solo en vigilancia ({n_vig})", key="f_solo_vig",
+                      help="Muestra únicamente los anuncios que tienes marcados en vigilancia.")
     titulo = f"🎚️ Filtros ({n_act})" if n_act else "🎚️ Filtros"
     with st.sidebar.expander(titulo, expanded=False):
         st.multiselect("Business", business, key="f_business",
@@ -1027,6 +1031,10 @@ def seccion_vista_general():
         anuncios = [a for a in anuncios if _tiene_producto(a)]
     if pais_sel != "Todos":
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
+    # Solo en vigilancia: deja únicamente los anuncios marcados.
+    if st.session_state.get("f_solo_vig"):
+        _vig = _get_vigilados()
+        anuncios = [a for a in anuncios if str(a.get("ad_id")) in _vig]
 
     # Búsqueda: sobre los anuncios crudos, en TODOS los nombres (anuncio, conjunto,
     # campaña, cuenta) y el ID; insensible a acentos y por palabras (todas deben estar).
@@ -1509,7 +1517,7 @@ def _render_lista_nativa(filas, nivel):
     sort_c = st.query_params.get("sort", "roas")
     dir_c = st.query_params.get("dir", "desc")
 
-    ACC = [0.5, 10.5, 0.55, 0.55, 0.55]
+    ACC = [0.5, 11.0, 0.55, 0.55]
     vigilados = _get_vigilados()
     # Marcador para fijar (sticky) la fila de títulos al hacer scroll.
     st.markdown('<span class="tbl-hdr-anchor"></span>', unsafe_allow_html=True)
@@ -1536,7 +1544,6 @@ def _render_lista_nativa(filas, nivel):
                 st.rerun()
     hc[2].markdown('<div class="h2" style="text-align:center">Info</div>', unsafe_allow_html=True)
     hc[3].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
-    hc[4].markdown('<div class="h2" style="text-align:center">Vig.</div>', unsafe_allow_html=True)
     st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
     for f in filas:
@@ -1561,9 +1568,16 @@ def _render_lista_nativa(filas, nivel):
                    else "Apagado" if est_col == C_BAD else "Mixto (unos activos)")
         # El nombre siempre en tinta (legible); el estado lo comunica el punto de color.
         nombre_col = C_INK
-        # Fecha de creación (se mantiene bajo Cuenta).
+        # Cuenta + fecha de creación en UNA sola línea compacta (sin guión, "CRE.").
         creado = _fecha_corta(f.get("creado"))
-        creado_mini = f'<div class="meta-mini" title="Fecha de creación">Creado <b>{creado}</b></div>'
+        _cta = esc(str(f["cuenta"]))[:16]
+        if _cta and _cta != "—":
+            cuenta_cell = (f'<div class="sub" style="white-space:nowrap;overflow:hidden;'
+                           f'text-overflow:ellipsis;font-size:12px">{_cta}'
+                           f'<span style="color:#9a968c;margin-left:7px">CRE. {creado}</span></div>')
+        else:
+            cuenta_cell = (f'<div class="sub" style="white-space:nowrap;font-size:12px;'
+                           f'color:#9a968c">CRE. {creado}</div>')
         # El rendimiento "desde el último cambio" ya NO va fijo en la fila (ruido
         # visual); sale en el tooltip del botón ⓘ (abajo) y en la card de detalle.
         # Degradado rojo SOLO para los que van muy mal: gastan y su ROAS < 1 (pierden).
@@ -1628,8 +1642,7 @@ def _render_lista_nativa(filas, nivel):
             ultmod_cell = '<div class="sub" style="font-size:12px">Sin cambios</div>'
         cells = [
             nombre_html,
-            f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>'
-            + creado_mini,
+            cuenta_cell,
             _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
             gastado_cell,
             f'<div class="big">{conv}</div>',
@@ -1667,14 +1680,6 @@ def _render_lista_nativa(filas, nivel):
                         help="Modificar presupuesto"):
             st.session_state["pres_row"] = f
             _dialog_presupuesto()
-        # VIGILANCIA: marcar/quitar. Subraya el anuncio sin apagarlo.
-        rc[4].markdown('<span class="iconbtn-anchor"></span>', unsafe_allow_html=True)
-        _vig_icon = ":material/visibility:" if es_vig else ":material/visibility_off:"
-        _vig_help = ("En vigilancia — clic para quitar" if es_vig
-                     else "Vigilar este anuncio (lo subraya, sin apagarlo)")
-        if rc[4].button("", icon=_vig_icon, key=f"vig_{f['sub']}", help=_vig_help):
-            _set_vigilancia(f["ad_ids"], not es_vig)
-            st.rerun()
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
 
