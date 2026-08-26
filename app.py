@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v105 · 2026-08-24"
+APP_VERSION = "v106 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1440,6 +1440,25 @@ def _barra_acciones_conjunto(filas):
             st.rerun()
 
 
+def _get_vigilados() -> set:
+    """Conjunto de ad_ids marcados en VIGILANCIA (persistido en config_kv)."""
+    try:
+        return set(json.loads(db.get_config("vigilados", "") or "[]"))
+    except Exception:
+        return set()
+
+
+def _set_vigilancia(ad_ids, activar: bool) -> None:
+    """Marca/desmarca en vigilancia todos los ad_ids de un anuncio/grupo."""
+    v = _get_vigilados()
+    for a in (ad_ids or []):
+        if activar:
+            v.add(str(a))
+        else:
+            v.discard(str(a))
+    db.set_config("vigilados", json.dumps(sorted(v), ensure_ascii=False))
+
+
 def _render_lista_nativa(filas, nivel):
     esc = _html.escape
     ahora = db.ahora()
@@ -1490,7 +1509,8 @@ def _render_lista_nativa(filas, nivel):
     sort_c = st.query_params.get("sort", "roas")
     dir_c = st.query_params.get("dir", "desc")
 
-    ACC = [0.5, 11.0, 0.55, 0.55]
+    ACC = [0.5, 10.5, 0.55, 0.55, 0.55]
+    vigilados = _get_vigilados()
     # Marcador para fijar (sticky) la fila de títulos al hacer scroll.
     st.markdown('<span class="tbl-hdr-anchor"></span>', unsafe_allow_html=True)
     hc = st.columns(ACC, vertical_alignment="center")
@@ -1516,6 +1536,7 @@ def _render_lista_nativa(filas, nivel):
                 st.rerun()
     hc[2].markdown('<div class="h2" style="text-align:center">Info</div>', unsafe_allow_html=True)
     hc[3].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
+    hc[4].markdown('<div class="h2" style="text-align:center">Vig.</div>', unsafe_allow_html=True)
     st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
     for f in filas:
@@ -1551,6 +1572,13 @@ def _render_lista_nativa(filas, nivel):
         # Nombre coloreado por ESTADO (verde activo / rojo apagado / amarillo mixto);
         # acento verde a la izquierda si ROAS > 5.
         borde = f"border-left:3px solid {C_OK};padding-left:8px;" if roas_alto else ""
+        # ¿Este anuncio está EN VIGILANCIA? (cualquiera de sus ad_ids marcado).
+        es_vig = any(str(a) in vigilados for a in f.get("ad_ids", []))
+        # Subrayado de atención + ojo cuando está vigilado.
+        vig_style = ("text-decoration:underline;text-decoration-color:#6D28D9;"
+                     "text-decoration-thickness:2px;text-underline-offset:3px;") if es_vig else ""
+        ojo_html = ('<span title="En vigilancia" style="color:#6D28D9;margin-right:5px;'
+                    'font-size:14px;vertical-align:middle">👁️</span>') if es_vig else ""
         # Punto de estado JUNTO al nombre (verde activo / rojo apagado / ámbar mixto).
         dot_html = (f'<span title="{est_txt}" style="color:{est_col};font-size:12px;'
                     f'margin-right:7px;vertical-align:middle;line-height:1">●</span>')
@@ -1560,7 +1588,8 @@ def _render_lista_nativa(filas, nivel):
                    f'margin-top:2px;letter-spacing:.02em">{esc(str(f["sub"]))}</div>')
         nombre_html = (f'<div class="ad-name" style="{borde}color:{nombre_col};font-weight:600;'
                        f'font-size:17px;line-height:1.18;white-space:normal;word-break:break-word">'
-                       f'{dot_html}{esc(str(f["nombre"]))[:120]}</div>{id_html}')
+                       f'{dot_html}{ojo_html}<span style="{vig_style}">'
+                       f'{esc(str(f["nombre"]))[:120]}</span></div>{id_html}')
         if muy_mal:
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
                            f'debajo de 1x con gasto. Considera pausar o ajustar.">'
@@ -1638,6 +1667,14 @@ def _render_lista_nativa(filas, nivel):
                         help="Modificar presupuesto"):
             st.session_state["pres_row"] = f
             _dialog_presupuesto()
+        # VIGILANCIA: marcar/quitar. Subraya el anuncio sin apagarlo.
+        rc[4].markdown('<span class="iconbtn-anchor"></span>', unsafe_allow_html=True)
+        _vig_icon = ":material/visibility:" if es_vig else ":material/visibility_off:"
+        _vig_help = ("En vigilancia — clic para quitar" if es_vig
+                     else "Vigilar este anuncio (lo subraya, sin apagarlo)")
+        if rc[4].button("", icon=_vig_icon, key=f"vig_{f['sub']}", help=_vig_help):
+            _set_vigilancia(f["ad_ids"], not es_vig)
+            st.rerun()
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
 
@@ -1781,6 +1818,15 @@ def _pop_presupuesto(f):
                                 value=actual, step=1.0, key=f"pres_{f['sub']}")
     if (f["moneda"] or "USD").upper() != "USD":
         st.caption(f"Se enviará a Facebook ≈ {_num(nuevo / (f['rate_c'] or 1))} {f['moneda']}")
+    # VIGILANCIA: por defecto SIN marcar → el cambio de presupuesto quita la vigilancia.
+    # Si lo marcas, el anuncio sigue subrayado (vigilado) tras el cambio.
+    _vig_now = any(str(a) in _get_vigilados() for a in f.get("ad_ids", []))
+    if _vig_now:
+        st.caption("👁️ Este anuncio está **en vigilancia** ahora mismo.")
+    vig_chk = st.checkbox("👁️ Seguir vigilando este anuncio después del cambio",
+                          value=False, key=f"vigchk_{f['sub']}",
+                          help="Si lo marcas, queda subrayado (vigilancia). Si NO lo marcas, "
+                               "la vigilancia se quita con este cambio de presupuesto.")
     if st.button("Aplicar", type="primary", key=f"presbtn_{f['sub']}",
                  use_container_width=True):
         # Rápido: aplica local al instante y empuja a Facebook en SEGUNDO PLANO.
@@ -1788,6 +1834,7 @@ def _pop_presupuesto(f):
         nativo = (nuevo / rate) if rate else nuevo
         for aid in f["ad_ids"]:
             db.cambiar_periodo(aid, nativo)
+        _set_vigilancia(f["ad_ids"], vig_chk)     # marca/quita vigilancia según el check
         _bitacora_presupuesto(f, actual, nuevo)   # registra en la bitácora
         hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
         if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
