@@ -877,6 +877,19 @@ def ingresos_diarios_por_ad(desde: datetime,
     return out
 
 
+def ventas_en_rango(cutoff: datetime, hasta: Optional[datetime] = None) -> list:
+    """Todas las ventas con hora_venta >= cutoff (y < hasta si se da), recientes primero."""
+    cond = ["hora_venta >= ?"]
+    args = [a_texto(cutoff)]
+    if hasta is not None:
+        cond.append("hora_venta < ?"); args.append(a_texto(hasta))
+    where = " WHERE " + " AND ".join(cond)
+    with _conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM ventas{where} ORDER BY hora_venta DESC, id DESC", args)
+        return [dict(r) for r in rows]
+
+
 def ventas_recientes(limite: int = 40) -> list:
     """Últimas ventas insertadas (más recientes primero), para corregir errores."""
     with _conn() as conn:
