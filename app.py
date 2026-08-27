@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v117 · 2026-08-24"
+APP_VERSION = "v118 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -298,6 +298,11 @@ def _recargar_facebook():
     """Trae datos nuevos de Facebook (se usa desde el botón del top-right)."""
     with st.spinner("Consultando Facebook (todas las conexiones)..."):
         r = fb.cargar_todo()
+        # Limpia anuncios de conexiones (business) ya eliminadas (cuentas fantasma).
+        try:
+            _huerf = db.borrar_anuncios_huerfanos()
+        except Exception:
+            _huerf = 0
         try:
             _insights_cache.clear()
             _gasto_diario_cache.clear()
@@ -305,6 +310,8 @@ def _recargar_facebook():
             pass
     if r["num_anuncios"]:
         st.toast(f"{r['num_anuncios']} anuncios de {r['num_cuentas']} cuenta(s).", icon="✅")
+    if _huerf:
+        st.toast(f"Limpiadas {_huerf} cuenta(s)/anuncio(s) de conexiones eliminadas.", icon="🧹")
     if r["errores"]:
         st.error("Errores: " + "; ".join(r["errores"])[:300])
     st.rerun()
@@ -503,8 +510,9 @@ def sidebar_filtros():
     def _biz_real(a):
         cid = a.get("conexion_id")
         return cid in (None, 0, "0") or str(cid) in _cx_ids
-    business = sorted({_alias_conexion(a.get("conexion_id"), conexiones)
-                       for a in todos if _biz_real(a)})
+    # Excluir de TODO el sidebar los anuncios de conexiones eliminadas (huérfanos).
+    todos = [a for a in todos if _biz_real(a)]
+    business = sorted({_alias_conexion(a.get("conexion_id"), conexiones) for a in todos})
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
     campanas = sorted({a.get("campaign_nombre") for a in todos if a.get("campaign_nombre")})
@@ -1007,6 +1015,11 @@ def seccion_vista_general():
     date_preset, since, until, cutoff, hasta_dt = _rango_actual(ahora)
 
     todos = db.obtener_anuncios(solo_activos=False)
+    # Excluir anuncios HUÉRFANOS: los de una conexión (business) que ya se eliminó.
+    # (ENV = conexion_id NULL/0 siempre válido.) Así no aparecen cuentas fantasma.
+    _cx_ids = {str(c["id"]) for c in db.obtener_conexiones()}
+    todos = [a for a in todos
+             if a.get("conexion_id") in (None, 0, "0") or str(a.get("conexion_id")) in _cx_ids]
     if filtro == "Activos":
         anuncios = [a for a in todos if _es_activo(a)]
     elif filtro == "Apagados":
