@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v116 · 2026-08-24"
+APP_VERSION = "v117 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -357,6 +357,7 @@ def sidebar_estado(pagina: str = "dashboard"):
 # Páginas de la app (para la navegación propia en el pie de la barra lateral).
 _PAGINAS = {
     "dashboard": ("Dashboard", ":material/dashboard:"),
+    "graficos": ("Gráficos", ":material/insights:"),
     "ventas": ("Ventas (3 días)", ":material/receipt_long:"),
     "tutoriales": ("Tutoriales", ":material/school:"),
     "configuracion": ("Configuración", ":material/settings:"),
@@ -1240,6 +1241,7 @@ def _render_totales(filas, sin_adid=None):
         ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo (verde bueno)
         ("Costo/venta", _usd(costo_venta), "#F59E0B"),    # ámbar
         ("Costo/conv", _usd(costo_conv), "#06B6D4"),      # cian
+        ("% Conv→Venta", f"{(num / conv * 100.0) if conv > 0 else 0.0:.1f}%", "#6D28D9"),
         ("Ganancia", ("+" if ganancia >= 0 else "") + _usd(ganancia),
          "#1F8A4C" if ganancia >= 0 else "#E11D48"),      # verde / crimson
     ]
@@ -3510,6 +3512,117 @@ def pagina_configuracion():
             _panel_diagnostico_api()
 
 
+def _fig_editorial(fig, height=300):
+    """Aplica el estilo editorial (fondo transparente, tinta) a una figura Plotly."""
+    fig.update_layout(height=height, margin=dict(t=30, b=10, l=10, r=10),
+                      legend=dict(orientation="h", y=1.12),
+                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                      font=dict(color="#18181B", family="Inter"),
+                      xaxis=dict(gridcolor="#DED9D0"), yaxis=dict(gridcolor="#DED9D0"))
+    return fig
+
+
+def pagina_graficos():
+    """Pestaña de gráficos: ventas por hora, rendimiento, ganancia, conversión y embudo."""
+    st.title("Gráficos")
+    ahora = db.ahora()
+    rlbl = st.segmented_control("Rango", ["7 días", "14 días", "30 días"],
+                                default="14 días", key="graf_dias") or "14 días"
+    ndias, preset = {"7 días": (7, "last_7d"), "14 días": (14, "last_14d"),
+                     "30 días": (30, "last_30d")}[rlbl]
+    medianoche = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+    manana = medianoche + timedelta(days=1)
+    desde = medianoche - timedelta(days=ndias - 1)   # ndias calendario, incluye hoy
+
+    # Monedas y tasas a USD (gasto por cuenta, ventas por moneda de ventas).
+    anuncios = db.obtener_anuncios(solo_activos=False)
+    ad_mon = {a["ad_id"]: (a.get("cuenta_moneda") or "USD") for a in anuncios}
+    mv = db.get_config("moneda_ventas", "auto")
+    if mv == "auto":
+        mons = [m for m in ad_mon.values() if m]
+        mv = max(set(mons), key=mons.count) if mons else "USD"
+    rate_v = fx.tasa_a_usd(mv)
+
+    # ---------- 1) Ventas por hora (hoy) ----------
+    st.subheader("Ventas por hora — hoy")
+    vh = db.ventas_por_hora(medianoche, manana)
+    horas = [f"{h:02d}" for h in range(24)]
+    y_ventas = [vh.get(h, {}).get("num", 0) for h in horas]
+    f1 = go.Figure(go.Bar(x=[f"{h}:00" for h in horas], y=y_ventas, marker_color="#1F8A4C",
+                          hovertemplate="%{x} · %{y} venta(s)<extra></extra>"))
+    f1.update_layout(yaxis_title="Ventas")
+    st.plotly_chart(_fig_editorial(f1), use_container_width=True)
+    if sum(y_ventas) == 0:
+        st.caption("Aún no hay ventas registradas hoy.")
+
+    # ---------- Series diarias (gasto USD e ingresos USD) ----------
+    dias = [(medianoche - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(ndias - 1, -1, -1)]
+    gd = _gasto_diario_cache(preset)   # {ad_id: {dia: spend_nat}}; {} si no hay conexión
+    _rate_cache = {}
+
+    def _rc(m):
+        m = (m or "USD").upper()
+        if m not in _rate_cache:
+            _rate_cache[m] = fx.tasa_a_usd(m)
+        return _rate_cache[m]
+    gasto_dia = {d: 0.0 for d in dias}
+    for aid, serie in (gd or {}).items():
+        r = _rc(ad_mon.get(aid, "USD"))
+        for d, sp in serie.items():
+            if d in gasto_dia:
+                gasto_dia[d] += (sp or 0.0) * r
+    vdt = db.ventas_diarias_totales(desde, manana)   # {dia: {num, ingreso_nat}}
+    ing_dia = {d: vdt.get(d, {}).get("ingreso_nat", 0.0) * rate_v for d in dias}
+    etq = [d[5:] for d in dias]  # MM-DD
+
+    # ---------- 2) Rendimiento general (gasto vs ingresos) ----------
+    st.subheader("Rendimiento general — últimos días")
+    f2 = go.Figure()
+    f2.add_trace(go.Bar(x=etq, y=[round(gasto_dia[d], 2) for d in dias],
+                        name="Gasto (USD)", marker_color="#18181B"))
+    f2.add_trace(go.Scatter(x=etq, y=[round(ing_dia[d], 2) for d in dias],
+                            name="Ingresos (USD)", mode="lines+markers",
+                            line=dict(color="#1F8A4C", width=3)))
+    st.plotly_chart(_fig_editorial(f2, 320), use_container_width=True)
+
+    # ---------- 4) Ganancia a través de los días ----------
+    st.subheader("Ganancia por día")
+    gan = [round(ing_dia[d] - gasto_dia[d], 2) for d in dias]
+    cols = ["#1F8A4C" if g >= 0 else "#E11D48" for g in gan]
+    f4 = go.Figure(go.Bar(x=etq, y=gan, marker_color=cols,
+                          hovertemplate="%{x} · %{y:$,.2f}<extra></extra>"))
+    f4.update_layout(yaxis_title="Ganancia (USD)")
+    st.plotly_chart(_fig_editorial(f4, 300), use_container_width=True)
+
+    # ---------- Insights del rango (para conversión y embudo) ----------
+    ins = _insights_cache(preset, "ad", "", "")   # {ad_id: {impressions, clicks, conversaciones, ...}}
+    impresiones = sum((m.get("impressions") or 0) for m in ins.values())
+    clics = sum((m.get("clicks") or 0) for m in ins.values())
+    conversaciones = sum((m.get("conversaciones") or 0) for m in ins.values())
+    ventas_rango = sum(v.get("num", 0) for v in vdt.values())
+
+    # ---------- 3) % de conversaciones que terminan en venta ----------
+    st.subheader("Conversión: conversaciones → ventas")
+    pct = (ventas_rango / conversaciones * 100.0) if conversaciones > 0 else 0.0
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Conversaciones", f"{int(conversaciones):,}".replace(",", "."))
+    m2.metric("Ventas", f"{int(ventas_rango):,}".replace(",", "."))
+    m3.metric("% conv. → venta", f"{pct:.1f}%")
+    st.caption("Este mismo porcentaje aparece también en los KPIs de arriba del Dashboard.")
+
+    # ---------- 5) Embudo: Impresiones → Clics → Conversaciones → Ventas ----------
+    st.subheader("Embudo")
+    f5 = go.Figure(go.Funnel(
+        y=["Impresiones", "Clics", "Conversaciones", "Ventas"],
+        x=[int(impresiones), int(clics), int(conversaciones), int(ventas_rango)],
+        textinfo="value+percent initial",
+        marker=dict(color=["#1D4ED8", "#06B6D4", "#F59E0B", "#1F8A4C"])))
+    st.plotly_chart(_fig_editorial(f5, 340), use_container_width=True)
+    if impresiones == 0:
+        st.caption("Impresiones/Clics/Conversaciones vienen de Facebook (conecta y pulsa "
+                   "Recargar). Ventas salen de tus fuentes importadas.")
+
+
 def pagina_ventas():
     """Historial de TODAS las ventas de los últimos 3 días (todas las fuentes)."""
     st.title("Ventas — últimos 3 días")
@@ -3904,6 +4017,8 @@ def main():
         pagina_actividad()
     elif pagina == "ventas":
         pagina_ventas()
+    elif pagina == "graficos":
+        pagina_graficos()
     else:
         pagina_dashboard()
     # La navegación va al FINAL para que quede al pie de la barra lateral,

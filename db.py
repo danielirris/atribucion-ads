@@ -877,6 +877,36 @@ def ingresos_diarios_por_ad(desde: datetime,
     return out
 
 
+def ventas_por_hora(cutoff: datetime, hasta: Optional[datetime] = None) -> dict:
+    """Ventas agrupadas por HORA del día (00-23): {'HH': {'num', 'ingreso_nat'}}."""
+    cond = ["hora_venta >= ?"]
+    args = [a_texto(cutoff)]
+    if hasta is not None:
+        cond.append("hora_venta < ?"); args.append(a_texto(hasta))
+    where = " WHERE " + " AND ".join(cond)
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT substr(hora_venta,12,2) AS h, COUNT(*) num,
+                       COALESCE(SUM(valor_venta),0) total
+                FROM ventas{where} GROUP BY h""", args)
+        return {r["h"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+
+
+def ventas_diarias_totales(desde: datetime, hasta: Optional[datetime] = None) -> dict:
+    """Ventas por DÍA de TODA la base: {'YYYY-MM-DD': {'num', 'ingreso_nat'}}."""
+    cond = ["hora_venta >= ?"]
+    args = [a_texto(desde)]
+    if hasta is not None:
+        cond.append("hora_venta < ?"); args.append(a_texto(hasta))
+    where = " WHERE " + " AND ".join(cond)
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT substr(hora_venta,1,10) AS dia, COUNT(*) num,
+                       COALESCE(SUM(valor_venta),0) total
+                FROM ventas{where} GROUP BY dia ORDER BY dia""", args)
+        return {r["dia"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+
+
 def ventas_en_rango(cutoff: datetime, hasta: Optional[datetime] = None) -> list:
     """Todas las ventas con hora_venta >= cutoff (y < hasta si se da), recientes primero."""
     cond = ["hora_venta >= ?"]
