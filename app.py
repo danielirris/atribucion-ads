@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v119 · 2026-08-24"
+APP_VERSION = "v120 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1268,14 +1268,22 @@ def _render_totales(filas, sin_adid=None):
         ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo (verde bueno)
         ("Costo/venta", _usd(costo_venta), "#F59E0B"),    # ámbar
         ("Costo/conv", _usd(costo_conv), "#06B6D4"),      # cian
-        ("% Conv→Venta", f"{(num / conv * 100.0) if conv > 0 else 0.0:.1f}%", "#6D28D9"),
         ("Ganancia", ("+" if ganancia >= 0 else "") + _usd(ganancia),
          "#1F8A4C" if ganancia >= 0 else "#E11D48"),      # verde / crimson
     ]
+    # Tasa de conversión: % de conversaciones que terminan en compra (ventas/conv * 100).
+    # Va como línea pequeña bajo la tarjeta de Ganancia (UTIL.).
+    conv_pct = (num / conv * 100.0) if conv > 0 else 0.0
+    extras = {
+        "Ganancia": (f'<div class="tnat" style="color:#6D28D9" '
+                     f'title="Conversaciones que terminan en compra (ventas ÷ conversaciones)">'
+                     f'Conv→compra {conv_pct:.1f}%</div>'),
+    }
     cards = "".join(
         f'<div class="tcard"><div class="tlbl">{t}</div>'
         f'<div class="tval" style="color:{c}">{v}</div>'
         + (f'<div class="tnat">{nat.get(t)}</div>' if nat.get(t) else '')
+        + extras.get(t, '')
         + '</div>'
         for t, v, c in tarjetas)
     st.markdown(
