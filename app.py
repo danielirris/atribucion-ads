@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v118 · 2026-08-24"
+APP_VERSION = "v119 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -370,6 +370,20 @@ _PAGINAS = {
     "configuracion": ("Configuración", ":material/settings:"),
     "actividad": ("Bitácora", ":material/history:"),
 }
+
+
+def _top_tabs(active: str):
+    """Pestañas grandes arriba: DASHBOARD | GRÁFICOS (misma tipografía de título).
+    La activa se ve en tinta; las otras en gris y clicables para cambiar de vista."""
+    st.markdown('<span class="toptabs-anchor"></span>', unsafe_allow_html=True)
+    cols = st.columns([1.35, 1.35, 4], vertical_alignment="bottom")
+    for i, (key, label) in enumerate([("dashboard", "DASHBOARD"), ("graficos", "GRÁFICOS")]):
+        with cols[i]:
+            if key == active:
+                st.markdown(f'<div class="toptab active">{label}</div>', unsafe_allow_html=True)
+            elif st.button(label, key=f"toptab_{key}", use_container_width=True):
+                st.session_state["_pagina"] = key
+                st.rerun()
 
 
 def _sidebar_nav(pagina: str):
@@ -2944,6 +2958,20 @@ def _inject_css():
     [data-testid="stMetricValue"]{ font-family:'Anton',sans-serif; color:#18181B; }
     [data-testid="stMetricLabel"]{ font-family:'Space Mono',monospace; text-transform:uppercase;
         letter-spacing:.08em; color:var(--sub); }
+    /* Pestañas grandes arriba (DASHBOARD | GRÁFICOS) con tipografía de título Anton.
+       La activa es un <div>; las inactivas son <button> estilizados como título gris. */
+    .toptab.active{ font-family:'Anton',sans-serif; text-transform:uppercase; letter-spacing:-.02em;
+        font-size:clamp(30px,4.2vw,56px); line-height:.92; color:#18181B; }
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button{
+        background:transparent !important; background-color:transparent !important;
+        border:none !important; box-shadow:none !important; padding:0 !important;
+        justify-content:flex-start !important; transform:none !important; min-height:0 !important; }
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button p{
+        font-family:'Anton',sans-serif !important; text-transform:uppercase; letter-spacing:-.02em;
+        font-size:clamp(30px,4.2vw,56px) !important; line-height:.92 !important; font-weight:400 !important;
+        color:#C4C0B4 !important; }
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button:hover p{
+        color:#18181B !important; }
     hr{ border-color:var(--card-brd) !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -3537,7 +3565,7 @@ def _fig_editorial(fig, height=300):
 
 def pagina_graficos():
     """Pestaña de gráficos: ventas por hora, rendimiento, ganancia, conversión y embudo."""
-    st.title("Gráficos")
+    _top_tabs("graficos")
     ahora = db.ahora()
     rlbl = st.segmented_control("Rango", ["7 días", "14 días", "30 días"],
                                 default="14 días", key="graf_dias") or "14 días"
@@ -3968,9 +3996,9 @@ def _panel_sync_ventas():
 
 
 def pagina_dashboard():
+    _top_tabs("dashboard")
     top1, top2 = st.columns([2.5, 2.5])
     with top1:
-        st.title("Dashboard")
         _timer_actualizacion()
     with top2:
         st.write("")
