@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v120 · 2026-08-24"
+APP_VERSION = "v121 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -394,6 +394,19 @@ def _sidebar_nav(pagina: str):
                              type="primary" if key == pagina else "secondary",
                              key=f"nav_{key}"):
             st.session_state["_pagina"] = key
+            st.rerun()
+    # Cerrar sesión (solo si hay contraseña configurada).
+    if config.APP_PASSWORD:
+        if st.sidebar.button("Cerrar sesión", icon=":material/logout:",
+                             use_container_width=True, key="logout_btn"):
+            st.session_state["_auth_ok"] = False
+            try:
+                del st.query_params["s"]      # olvida la sesión recordada en la URL
+            except Exception:
+                try:
+                    st.query_params.clear()
+                except Exception:
+                    pass
             st.rerun()
     st.sidebar.caption(f"Versión: {APP_VERSION}")
 
