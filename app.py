@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v124 · 2026-08-24"
+APP_VERSION = "v125 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -260,6 +260,27 @@ def _gasto_diario_cache(date_preset: str = "last_7d"):
     return fb.gasto_diario_todos(date_preset)
 
 
+@st.cache_data(ttl=INSIGHTS_TTL, show_spinner=False)
+def _gasto_lifetime_cache():
+    """Gasto acumulado (lifetime) por anuncio, para 'gasto desde el último cambio'
+    con el método snapshot (gasto_actual - snapshot)."""
+    return fb.gasto_lifetime_todos()
+
+
+def _cambiar_periodo_snapshot(ad_ids, nativo):
+    """Cambia el período (presupuesto) de cada anuncio Y guarda el SNAPSHOT del gasto
+    acumulado (lifetime) en ese instante. Así el 'gasto desde el cambio' luego es
+    exacto: gasto_lifetime_actual - snapshot. Una sola llamada a FB para el snapshot."""
+    try:
+        life = fb.gasto_lifetime_todos()   # snapshot fresco del gasto acumulado
+    except Exception:
+        life = {}
+    for aid in ad_ids:
+        pid = db.cambiar_periodo(aid, nativo)
+        if life:
+            db.set_periodo_snapshot(pid, float(life.get(str(aid), 0.0) or 0.0))
+
+
 def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
     """
     Flujo Parte 8: envía el cambio a Facebook y SOLO si Facebook confirma,
@@ -282,7 +303,7 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
         if not r["ok"]:
             # NO cerramos el período en SQLite.
             return {"ok": False, "error": r["error"], "solo_local": False}
-        db.cambiar_periodo(ad_id, nuevo_monto)
+        _cambiar_periodo_snapshot([ad_id], nuevo_monto)
         return {"ok": True, "error": None, "solo_local": False}
 
     # Sin API disponible: registro local solamente (advertencia).
@@ -306,6 +327,7 @@ def _recargar_facebook():
         try:
             _insights_cache.clear()
             _gasto_diario_cache.clear()
+            _gasto_lifetime_cache.clear()
         except Exception:
             pass
     if r["num_anuncios"]:
@@ -679,6 +701,9 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
     # Gasto diario por anuncio (Facebook) para dibujar la LÍNEA de gasto sobre las
     # barras. Vacío si no hay conexión; se cachea aparte (una llamada por cuenta).
     _gastodia7 = _gasto_diario_cache("last_7d") if hay_conexion else {}
+    # Gasto acumulado (lifetime) por anuncio, para el gasto REAL desde el cambio
+    # con el método snapshot (gasto_actual - snapshot guardado al cambiar).
+    _gastolife = _gasto_lifetime_cache() if hay_conexion else {}
 
     grupos = {}
     for a in anuncios:
@@ -782,19 +807,27 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         if ab:
             inicio_mod = db.a_fecha(ab["hora_inicio"])
             mins = max(0.0, (ahora - inicio_mod).total_seconds() / 60.0) if inicio_mod else 0.0
-            # Gasto desde el cambio: REAL de Facebook (caché diaria) sumando los días
-            # desde la fecha del cambio hasta hoy. Así coincide con la columna GASTADO y
-            # NO se infla como el viejo estimado (presupuesto ÷ 1440 × minutos).
-            gmod_es_real = bool(_gastodia7)
-            if gmod_es_real:
+            # Gasto REAL desde el cambio. Preferencia:
+            #  1) SNAPSHOT (exacto): gasto_lifetime_actual - snapshot guardado al cambiar.
+            #  2) Suma del gasto diario real desde la fecha del cambio (aprox. por día).
+            #  3) Estimado por presupuesto (solo sin conexión a Facebook).
+            _snaps = db.snapshots_periodo_abierto(ad_ids_grupo)
+            _todos_snap = bool(_gastolife) and all(
+                _snaps.get(aid) is not None for aid in ad_ids_grupo)
+            if _todos_snap:
+                gmod_nat = sum(max(0.0, (_gastolife.get(str(aid), 0.0) or 0.0) - _snaps[aid])
+                               for aid in ad_ids_grupo)
+                gmod_es_real = True
+            elif _gastodia7:
                 _desde_dia = inicio_mod.strftime("%Y-%m-%d") if inicio_mod else "9999"
                 gmod_nat = sum(
                     sp for aid in ad_ids_grupo
                     for d, sp in _gastodia7.get(aid, {}).items()
                     if d >= _desde_dia and sp)
+                gmod_es_real = True
             else:
-                # Sin conexión: estimado por presupuesto (única opción).
                 gmod_nat = (float(ab["presupuesto"]) / config.MINUTOS_POR_DIA) * mins
+                gmod_es_real = False
             vs_mod = db.ventas_suma(ad_ids_grupo, inicio_mod)
             imod_nat = vs_mod["ingreso_nat"]
             ventas_mod = int(vs_mod.get("num", 0))
@@ -887,8 +920,7 @@ def _aplicar_presupuesto_grupo(fila, nuevo_usd):
                                       nativo, fila.get("conexion_id"))
         if not r["ok"]:
             return {"ok": False, "error": r["error"]}
-        for aid in fila["ad_ids"]:
-            db.cambiar_periodo(aid, nativo)
+        _cambiar_periodo_snapshot(fila["ad_ids"], nativo)
         return {"ok": True, "solo_local": False, "nativo": nativo}
     for aid in fila["ad_ids"]:
         db.cambiar_periodo(aid, nativo)
@@ -1912,8 +1944,7 @@ def _pop_presupuesto(f):
         # Rápido: aplica local al instante y empuja a Facebook en SEGUNDO PLANO.
         rate = f.get("rate_c") or 1.0
         nativo = (nuevo / rate) if rate else nuevo
-        for aid in f["ad_ids"]:
-            db.cambiar_periodo(aid, nativo)
+        _cambiar_periodo_snapshot(f["ad_ids"], nativo)  # guarda snapshot del gasto
         _set_vigilancia(f["ad_ids"], vigilar)     # vigila o quita según el botón
         _bitacora_presupuesto(f, actual, nuevo)   # registra en la bitácora
         _ojo = " · 👁️ en vigilancia" if vigilar else ""

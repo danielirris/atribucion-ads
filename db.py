@@ -157,6 +157,9 @@ def init_db() -> None:
     _asegurar_columna("ventas", "ext_id", "TEXT")
     _asegurar_columna("ventas", "producto", "TEXT")
     _asegurar_columna("ventas", "pais", "TEXT")
+    # Gasto acumulado (lifetime) de Facebook al momento en que se abrió el período.
+    # Sirve para calcular el gasto REAL desde el cambio: gasto_actual - gasto_snapshot.
+    _asegurar_columna("periodos", "gasto_snapshot", "REAL")
 
 
 def _asegurar_columna(tabla: str, columna: str, tipo: str) -> None:
@@ -394,6 +397,28 @@ def asegurar_periodo_inicial(ad_id: str, presupuesto: float,
                          (a_texto(hora_inicio), periodos[0]["id"]))
             conn.commit()
     return periodo_abierto(ad_id)
+
+
+def set_periodo_snapshot(periodo_id: int, gasto_lifetime: float) -> None:
+    """Guarda el gasto acumulado (lifetime) de FB al abrir un período (para el gasto
+    real desde el cambio: gasto_actual - snapshot)."""
+    with _LOCK, _conn() as conn:
+        conn.execute("UPDATE periodos SET gasto_snapshot = ? WHERE id = ?",
+                     (float(gasto_lifetime), int(periodo_id)))
+        conn.commit()
+
+
+def snapshots_periodo_abierto(ad_ids: list) -> dict:
+    """{ad_id: gasto_snapshot} del período ABIERTO de cada anuncio (NULL si no tiene)."""
+    if not ad_ids:
+        return {}
+    ph = ",".join("?" for _ in ad_ids)
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT ad_id, gasto_snapshot FROM periodos
+                WHERE hora_fin IS NULL AND ad_id IN ({ph})""",
+            [str(a) for a in ad_ids])
+        return {r["ad_id"]: r["gasto_snapshot"] for r in rows}
 
 
 def obtener_periodos(ad_id: str) -> list:

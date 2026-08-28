@@ -753,6 +753,44 @@ def gasto_diario_todos(date_preset: str = "last_7d") -> dict:
     return resultado
 
 
+def gasto_lifetime_todos(date_preset: str = "maximum") -> dict:
+    """Gasto ACUMULADO (lifetime) por anuncio de todas las conexiones/cuentas.
+    {ad_id: spend_nativo}. Una llamada de insights por cuenta (sin time_increment ->
+    total del rango 'maximum'). Se usa para el snapshot al cambiar presupuesto y para
+    calcular el gasto real desde el cambio. Nunca lanza."""
+    if not SDK_DISPONIBLE:
+        return {}
+    cons = _conexiones_efectivas()
+    resultado: dict = {}
+    for con in cons:
+        try:
+            api = _api_desde(con["token"], con["app_id"], con["app_secret"])
+            cuentas = _descubrir_cuentas(api, con.get("env_account"))
+        except Exception as e:
+            _log(f"Gasto lifetime: fallo en {con['alias']}: {e}")
+            continue
+        for idx, cta in enumerate(cuentas):
+            if idx:
+                _dormir(STAGGER_SEG)
+            try:
+                _contar_llamado()
+                filas = AdAccount(cta["act_id"], api=api).get_insights(
+                    params={"level": "ad", "limit": 500, "date_preset": date_preset},
+                    fields=["ad_id", "spend"])
+            except Exception as e:
+                if _es_rate_limit(e):
+                    _marcar_throttle(e, cta["name"])
+                    break
+                _log(f"Gasto lifetime {cta['name']}: {e}")
+                continue
+            for row in filas:
+                ad_id = row.get("ad_id")
+                if not ad_id:
+                    continue
+                resultado[str(ad_id)] = _to_float(row.get("spend"))
+    return resultado
+
+
 def gasto_por_pais(date_preset: str = "today", time_range: Optional[dict] = None) -> list:
     """
     Gasto REAL por país usando el desglose (breakdown) de Facebook, a nivel de
