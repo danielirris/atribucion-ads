@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v123 · 2026-08-24"
+APP_VERSION = "v124 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -782,13 +782,26 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         if ab:
             inicio_mod = db.a_fecha(ab["hora_inicio"])
             mins = max(0.0, (ahora - inicio_mod).total_seconds() / 60.0) if inicio_mod else 0.0
-            gmod_nat = (float(ab["presupuesto"]) / config.MINUTOS_POR_DIA) * mins
+            # Gasto desde el cambio: REAL de Facebook (caché diaria) sumando los días
+            # desde la fecha del cambio hasta hoy. Así coincide con la columna GASTADO y
+            # NO se infla como el viejo estimado (presupuesto ÷ 1440 × minutos).
+            gmod_es_real = bool(_gastodia7)
+            if gmod_es_real:
+                _desde_dia = inicio_mod.strftime("%Y-%m-%d") if inicio_mod else "9999"
+                gmod_nat = sum(
+                    sp for aid in ad_ids_grupo
+                    for d, sp in _gastodia7.get(aid, {}).items()
+                    if d >= _desde_dia and sp)
+            else:
+                # Sin conexión: estimado por presupuesto (única opción).
+                gmod_nat = (float(ab["presupuesto"]) / config.MINUTOS_POR_DIA) * mins
             vs_mod = db.ventas_suma(ad_ids_grupo, inicio_mod)
             imod_nat = vs_mod["ingreso_nat"]
             ventas_mod = int(vs_mod.get("num", 0))
             roas_mod = (imod_nat / gmod_nat) if gmod_nat > 0 else 0.0
         else:
             inicio_mod, gmod_nat, imod_nat, roas_mod, ventas_mod = None, 0.0, 0.0, 0.0, 0
+            gmod_es_real = False
         # Presupuesto ANTERIOR (período previo al último cambio), en USD.
         _periodos = db.obtener_periodos(rep["ad_id"])
         presup_anterior = ((float(_periodos[-2]["presupuesto"]) * rate_c)
@@ -829,6 +842,7 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "num_cambios": _ncambios, "ult_mod_ts": _ultmod_ts,
             "roas_mod": roas_mod, "ingresos_mod": imod_nat * rate_v,
             "gasto_mod": gmod_nat * rate_c, "ventas_mod": ventas_mod,
+            "gmod_es_real": gmod_es_real,
             "conv": ins.get("conversaciones"),
             "impresiones": ins.get("impressions"), "clics": ins.get("clicks"),
             "spend_nat": spend_nat, "compras_meta": ins.get("compras"),
@@ -1375,11 +1389,12 @@ def _perf_help_text(f, ahora) -> str:
         presup_line = f"Presupuesto: **{_d(p_act)}** (sin cambios previos)  \n"
     else:
         presup_line = ""
+    _glbl = "Gasto publicitario" if f.get("gmod_es_real") else "Gasto (estimado)"
     return (
         f"**Rendimiento desde el último cambio** · {_hace_amigable(umod, ahora)}\n\n"
         f"{presup_line}"
         f"Ventas: **{ventas}**  \n"
-        f"Gasto publicitario: **{_d(gasto_mod)}**  \n"
+        f"{_glbl}: **{_d(gasto_mod)}**  \n"
         f"Ingreso: **{_d(ingreso)}**  \n"
         f"ROAS: **{roas:.2f}x** {emoji}\n\n"
         f"Haz clic para ver el detalle y la gráfica de 7 días.")
