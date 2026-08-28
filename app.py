@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v125 · 2026-08-24"
+APP_VERSION = "v126 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1157,7 +1157,13 @@ def seccion_vista_general():
     # con un ID que no coincide con ningún anuncio (huérfanas) NO se cuentan aquí:
     # esas se explican en el "Cuadre de ventas" para no inflar el número.
     sin_adid = None
-    if fuente != "meta":
+    # Las ventas "sin ad id" NO se pueden atribuir a una campaña/anuncio/cuenta concreta.
+    # Si hay un filtro que acota por debajo del Business (campaña, producto, cuenta, país,
+    # búsqueda o vigilancia), NO se suman al total (si no, inflan la ganancia como si
+    # fueran de ese filtro). Con solo Business (o sin filtro) sí se incluyen.
+    _filtro_acota = bool(cuentas_sel or campanas_sel or productos_sel
+                         or (pais_sel != "Todos") or q or st.session_state.get("f_solo_vig"))
+    if fuente != "meta" and not _filtro_acota:
         moneda_v = db.get_config("moneda_ventas", "auto")
         if moneda_v and moneda_v != "auto":
             rate_sa = fx.tasa_a_usd(moneda_v)
