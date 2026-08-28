@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v122 · 2026-08-24"
+APP_VERSION = "v123 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3626,10 +3626,19 @@ def pagina_graficos():
                             hovertemplate="%{x} · %{y} venta(s)<extra>" + cmp_dia.strftime("%d/%m") + "</extra>"))
     f1.update_layout(yaxis_title="Ventas")
     st.plotly_chart(_fig_editorial(f1), use_container_width=True)
+
+    # Comparativo "a esta hora": acumulado hasta la hora actual (hoy vs día elegido).
+    h_act = ahora.hour
+    acum_hoy = sum(y_hoy[:h_act + 1])
+    acum_cmp = sum(y_cmp[:h_act + 1])
+    dif = acum_hoy - acum_cmp
+    ca, cb = st.columns(2)
+    ca.metric(f"Hoy a las {h_act:02d}:{ahora.minute:02d}", f"{acum_hoy} ventas",
+              delta=f"{dif:+d} vs {cmp_dia.strftime('%d/%m')}")
+    cb.metric(f"{cmp_dia.strftime('%d/%m')} a las {h_act:02d}:00 (misma hora)",
+              f"{acum_cmp} ventas")
     _th, _tc = sum(y_hoy), sum(y_cmp)
-    st.caption(f"Hoy: **{_th}** venta(s) · {cmp_dia.strftime('%d/%m')}: **{_tc}** venta(s)."
-               + (f"  {'📈' if _th >= _tc else '📉'} {abs(_th - _tc)} de diferencia." if (_th or _tc) else
-                  "  Aún no hay ventas hoy."))
+    st.caption(f"Totales del día completo — Hoy: **{_th}** · {cmp_dia.strftime('%d/%m')}: **{_tc}**.")
 
     # ---------- Series diarias (gasto USD e ingresos USD) ----------
     dias = [(medianoche - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(ndias - 1, -1, -1)]
