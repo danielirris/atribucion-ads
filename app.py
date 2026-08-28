@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v121 · 2026-08-24"
+APP_VERSION = "v122 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3605,17 +3605,31 @@ def pagina_graficos():
         mv = max(set(mons), key=mons.count) if mons else "USD"
     rate_v = fx.tasa_a_usd(mv)
 
-    # ---------- 1) Ventas por hora (hoy) ----------
+    # ---------- 1) Ventas por hora (hoy) + comparativo con un día anterior ----------
     st.subheader("Ventas por hora — hoy")
-    vh = db.ventas_por_hora(medianoche, manana)
+    ayer = (medianoche - timedelta(days=1)).date()
+    cmp_dia = st.date_input("Comparar hoy con:", value=ayer, max_value=ayer,
+                            format="DD/MM/YYYY", key="graf_cmp_dia",
+                            help="Elige cualquier día anterior para compararlo con hoy, hora por hora.")
     horas = [f"{h:02d}" for h in range(24)]
-    y_ventas = [vh.get(h, {}).get("num", 0) for h in horas]
-    f1 = go.Figure(go.Bar(x=[f"{h}:00" for h in horas], y=y_ventas, marker_color="#1F8A4C",
-                          hovertemplate="%{x} · %{y} venta(s)<extra></extra>"))
+    xh = [f"{h}:00" for h in horas]
+    vh = db.ventas_por_hora(medianoche, manana)                       # hoy
+    y_hoy = [vh.get(h, {}).get("num", 0) for h in horas]
+    cmp_ini = datetime.combine(cmp_dia, datetime.min.time())
+    vh_cmp = db.ventas_por_hora(cmp_ini, cmp_ini + timedelta(days=1))  # día elegido
+    y_cmp = [vh_cmp.get(h, {}).get("num", 0) for h in horas]
+    f1 = go.Figure()
+    f1.add_trace(go.Bar(x=xh, y=y_hoy, name="Hoy", marker_color="#1F8A4C",
+                        hovertemplate="%{x} · %{y} venta(s)<extra>Hoy</extra>"))
+    f1.add_trace(go.Scatter(x=xh, y=y_cmp, name=cmp_dia.strftime("%d/%m"),
+                            mode="lines+markers", line=dict(color="#6D28D9", width=2),
+                            hovertemplate="%{x} · %{y} venta(s)<extra>" + cmp_dia.strftime("%d/%m") + "</extra>"))
     f1.update_layout(yaxis_title="Ventas")
     st.plotly_chart(_fig_editorial(f1), use_container_width=True)
-    if sum(y_ventas) == 0:
-        st.caption("Aún no hay ventas registradas hoy.")
+    _th, _tc = sum(y_hoy), sum(y_cmp)
+    st.caption(f"Hoy: **{_th}** venta(s) · {cmp_dia.strftime('%d/%m')}: **{_tc}** venta(s)."
+               + (f"  {'📈' if _th >= _tc else '📉'} {abs(_th - _tc)} de diferencia." if (_th or _tc) else
+                  "  Aún no hay ventas hoy."))
 
     # ---------- Series diarias (gasto USD e ingresos USD) ----------
     dias = [(medianoche - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(ndias - 1, -1, -1)]
