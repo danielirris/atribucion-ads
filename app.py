@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v126 · 2026-08-24"
+APP_VERSION = "v127 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1411,10 +1411,19 @@ def _perf_help_text(f, ahora) -> str:
         return ("Sin cambios de presupuesto registrados.\n\n"
                 "Haz clic para ver el detalle y la gráfica de 7 días.")
     roas = f.get("roas_mod") or 0.0
-    emoji = "🟢" if roas > 2 else "🟡" if roas >= 1 else "🔴"
     ventas = int(f.get("ventas_mod") or 0)
     ingreso = f.get("ingresos_mod") or 0.0
     gasto_mod = f.get("gasto_mod") or 0.0
+    # ROAS: con gasto 0 no se puede dividir. Si hay ventas, es "excelente" (no 0.00x rojo);
+    # normalmente es porque Facebook aún no reporta el gasto de la última hora.
+    if gasto_mod <= 0:
+        if ingreso > 0:
+            roas_txt, emoji = "— · aún sin gasto reportado desde el cambio", "⏳"
+        else:
+            roas_txt, emoji = "—", ""
+    else:
+        roas_txt = f"{roas:.2f}x"
+        emoji = "🟢" if roas > 2 else "🟡" if roas >= 1 else "🔴"
     # El "$" activa el modo fórmula (LaTeX) del tooltip -> hay que escaparlo.
     def _d(v):
         return _usd(v).replace("$", "\\$")
@@ -1434,7 +1443,7 @@ def _perf_help_text(f, ahora) -> str:
         f"Ventas: **{ventas}**  \n"
         f"{_glbl}: **{_d(gasto_mod)}**  \n"
         f"Ingreso: **{_d(ingreso)}**  \n"
-        f"ROAS: **{roas:.2f}x** {emoji}\n\n"
+        f"ROAS: **{roas_txt}** {emoji}\n\n"
         f"Haz clic para ver el detalle y la gráfica de 7 días.")
 
 
@@ -3522,6 +3531,65 @@ Es la forma segura y permanente (no caduca como los tokens normales).
 
 > 🔁 **Repite** los pasos 3–7 **por cada Business** que tengas. Cada Business = una conexión.
 > No importa que las cuentas estén en perfiles distintos: lo que manda es el Business.
+        """)
+
+    with st.expander("🔗 Conectar el Business de OTRO perfil (Perfil 1 = dueño de la app · "
+                     "Perfil 2 = otro Business)"):
+        st.markdown("""
+**Tu caso:** hay dos perfiles de Facebook:
+- **PERFIL 1** — el tuyo, dueño de la app de Meta y del **Business propietario** de esta aplicación.
+- **PERFIL 2** — otro perfil, dueño de **otro Business**, que **tú también administras**.
+
+Quieres que la app lea también los anuncios del Business de **Perfil 2**. **No uses "Socios/Partners"**
+(eso pide que la otra parte acepte). Como administras ambos, hay dos caminos. **Recomiendo el B**
+(más simple y autocontenido).
+
+---
+
+### 🅱️ Camino B — App propia del Business de Perfil 2 (recomendado)
+Cada Business usa **su propia app + su propio token**. No hay que compartir nada entre perfiles.
+
+1. **Entra al Business de Perfil 2** (inicia sesión con Perfil 2, o cambia de negocio arriba a la
+   izquierda en business.facebook.com si tu Perfil 1 ya es admin de ese Business).
+2. **Crea una app de Meta** para ese Business (solo una vez):
+   - Ve a **developers.facebook.com/apps** → **Crear app** → tipo **Negocio/Business**.
+   - Vincúlala a **el Business de Perfil 2**.
+   - Agrega el producto **Marketing API**.
+   - En **Configuración → Información básica** copia el **APP ID** y el **APP SECRET**.
+3. **Genera el token de Usuario del Sistema** (en el Business de Perfil 2):
+   - **Configuración del negocio → Usuarios → Usuarios del sistema** → crea uno **Administrador**.
+   - **Asignar activos → Cuentas publicitarias** → marca las cuentas de Perfil 2 → **control total**.
+   - **Generar nuevo token** → **App:** la app que creaste en el paso 2 →
+     **Permisos:** `ads_management`, `ads_read`, `business_management` → **copia el token**.
+4. **En esta app** → **Configuración → Conectar Business → Agregar conexión**:
+   - **Alias:** ej. *"Business Perfil 2"*.
+   - **Token:** pega el token del paso 3.
+   - Abre **"App propia (opcional)"** y pega el **APP ID** y **APP SECRET** del paso 2.
+   - Guarda → **Probar** (debe listar las cuentas de Perfil 2).
+5. Vuelve al **Dashboard** y pulsa **🔄 Recargar Facebook**.
+
+✅ Listo: ahora verás los anuncios de los **dos Business** juntos, y puedes filtrar por Business.
+
+---
+
+### 🅰️ Camino A — Reusar la app central de Perfil 1 en el Business de Perfil 2
+Si prefieres no crear una app nueva, comparte tu app central con el Business de Perfil 2:
+
+1. **(Con Perfil 1)** En **developers.facebook.com/apps** abre tu app central →
+   **Roles del negocio / Business** → **Agregar** el **Business de Perfil 2** con acceso a la app.
+   *(o en Configuración del negocio de Perfil 1 → Cuentas → Apps → tu app → agregar el Business de Perfil 2).*
+2. **(En el Business de Perfil 2)** Configuración del negocio → **Usuarios del sistema** → crea uno
+   admin → **Generar token** → **App:** la **app central de Perfil 1** (ya debe aparecer) →
+   permisos `ads_management`, `ads_read`, `business_management` → copia el token.
+3. Asigna las **cuentas publicitarias** de Perfil 2 a ese usuario del sistema (control total).
+4. **En esta app** → Agregar conexión → pega **solo el token** (NO llenes "App propia": usa la central).
+5. **Recargar**.
+
+---
+
+> **¿Cuál elegir?** Si el Business de Perfil 2 ya tiene o puede tener su app → **Camino B**
+> (más limpio, cada Business independiente). Si quieres una sola app para todo → **Camino A**.
+> En ambos, lo único que la app guarda es el **token** (y el App ID/secreto si usas B).
         """)
 
     with st.expander("② ¿No tienes App de Facebook? Créala una vez (App ID y secreto)"):
