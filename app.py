@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v127 · 2026-08-24"
+APP_VERSION = "v128 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3541,55 +3541,50 @@ Es la forma segura y permanente (no caduca como los tokens normales).
 - **PERFIL 2** — otro perfil, dueño de **otro Business**, que **tú también administras**.
 
 Quieres que la app lea también los anuncios del Business de **Perfil 2**. **No uses "Socios/Partners"**
-(eso pide que la otra parte acepte). Como administras ambos, hay dos caminos. **Recomiendo el B**
-(más simple y autocontenido).
+(eso pide que la otra parte acepte). Como administras ambos, hay dos caminos.
+**✅ Recomendado: Camino A** (UNA sola app central para todos los Business). Es lo mejor a largo plazo:
+mantienes una sola app, arreglas permisos y revisión (App Review) **una sola vez** para todo, y evitas
+repetir por cada Business el error `code 3` (capability) que sale al duplicar.
 
 ---
 
-### 🅱️ Camino B — App propia del Business de Perfil 2 (recomendado)
-Cada Business usa **su propia app + su propio token**. No hay que compartir nada entre perfiles.
+### 🅰️ Camino A — UNA sola app central (la de Perfil 1) — **RECOMENDADO**
+Reutilizas tu app central de Perfil 1 también en el Business de Perfil 2. Solo hay que darle acceso
+una vez:
 
-1. **Entra al Business de Perfil 2** (inicia sesión con Perfil 2, o cambia de negocio arriba a la
-   izquierda en business.facebook.com si tu Perfil 1 ya es admin de ese Business).
-2. **Crea una app de Meta** para ese Business (solo una vez):
-   - Ve a **developers.facebook.com/apps** → **Crear app** → tipo **Negocio/Business**.
-   - Vincúlala a **el Business de Perfil 2**.
-   - Agrega el producto **Marketing API**.
-   - En **Configuración → Información básica** copia el **APP ID** y el **APP SECRET**.
-3. **Genera el token de Usuario del Sistema** (en el Business de Perfil 2):
-   - **Configuración del negocio → Usuarios → Usuarios del sistema** → crea uno **Administrador**.
-   - **Asignar activos → Cuentas publicitarias** → marca las cuentas de Perfil 2 → **control total**.
-   - **Generar nuevo token** → **App:** la app que creaste en el paso 2 →
-     **Permisos:** `ads_management`, `ads_read`, `business_management` → **copia el token**.
-4. **En esta app** → **Configuración → Conectar Business → Agregar conexión**:
-   - **Alias:** ej. *"Business Perfil 2"*.
-   - **Token:** pega el token del paso 3.
-   - Abre **"App propia (opcional)"** y pega el **APP ID** y **APP SECRET** del paso 2.
-   - Guarda → **Probar** (debe listar las cuentas de Perfil 2).
-5. Vuelve al **Dashboard** y pulsa **🔄 Recargar Facebook**.
+1. **(Con Perfil 1)** En **developers.facebook.com/apps** abre tu **app central** →
+   **Roles → Roles del negocio (Business)** → **Agregar** el **Business de Perfil 2** con acceso a la app.
+   *(alternativa: en Configuración del negocio de Perfil 2 → Cuentas → **Apps** → "Conectar un App ID"
+   y pones el ID de tu app central).*
+2. **(En el Business de Perfil 2)** Configuración del negocio → **Usuarios → Usuarios del sistema** →
+   crea uno **Administrador**.
+3. **Asignar activos → Cuentas publicitarias** → marca las cuentas de Perfil 2 → **control total**.
+4. **Generar nuevo token** → **App:** la **app central de Perfil 1** (ya debe aparecer en la lista) →
+   **Permisos:** `ads_management`, `ads_read`, `business_management` → **copia el token**.
+5. **En esta app** → **Configuración → Conectar Business → Agregar conexión** → pega **solo el token**
+   (NO llenes "App propia": se usa la central) → Guarda → **Probar**.
+6. Vuelve al **Dashboard** y pulsa **🔄 Recargar Facebook**.
 
-✅ Listo: ahora verás los anuncios de los **dos Business** juntos, y puedes filtrar por Business.
+✅ Ahora ves los anuncios de los **dos Business** juntos y puedes filtrar por Business.
 
 ---
 
-### 🅰️ Camino A — Reusar la app central de Perfil 1 en el Business de Perfil 2
-Si prefieres no crear una app nueva, comparte tu app central con el Business de Perfil 2:
+### 🅱️ Camino B — App propia por Business (alternativa, solo si no puedes compartir la app)
+Cada Business usa su propia app + token. **Más piezas que mantener** (por eso NO es la recomendada).
 
-1. **(Con Perfil 1)** En **developers.facebook.com/apps** abre tu app central →
-   **Roles del negocio / Business** → **Agregar** el **Business de Perfil 2** con acceso a la app.
-   *(o en Configuración del negocio de Perfil 1 → Cuentas → Apps → tu app → agregar el Business de Perfil 2).*
-2. **(En el Business de Perfil 2)** Configuración del negocio → **Usuarios del sistema** → crea uno
-   admin → **Generar token** → **App:** la **app central de Perfil 1** (ya debe aparecer) →
-   permisos `ads_management`, `ads_read`, `business_management` → copia el token.
-3. Asigna las **cuentas publicitarias** de Perfil 2 a ese usuario del sistema (control total).
-4. **En esta app** → Agregar conexión → pega **solo el token** (NO llenes "App propia": usa la central).
-5. **Recargar**.
+1. En el Business de Perfil 2, crea una app en **developers.facebook.com/apps** (tipo Negocio,
+   agrega **Marketing API**) → copia **APP ID** y **APP SECRET**.
+2. Genera el token de Usuario del Sistema con **esa** app (mismos permisos y asignar cuentas).
+3. En esta app → Agregar conexión → pega el token + abre **"App propia"** y pon el APP ID/SECRET.
+4. **Recargar**.
+
+> Ojo con B: si algún día haces App Review (por ejemplo para arreglar el `code 3` al duplicar),
+> tendrías que hacerlo **en cada app** por separado. Con A lo haces una vez.
 
 ---
 
-> **¿Cuál elegir?** Si el Business de Perfil 2 ya tiene o puede tener su app → **Camino B**
-> (más limpio, cada Business independiente). Si quieres una sola app para todo → **Camino A**.
-> En ambos, lo único que la app guarda es el **token** (y el App ID/secreto si usas B).
+> **En resumen: usa A.** Una sola app central para todos los Business. B solo si por alguna razón
+> no puedes darle acceso a la app central desde el Business de Perfil 2.
         """)
 
     with st.expander("② ¿No tienes App de Facebook? Créala una vez (App ID y secreto)"):
