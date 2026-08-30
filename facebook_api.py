@@ -271,6 +271,18 @@ def inicializar_api() -> bool:
 # --------------------------------------------------------------------------- #
 #  Descubrimiento de cuentas
 # --------------------------------------------------------------------------- #
+# Monedas SIN centavos (zero-decimal) en la API de Facebook: los montos vienen y se
+# envían en UNIDADES ENTERAS, no en centavos (offset 1). Las demás usan centavos (100).
+# Ej.: 16.000 COP se envía/recibe como 16000, no como 1.600.000.
+_MONEDAS_SIN_CENTAVOS = {"COP", "CLP", "PYG", "JPY", "KRW", "VND", "ISK", "CRC", "UGX",
+                         "XAF", "XOF", "XPF", "GNF", "RWF", "KMF", "DJF", "BIF", "VUV", "MGA"}
+
+
+def _offset_moneda(moneda) -> int:
+    """100 para monedas con centavos; 1 para las zero-decimal (COP, CLP, JPY, …)."""
+    return 1 if str(moneda or "").upper() in _MONEDAS_SIN_CENTAVOS else 100
+
+
 def _descubrir_cuentas(api, env_account: Optional[str] = None) -> list:
     """
     Devuelve [{"act_id","account_id","name"}] accesibles por el token.
@@ -423,14 +435,15 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                         # Presupuesto + país SALEN del propio adset (ya vino en get_ads),
                         # así NO hacemos un llamado extra por conjunto.
                         raw_b = aset.get("daily_budget")
+                        _off = _offset_moneda(cta.get("moneda"))
                         if raw_b is not None or aset.get("targeting") is not None:
                             codigos = _paises_de_targeting(aset.get("targeting"))
                             info = {
-                                "presupuesto": (float(raw_b) / 100.0) if raw_b not in (None, "") else None,
+                                "presupuesto": (float(raw_b) / _off) if raw_b not in (None, "") else None,
                                 "pais": (", ".join(pais_nombre(c) for c in codigos[:3]) if codigos else None),
                             }
                         else:  # respaldo (rara vez): llamado extra
-                            info = _leer_adset_info(adset_id, api)
+                            info = _leer_adset_info(adset_id, api, cta.get("moneda"))
                         cache_budget[adset_id] = info
                     presupuesto = info.get("presupuesto")
                     pais_pauta = info.get("pais")
@@ -443,7 +456,7 @@ def cargar_todo(abrir_periodos: bool = True) -> dict:
                     if campaign_id in cache_camp:
                         presupuesto = cache_camp[campaign_id]
                     else:
-                        presupuesto = _leer_campaign_budget(campaign_id, api)
+                        presupuesto = _leer_campaign_budget(campaign_id, api, cta.get("moneda"))
                         cache_camp[campaign_id] = presupuesto
                     if presupuesto is not None:
                         budget_nivel = "campaign"
@@ -569,17 +582,17 @@ def _paises_de_targeting(tg) -> list:
     return out
 
 
-def _leer_adset_info(adset_id: str, api=None) -> dict:
+def _leer_adset_info(adset_id: str, api=None, moneda=None) -> dict:
     """
-    Lee del conjunto: presupuesto diario (centavos→unidades) y el país donde
-    está PAUTADO (targeting.geo_locations), con nombre completo.
+    Lee del conjunto: presupuesto diario (según la moneda: /100 o /1 en zero-decimal)
+    y el país donde está PAUTADO (targeting.geo_locations), con nombre completo.
     Devuelve {"presupuesto": float|None, "pais": str|None}.
     """
     try:
         adset = AdSet(adset_id, api=api).api_get(
             fields=[AdSet.Field.daily_budget, "targeting"])
         raw = adset.get(AdSet.Field.daily_budget)
-        presupuesto = (float(raw) / 100.0) if raw is not None else None
+        presupuesto = (float(raw) / _offset_moneda(moneda)) if raw is not None else None
         codigos = _paises_de_targeting(adset.get("targeting"))
         pais = ", ".join(pais_nombre(c) for c in codigos[:3]) if codigos else None
         return {"presupuesto": presupuesto, "pais": pais}
@@ -587,17 +600,17 @@ def _leer_adset_info(adset_id: str, api=None) -> dict:
         return {"presupuesto": None, "pais": None}
 
 
-def _leer_daily_budget_adset(adset_id: str, api=None) -> Optional[float]:
+def _leer_daily_budget_adset(adset_id: str, api=None, moneda=None) -> Optional[float]:
     """Solo el presupuesto (para el polling)."""
-    return _leer_adset_info(adset_id, api).get("presupuesto")
+    return _leer_adset_info(adset_id, api, moneda).get("presupuesto")
 
 
-def _leer_campaign_budget(campaign_id: str, api=None) -> Optional[float]:
-    """Presupuesto diario de la campaña (CBO), centavos → unidades."""
+def _leer_campaign_budget(campaign_id: str, api=None, moneda=None) -> Optional[float]:
+    """Presupuesto diario de la campaña (CBO), según la moneda (centavos o unidades)."""
     try:
         camp = Campaign(campaign_id, api=api).api_get(fields=[Campaign.Field.daily_budget])
         raw = camp.get(Campaign.Field.daily_budget)
-        return (float(raw) / 100.0) if raw is not None else None
+        return (float(raw) / _offset_moneda(moneda)) if raw is not None else None
     except Exception:
         return None
 
@@ -839,11 +852,12 @@ def gasto_por_pais(date_preset: str = "today", time_range: Optional[dict] = None
 #  Modificación de presupuesto (usa el token de la conexión del anuncio)
 # --------------------------------------------------------------------------- #
 def actualizar_presupuesto(obj_id: str, nivel: str, nuevo_monto: float,
-                           conexion_id: Optional[int] = None) -> dict:
+                           conexion_id: Optional[int] = None, moneda=None) -> dict:
     """
     Cambia el daily_budget en Facebook del objeto correcto:
       nivel='campaign' → la campaña (CBO); si no → el conjunto (adset).
-    Monto en centavos (monto*100). NO toca SQLite.
+    Monto convertido según la moneda (×100 con centavos; ×1 en zero-decimal como COP).
+    NO toca SQLite.
     """
     if not SDK_DISPONIBLE:
         return {"ok": False, "error": f"SDK no disponible: {SDK_ERROR_IMPORT}"}
@@ -854,7 +868,7 @@ def actualizar_presupuesto(obj_id: str, nivel: str, nuevo_monto: float,
     if api is None:
         return {"ok": False, "error": "No hay token para la conexión de este anuncio."}
     try:
-        centavos = int(round(float(nuevo_monto) * 100))
+        centavos = int(round(float(nuevo_monto) * _offset_moneda(moneda)))
         if nivel == "campaign":
             Campaign(obj_id, api=api).api_update(params={Campaign.Field.daily_budget: centavos})
             _log(f"Presupuesto de campaña {obj_id} → {nuevo_monto:.2f}.")
@@ -869,9 +883,9 @@ def actualizar_presupuesto(obj_id: str, nivel: str, nuevo_monto: float,
 
 
 def actualizar_presupuesto_facebook(adset_id: str, nuevo_monto: float,
-                                    conexion_id: Optional[int] = None) -> dict:
+                                    conexion_id: Optional[int] = None, moneda=None) -> dict:
     """Compat: actualiza el presupuesto del conjunto."""
-    return actualizar_presupuesto(adset_id, "adset", nuevo_monto, conexion_id)
+    return actualizar_presupuesto(adset_id, "adset", nuevo_monto, conexion_id, moneda)
 
 
 # --- Cola de cambios de presupuesto PENDIENTES (reintento ante rate limit) --- #
@@ -897,14 +911,14 @@ def pendientes_presupuesto() -> list:
         return _pendientes_leer()
 
 
-def _encolar_pendiente(obj_id, nivel, monto, conexion_id, etiqueta) -> None:
+def _encolar_pendiente(obj_id, nivel, monto, conexion_id, etiqueta, moneda=None) -> None:
     """Guarda un cambio de presupuesto que Facebook no aceptó (por límite) para
     reintentarlo solo. Si ya había uno para el mismo objeto, se reemplaza (gana el
     último valor)."""
     with _PEND_LOCK:
         lst = [p for p in _pendientes_leer() if p.get("obj_id") != obj_id]
         lst.append({"obj_id": obj_id, "nivel": nivel, "monto": float(monto),
-                    "conexion_id": conexion_id, "etiqueta": etiqueta,
+                    "conexion_id": conexion_id, "etiqueta": etiqueta, "moneda": moneda,
                     "ts": db.a_texto(db.ahora())})
         _pendientes_guardar(lst)
     _set_estado(pendientes_presupuesto=len(lst))
@@ -920,7 +934,7 @@ def procesar_pendientes_presupuesto() -> int:
     quedan, aplicados = [], 0
     for p in lst:
         r = actualizar_presupuesto(p["obj_id"], p.get("nivel", "adset"),
-                                   p["monto"], p.get("conexion_id"))
+                                   p["monto"], p.get("conexion_id"), p.get("moneda"))
         if r.get("ok"):
             aplicados += 1
             _log(f"✔ Presupuesto pendiente aplicado: {p.get('etiqueta') or p['obj_id']} "
@@ -946,16 +960,16 @@ def _es_error_rate_limit_txt(txt: Optional[str]) -> bool:
 
 def actualizar_presupuesto_async(obj_id: str, nivel: str, nuevo_monto: float,
                                  conexion_id: Optional[int] = None,
-                                 etiqueta: str = "") -> None:
+                                 etiqueta: str = "", moneda=None) -> None:
     """Empuja el cambio de presupuesto a Facebook en SEGUNDO PLANO (no bloquea la
     UI). Si Facebook está frenado (rate limit), NO se pierde: se encola y se
     reintenta solo cada pocos minutos hasta aplicarse."""
     def _worker():
-        r = actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id)
+        r = actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id, moneda)
         if r.get("ok"):
             _log(f"✔ Presupuesto aplicado en Facebook: {etiqueta or obj_id} → {nuevo_monto:.2f}.")
         elif _es_error_rate_limit_txt(r.get("error")):
-            _encolar_pendiente(obj_id, nivel, nuevo_monto, conexion_id, etiqueta)
+            _encolar_pendiente(obj_id, nivel, nuevo_monto, conexion_id, etiqueta, moneda)
             _log(f"⏳ Facebook está frenado; el presupuesto de {etiqueta or obj_id} "
                  f"→ {nuevo_monto:.2f} quedó EN COLA y se aplicará solo en unos minutos.")
         else:
@@ -1096,7 +1110,7 @@ def _campaign_es_cbo(api, campaign_id) -> bool:
 
 def _crear_adset_manual(api, act: str, src: dict, presupuesto_nat=None,
                         status: str = "PAUSED", sufijo: str = "— copia",
-                        dry_run: bool = False):
+                        dry_run: bool = False, moneda=None):
     """PASO 3 — reconstruye un conjunto con los mismos ajustes del origen.
     Reglas: nunca daily+lifetime a la vez; si la campaña es CBO no se manda
     presupuesto; start_time en el pasado se omite; targeting/promoted_object
@@ -1118,7 +1132,7 @@ def _crear_adset_manual(api, act: str, src: dict, presupuesto_nat=None,
             p["end_time"] = src.get("end_time")   # start_time se omite (empieza ya)
         if not es_cbo:   # presupuesto solo si la campaña NO es CBO/Advantage
             if presupuesto_nat and float(presupuesto_nat) > 0:
-                p["daily_budget"] = int(round(float(presupuesto_nat) * 100))
+                p["daily_budget"] = int(round(float(presupuesto_nat) * _offset_moneda(moneda)))
             elif src.get("daily_budget"):
                 p["daily_budget"] = src.get("daily_budget")
             elif src.get("lifetime_budget"):
@@ -1246,7 +1260,7 @@ def _resolver_adset_de_copia(copia: dict, nuevo_ad_id: Optional[str], api) -> Op
 def duplicar_objeto(nivel: str, obj_id: str, num_copias: int, presupuesto: float,
                     activar: bool = False, conexion_id: Optional[int] = None,
                     cuenta_id: Optional[str] = None, cuenta_nombre: Optional[str] = None,
-                    reutilizar_post: bool = True, dry_run: bool = False) -> dict:
+                    reutilizar_post: bool = True, dry_run: bool = False, moneda=None) -> dict:
     """Duplica de forma MANUAL (sin /copies) según el NIVEL de la vista:
       - 'ad'       → duplica el ANUNCIO reutilizando el creative (prueba social).
       - 'adset'    → reconstruye el CONJUNTO + recrea sus anuncios (mismos creativos).
@@ -1281,7 +1295,8 @@ def duplicar_objeto(nivel: str, obj_id: str, num_copias: int, presupuesto: float
                 src = _a_dict(AdSet(obj_id, api=api).api_get(fields=_ADSET_FIELDS))
                 ads_src = _ads_de_adset(api, obj_id)
                 nuevo_adset = _crear_adset_manual(api, act, src, presupuesto, status,
-                                                  sufijo=f"— copia {i}", dry_run=dry_run)
+                                                  sufijo=f"— copia {i}", dry_run=dry_run,
+                                                  moneda=moneda)
                 if dry_run:
                     resultado["exitosas"].append({"nivel": "adset", "dry_run": nuevo_adset,
                                                   "anuncios_a_recrear": len(ads_src)})
@@ -1337,7 +1352,8 @@ def duplicar_objeto(nivel: str, obj_id: str, num_copias: int, presupuesto: float
                     src_adset_id = str(asrc.get("id") or "")
                     asrc["campaign_id"] = nueva_camp_id   # colgar de la nueva campaña
                     nuevo_as = _crear_adset_manual(api, act, asrc,
-                                                   None if es_cbo else presupuesto, status)
+                                                   None if es_cbo else presupuesto, status,
+                                                   moneda=moneda)
                     nuevo_as_id = _a_dict(nuevo_as).get("id")
                     if not nuevo_as_id:
                         continue
@@ -1387,7 +1403,7 @@ def _revisar_cambios_presupuesto() -> None:
         if clave in cache_budget:
             actual = cache_budget[clave]
         else:
-            actual = _leer_daily_budget_adset(adset_id, api)
+            actual = _leer_daily_budget_adset(adset_id, api, anuncio.get("cuenta_moneda"))
             cache_budget[clave] = actual
         if actual is None:
             continue

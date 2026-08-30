@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v132 · 2026-08-24"
+APP_VERSION = "v133 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -299,7 +299,8 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 
     # Si hay API/conexión disponible, intentamos el cambio en Facebook.
     if fb.SDK_DISPONIBLE and hay_conexion and obj_id:
-        r = fb.actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id)
+        r = fb.actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id,
+                                      anuncio.get("cuenta_moneda"))
         if not r["ok"]:
             # NO cerramos el período en SQLite.
             return {"ok": False, "error": r["error"], "solo_local": False}
@@ -922,7 +923,7 @@ def _aplicar_presupuesto_grupo(fila, nuevo_usd):
     hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
     if fb.SDK_DISPONIBLE and hay and fila.get("budget_obj_id"):
         r = fb.actualizar_presupuesto(fila["budget_obj_id"], fila.get("budget_nivel", "adset"),
-                                      nativo, fila.get("conexion_id"))
+                                      nativo, fila.get("conexion_id"), fila.get("moneda"))
         if not r["ok"]:
             return {"ok": False, "error": r["error"]}
         _cambiar_periodo_snapshot(fila["ad_ids"], nativo)
@@ -1546,7 +1547,8 @@ def _barra_acciones_conjunto(filas):
                 if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
                     fb.actualizar_presupuesto_async(
                         f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
-                        f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40])
+                        f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40],
+                        moneda=f.get("moneda"))
             resumen = btn_lbl if factor is not None else f"→ {_usd(nuevo)}"
             st.session_state["_estado_msg"] = ("ok",
                 f"Presupuesto de {len(sel)} anuncio(s): {resumen}. "
@@ -1972,7 +1974,8 @@ def _pop_presupuesto(f):
         if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
             fb.actualizar_presupuesto_async(
                 f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
-                f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40])
+                f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40],
+                moneda=f.get("moneda"))
             st.session_state["_estado_msg"] = (
                 "ok", f"Presupuesto de '{str(f['nombre'])[:35]}' → {_usd(nuevo)}.{_ojo} "
                 "Aplicándose en Facebook en segundo plano.")
@@ -2024,7 +2027,8 @@ def _pop_duplicar(f):
                                      activar=bool(activar), conexion_id=f.get("conexion_id"),
                                      cuenta_id=f.get("cuenta_id"),
                                      cuenta_nombre=f.get("cuenta_nombre"),
-                                     reutilizar_post=bool(reutilizar), dry_run=bool(dry))
+                                     reutilizar_post=bool(reutilizar), dry_run=bool(dry),
+                                     moneda=f.get("moneda"))
         ok = res.get("exitosas", [])
         fail = res.get("fallidas", [])
         if res.get("error_global"):
