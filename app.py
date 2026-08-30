@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v130 · 2026-08-24"
+APP_VERSION = "v131 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -1994,8 +1994,10 @@ def _pop_duplicar(f):
     obj_id = f.get("status_obj_id")
     lbl = {"ad": "anuncio", "adset": "conjunto", "campaign": "campaña"}.get(nivel, "anuncio")
     st.markdown(f"**Duplicar {lbl}: {esc_nombre(f)}**")
-    st.caption(f"Estás en la vista **{lbl}**, así que se duplica el {lbl} completo "
-               "en su misma campaña.")
+    st.caption(f"Estás en la vista **{lbl}**. Se duplica el {lbl} de forma **manual** "
+               "(sin `/copies`), reutilizando el mismo creativo → **conserva la publicación "
+               "y su prueba social** (likes, comentarios, compartidos). Las copias quedan "
+               "**pausadas** por defecto.")
     hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
     if not hay:
         st.info("Necesitas una conexión de Facebook activa para duplicar.")
@@ -2004,30 +2006,31 @@ def _pop_duplicar(f):
                         key=f"dupn_{f['sub']}")
     presu = st.number_input(f"Presupuesto por copia (USD)", min_value=0.0,
                             value=4.0, step=1.0, key=f"dupp_{f['sub']}",
-                            help="Por defecto 4 USD por copia.")
+                            help="Se aplica al conjunto nuevo (si la campaña no es CBO).")
     activar = st.toggle("Activar copias de inmediato", value=False, key=f"dupa_{f['sub']}")
     reutilizar = True
-    if nivel == "ad":
-        reutilizar = st.toggle("Conservar interacciones (usar la misma publicación)",
-                               value=True, key=f"dupr_{f['sub']}",
-                               help="Fuerza a la copia a usar el MISMO post del original, así "
-                                    "arrastra los likes, comentarios y compartidos.")
-    else:
-        st.caption("Las interacciones se conservan si los anuncios del "
-                   f"{lbl} usan publicaciones existentes (deep copy de Facebook).")
-    if st.button("Duplicar ahora", type="primary", key=f"dupbtn_{f['sub']}",
-                 use_container_width=True):
+    dry = st.toggle("🔎 Solo ver el payload (dry-run, no crea nada)", value=False,
+                    key=f"dupdry_{f['sub']}",
+                    help="Muestra exactamente lo que se enviaría a Facebook, sin ejecutar.")
+    if st.button("Duplicar ahora" if not dry else "Ver payload (dry-run)", type="primary",
+                 key=f"dupbtn_{f['sub']}", use_container_width=True):
         nativo = presu / (f["rate_c"] or 1)
-        with st.spinner(f"Duplicando {lbl} en Facebook..."):
+        with st.spinner(f"{'Calculando payload' if dry else 'Duplicando'} ({lbl})..."):
             res = fb.duplicar_objeto(nivel, obj_id, int(n), float(nativo),
                                      activar=bool(activar), conexion_id=f.get("conexion_id"),
                                      cuenta_id=f.get("cuenta_id"),
                                      cuenta_nombre=f.get("cuenta_nombre"),
-                                     reutilizar_post=bool(reutilizar))
+                                     reutilizar_post=bool(reutilizar), dry_run=bool(dry))
         ok = res.get("exitosas", [])
         fail = res.get("fallidas", [])
         if res.get("error_global"):
             st.error(res["error_global"])
+        if dry:
+            st.info("Dry-run: esto es lo que se enviaría a Facebook (no se creó nada).")
+            st.json(ok if ok else res)
+            for x in fail:
+                st.error(f"{x['nombre']}: {x['error']}")
+            return
         if ok:
             st.success(f"{len(ok)} copia(s) de {lbl} creada(s).")
             if nivel == "ad" and reutilizar:

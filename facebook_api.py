@@ -1028,17 +1028,129 @@ def _forzar_post_existente(nuevo_ad_id: str, post_id: str, cuenta_id: Optional[s
     return True
 
 
+# --- Duplicación MANUAL (sin /copies): reconstruye los objetos reutilizando el
+#     creative_id para conservar la prueba social. Funciona en Development Tier. ---
+_RATE_CODES = {17, 613, 80000, 80004}   # rate limiting -> reintento con backoff
+_ADSET_FIELDS = ["name", "campaign_id", "daily_budget", "lifetime_budget", "billing_event",
+                 "optimization_goal", "bid_amount", "bid_strategy", "targeting",
+                 "promoted_object", "start_time", "end_time", "attribution_spec",
+                 "destination_type"]
+
+
+def _act_id(cuenta_id) -> str:
+    s = str(cuenta_id or "")
+    return s if s.startswith("act_") else f"act_{s}"
+
+
+def _con_backoff(fn, intentos: int = 3, espera_ini: float = 2.0):
+    """Reintenta fn() con backoff exponencial SOLO en códigos de rate limit."""
+    espera = espera_ini
+    ultimo = None
+    for i in range(intentos):
+        try:
+            return fn()
+        except FacebookRequestError as e:
+            ultimo = e
+            try:
+                code = e.api_error_code()
+            except Exception:
+                code = None
+            if code in _RATE_CODES and i < intentos - 1:
+                _dormir(espera)
+                espera *= 2
+                continue
+            raise
+    if ultimo:
+        raise ultimo
+
+
+def _leer_ad_src(api, ad_id: str) -> dict:
+    """PASO 1 — lee el anuncio origen (nombre, adset, status, creative id + post)."""
+    ad = _a_dict(Ad(ad_id, api=api).api_get(
+        fields=["name", "adset_id", "status", "creative{id,effective_object_story_id}"]))
+    cr = _a_dict(ad.get("creative"))
+    return {"name": ad.get("name"), "adset_id": ad.get("adset_id"),
+            "status": ad.get("status"), "creative_id": cr.get("id"),
+            "post_id": cr.get("effective_object_story_id")}
+
+
+def _crear_ad_manual(api, act: str, name: str, adset_id: str, creative_id: str,
+                     status: str = "PAUSED", dry_run: bool = False):
+    """PASO 2 — crea el anuncio duplicado reutilizando el MISMO creative_id
+    (conserva la publicación y su prueba social). NO crea un post nuevo."""
+    params = {"name": str(name)[:390], "adset_id": adset_id,
+              "creative": {"creative_id": creative_id}, "status": status}
+    if dry_run:
+        return {"dry_run": True, "endpoint": f"{act}/ads", "params": params}
+    return _con_backoff(lambda: AdAccount(act, api=api).create_ad(params=params))
+
+
+def _campaign_es_cbo(api, campaign_id) -> bool:
+    try:
+        c = _a_dict(Campaign(campaign_id, api=api).api_get(
+            fields=["daily_budget", "lifetime_budget"]))
+        return bool(c.get("daily_budget") or c.get("lifetime_budget"))
+    except Exception:
+        return False
+
+
+def _crear_adset_manual(api, act: str, src: dict, presupuesto_nat=None,
+                        status: str = "PAUSED", sufijo: str = "— copia",
+                        dry_run: bool = False):
+    """PASO 3 — reconstruye un conjunto con los mismos ajustes del origen.
+    Reglas: nunca daily+lifetime a la vez; si la campaña es CBO no se manda
+    presupuesto; start_time en el pasado se omite; targeting/promoted_object
+    completos."""
+    p = {"name": f"{src.get('name') or 'Conjunto'} {sufijo}"[:390],
+         "campaign_id": src.get("campaign_id"), "status": status}
+    for k in ("billing_event", "optimization_goal", "bid_amount", "bid_strategy",
+              "targeting", "promoted_object", "attribution_spec", "destination_type"):
+        v = src.get(k)
+        if v not in (None, "", [], {}):
+            p[k] = v
+    # end_time: solo si está en el futuro; start_time se omite (empieza ya).
+    try:
+        et = src.get("end_time")
+        if et:
+            p["end_time"] = et
+    except Exception:
+        pass
+    # Presupuesto: solo si la campaña NO es CBO/Advantage (si lo es, Meta lo rechaza).
+    if not _campaign_es_cbo(api, src.get("campaign_id")):
+        if presupuesto_nat and float(presupuesto_nat) > 0:
+            p["daily_budget"] = int(round(float(presupuesto_nat) * 100))
+        elif src.get("daily_budget"):
+            p["daily_budget"] = src.get("daily_budget")
+        elif src.get("lifetime_budget"):
+            p["lifetime_budget"] = src.get("lifetime_budget")
+    if dry_run:
+        return {"dry_run": True, "endpoint": f"{act}/adsets", "params": p}
+    return _con_backoff(lambda: AdAccount(act, api=api).create_ad_set(params=p))
+
+
+def _ads_de_adset(api, adset_id: str) -> list:
+    """Lista de {name, creative_id} de los anuncios de un conjunto."""
+    out = []
+    try:
+        for a in AdSet(adset_id, api=api).get_ads(fields=["name", "creative{id}"]):
+            ad = _a_dict(a)
+            cid = _a_dict(ad.get("creative")).get("id")
+            if cid:
+                out.append({"name": ad.get("name") or "Anuncio", "creative_id": cid})
+    except Exception as e:
+        _log(f"No pude listar anuncios del conjunto {adset_id}: {e}")
+    return out
+
+
 def duplicar_anuncio(ad_id: str, num_copias: int, presupuesto: float,
                      activar: bool = False, conexion_id: Optional[int] = None,
                      cuenta_id: Optional[str] = None,
                      cuenta_nombre: Optional[str] = None,
-                     reutilizar_post: bool = True) -> dict:
-    """Duplica un anuncio N veces con deep_copy usando el token de su conexión.
-
-    Si reutilizar_post=True (por defecto), fuerza a cada copia a usar la MISMA
-    publicación del original (effective_object_story_id), de modo que se conserven
-    los likes, comentarios y compartidos (prueba social). Si no se puede, la copia
-    igual se crea con su propio creativo (deep_copy) y se avisa."""
+                     reutilizar_post: bool = True, dry_run: bool = False) -> dict:
+    """Duplica un ANUNCIO N veces de forma MANUAL (sin /copies): crea cada copia
+    reutilizando el MISMO creative_id, así conserva la publicación y su prueba
+    social (likes, comentarios, compartidos). Las copias van al MISMO conjunto y
+    quedan PAUSADAS (salvo activar=True). Misma cuenta publicitaria."""
     resultado = {"exitosas": [], "fallidas": [], "error_global": None,
                  "post_id": None, "post_reutilizado": 0}
     if not SDK_DISPONIBLE:
@@ -1048,51 +1160,48 @@ def duplicar_anuncio(ad_id: str, num_copias: int, presupuesto: float,
     if api is None:
         resultado["error_global"] = "No hay token para la conexión de este anuncio."
         return resultado
+    if not cuenta_id:
+        resultado["error_global"] = "Falta la cuenta publicitaria del anuncio."
+        return resultado
 
+    try:
+        src = _leer_ad_src(api, ad_id)
+    except FacebookRequestError as e:
+        resultado["error_global"] = _fmt_fb_error(e)
+        return resultado
+    creative_id = src.get("creative_id")
+    adset_id = src.get("adset_id")
+    resultado["post_id"] = src.get("post_id")
+    if not creative_id or not adset_id:
+        resultado["error_global"] = "No pude leer el creativo/conjunto del anuncio origen."
+        return resultado
+
+    act = _act_id(cuenta_id)
     num_copias = max(1, min(int(num_copias), 10))
     original = db.obtener_anuncio(ad_id)
-    nombre_base = original["nombre"] if original else f"Anuncio {ad_id}"
-    status_copia = "ACTIVE" if activar else "PAUSED"
-
-    # Post real del original (para arrastrar interacciones).
-    post_id = _post_id_del_anuncio(ad_id, api) if reutilizar_post else None
-    resultado["post_id"] = post_id
+    nombre_base = src.get("name") or (original or {}).get("nombre") or f"Anuncio {ad_id}"
+    status = "ACTIVE" if activar else "PAUSED"   # por defecto PAUSED
 
     for i in range(1, num_copias + 1):
         nombre_copia = f"{nombre_base} - Copia {i}"
         try:
-            copia = Ad(ad_id, api=api).create_copy(params={
-                "deep_copy": True, "status_option": status_copia})
-            nuevo_ad_id = copia.get("copied_ad_id") or copia.get("ad_id") or copia.get("id")
-            nuevo_adset_id = _resolver_adset_de_copia(copia, nuevo_ad_id, api)
+            nad = _crear_ad_manual(api, act, nombre_copia, adset_id, creative_id, status, dry_run)
+            if dry_run:
+                resultado["exitosas"].append({"nombre": nombre_copia, "dry_run": nad})
+                continue
+            nuevo_ad_id = _a_dict(nad).get("id")
             if not nuevo_ad_id:
                 raise RuntimeError("Facebook no devolvió el ad_id de la copia.")
-
-            # Forzar la MISMA publicación para conservar las interacciones.
-            if post_id:
-                try:
-                    if _forzar_post_existente(nuevo_ad_id, post_id, cuenta_id, nombre_copia, api):
-                        resultado["post_reutilizado"] += 1
-                        _log(f"Copia {nuevo_ad_id}: usa la publicación {post_id} "
-                             f"(conserva interacciones).")
-                except Exception as e:
-                    _log(f"Copia {nuevo_ad_id}: no pude reutilizar la publicación "
-                         f"{post_id} ({e}); queda con su propio creativo.")
-
-            if nuevo_adset_id:
-                r = actualizar_presupuesto_facebook(nuevo_adset_id, presupuesto, conexion_id)
-                if not r["ok"]:
-                    _log(f"Copia {nuevo_ad_id}: presupuesto no aplicado: {r['error']}")
-
-            db.upsert_anuncio(nuevo_ad_id, nombre_copia, adset_id=nuevo_adset_id,
-                              activo=1 if activar else 0, effective_status=status_copia,
+            resultado["post_reutilizado"] += 1   # mismo creative_id -> mismo post
+            db.upsert_anuncio(nuevo_ad_id, nombre_copia, adset_id=adset_id,
+                              activo=1 if activar else 0, effective_status=status,
                               conexion_id=conexion_id, cuenta_id=cuenta_id,
                               cuenta_nombre=cuenta_nombre)
             db.abrir_periodo(nuevo_ad_id, float(presupuesto))
             resultado["exitosas"].append({
-                "ad_id": nuevo_ad_id, "nombre": nombre_copia,
-                "adset_id": nuevo_adset_id, "presupuesto": presupuesto})
-            _log(f"Copia creada: {nombre_copia} ({nuevo_ad_id}).")
+                "ad_id": nuevo_ad_id, "nombre": nombre_copia, "adset_id": adset_id,
+                "creative_id": creative_id, "post_id": src.get("post_id")})
+            _log(f"Copia manual creada: {nombre_copia} ({nuevo_ad_id}), creative {creative_id}.")
         except FacebookRequestError as e:
             resultado["fallidas"].append({"nombre": nombre_copia, "error": _fmt_fb_error(e)})
         except Exception as e:
@@ -1123,15 +1232,16 @@ def _resolver_adset_de_copia(copia: dict, nuevo_ad_id: Optional[str], api) -> Op
 def duplicar_objeto(nivel: str, obj_id: str, num_copias: int, presupuesto: float,
                     activar: bool = False, conexion_id: Optional[int] = None,
                     cuenta_id: Optional[str] = None, cuenta_nombre: Optional[str] = None,
-                    reutilizar_post: bool = True) -> dict:
-    """Duplica según el NIVEL de la vista:
-      - 'ad'       → duplica el ANUNCIO (con reuso de publicación/interacciones).
-      - 'adset'    → duplica el CONJUNTO completo (con sus anuncios) en su campaña.
-      - 'campaign' → duplica la CAMPAÑA completa.
+                    reutilizar_post: bool = True, dry_run: bool = False) -> dict:
+    """Duplica de forma MANUAL (sin /copies) según el NIVEL de la vista:
+      - 'ad'       → duplica el ANUNCIO reutilizando el creative (prueba social).
+      - 'adset'    → reconstruye el CONJUNTO + recrea sus anuncios (mismos creativos).
+      - 'campaign' → reconstruye la CAMPAÑA + sus conjuntos + sus anuncios.
+    Todo en la MISMA cuenta publicitaria y PAUSADO (salvo activar=True).
     """
     if nivel == "ad":
         return duplicar_anuncio(obj_id, num_copias, presupuesto, activar, conexion_id,
-                                cuenta_id, cuenta_nombre, reutilizar_post)
+                                cuenta_id, cuenta_nombre, reutilizar_post, dry_run)
 
     resultado = {"exitosas": [], "fallidas": [], "error_global": None, "nivel": nivel}
     if not SDK_DISPONIBLE:
@@ -1141,52 +1251,100 @@ def duplicar_objeto(nivel: str, obj_id: str, num_copias: int, presupuesto: float
     if api is None:
         resultado["error_global"] = "No hay token para la conexión."
         return resultado
-    if not obj_id:
-        resultado["error_global"] = "No hay objeto que duplicar. Pulsa Recargar y reintenta."
+    if not obj_id or not cuenta_id:
+        resultado["error_global"] = ("Falta el objeto o la cuenta publicitaria. "
+                                     "Pulsa Recargar y reintenta.")
         return resultado
 
+    act = _act_id(cuenta_id)
     num_copias = max(1, min(int(num_copias), 10))
-    status_copia = "ACTIVE" if activar else "PAUSED"
-    centavos = int(round(float(presupuesto) * 100))
+    status = "ACTIVE" if activar else "PAUSED"
     etiqueta = "conjunto" if nivel == "adset" else "campaña"
 
     for i in range(1, num_copias + 1):
         try:
             if nivel == "adset":
-                copia = AdSet(obj_id, api=api).create_copy(params={
-                    "deep_copy": True, "status_option": status_copia})
-                nuevo = copia.get("copied_adset_id") or copia.get("id")
-                if nuevo:
-                    try:  # aplica el presupuesto al conjunto nuevo (si no es CBO)
-                        AdSet(nuevo, api=api).api_update(
-                            params={AdSet.Field.daily_budget: centavos})
-                    except Exception as e:
-                        _log(f"Copia de conjunto {nuevo}: presupuesto no aplicado ({e}).")
+                src = _a_dict(AdSet(obj_id, api=api).api_get(fields=_ADSET_FIELDS))
+                ads_src = _ads_de_adset(api, obj_id)
+                nuevo_adset = _crear_adset_manual(api, act, src, presupuesto, status,
+                                                  sufijo=f"— copia {i}", dry_run=dry_run)
+                if dry_run:
+                    resultado["exitosas"].append({"nivel": "adset", "dry_run": nuevo_adset,
+                                                  "anuncios_a_recrear": len(ads_src)})
+                    continue
+                nuevo_adset_id = _a_dict(nuevo_adset).get("id")
+                if not nuevo_adset_id:
+                    raise RuntimeError("No se pudo crear el conjunto nuevo.")
+                creados, fallos_ad = 0, []
+                for a in ads_src:
+                    try:
+                        nad = _crear_ad_manual(api, act, f"{a['name']} — copia {i}",
+                                               nuevo_adset_id, a["creative_id"], status)
+                        nid = _a_dict(nad).get("id")
+                        creados += 1
+                        db.upsert_anuncio(nid, f"{a['name']} — copia {i}",
+                                          adset_id=nuevo_adset_id, activo=1 if activar else 0,
+                                          effective_status=status, conexion_id=conexion_id,
+                                          cuenta_id=cuenta_id, cuenta_nombre=cuenta_nombre)
+                        db.abrir_periodo(nid, float(presupuesto))
+                    except FacebookRequestError as e:
+                        fallos_ad.append(_fmt_fb_error(e))
+                resultado["exitosas"].append({"id": nuevo_adset_id, "nivel": "adset",
+                                              "anuncios_creados": creados,
+                                              "anuncios_fallidos": fallos_ad})
+                _log(f"Conjunto duplicado (manual): {nuevo_adset_id} · {creados} anuncios.")
             else:  # campaign
-                copia = Campaign(obj_id, api=api).create_copy(params={
-                    "deep_copy": True, "status_option": status_copia})
-                nuevo = copia.get("copied_campaign_id") or copia.get("id")
-                if nuevo:
-                    try:  # si es CBO, aplica presupuesto a la campaña; si no, se ignora
-                        Campaign(nuevo, api=api).api_update(
-                            params={Campaign.Field.daily_budget: centavos})
-                    except Exception:
-                        pass
-            resultado["exitosas"].append({"id": nuevo, "nivel": nivel})
-            _log(f"Copia de {etiqueta} creada desde {obj_id}: {nuevo}.")
+                c = _a_dict(Campaign(obj_id, api=api).api_get(fields=[
+                    "name", "objective", "status", "special_ad_categories", "buying_type",
+                    "daily_budget", "lifetime_budget", "bid_strategy"]))
+                cp = {"name": f"{c.get('name') or 'Campaña'} — copia {i}"[:390],
+                      "objective": c.get("objective"), "status": status,
+                      "special_ad_categories": c.get("special_ad_categories") or []}
+                if c.get("buying_type"):
+                    cp["buying_type"] = c["buying_type"]
+                es_cbo = bool(c.get("daily_budget") or c.get("lifetime_budget"))
+                if es_cbo:
+                    if c.get("daily_budget"):
+                        cp["daily_budget"] = c["daily_budget"]
+                    elif c.get("lifetime_budget"):
+                        cp["lifetime_budget"] = c["lifetime_budget"]
+                    if c.get("bid_strategy"):
+                        cp["bid_strategy"] = c["bid_strategy"]
+                if dry_run:
+                    resultado["exitosas"].append({"nivel": "campaign", "dry_run": cp})
+                    continue
+                nueva_camp = _con_backoff(lambda: AdAccount(act, api=api).create_campaign(params=cp))
+                nueva_camp_id = _a_dict(nueva_camp).get("id")
+                if not nueva_camp_id:
+                    raise RuntimeError("No se pudo crear la campaña nueva.")
+                conjuntos = 0
+                for asrc_obj in Campaign(obj_id, api=api).get_ad_sets(fields=_ADSET_FIELDS + ["id"]):
+                    asrc = _a_dict(asrc_obj)
+                    src_adset_id = str(asrc.get("id") or "")
+                    asrc["campaign_id"] = nueva_camp_id   # colgar de la nueva campaña
+                    nuevo_as = _crear_adset_manual(api, act, asrc,
+                                                   None if es_cbo else presupuesto, status)
+                    nuevo_as_id = _a_dict(nuevo_as).get("id")
+                    if not nuevo_as_id:
+                        continue
+                    conjuntos += 1
+                    for a in _ads_de_adset(api, src_adset_id):
+                        try:
+                            nad = _crear_ad_manual(api, act, f"{a['name']} — copia",
+                                                   nuevo_as_id, a["creative_id"], status)
+                            nid = _a_dict(nad).get("id")
+                            db.upsert_anuncio(nid, f"{a['name']} — copia", adset_id=nuevo_as_id,
+                                              activo=1 if activar else 0, effective_status=status,
+                                              conexion_id=conexion_id, cuenta_id=cuenta_id,
+                                              cuenta_nombre=cuenta_nombre)
+                            db.abrir_periodo(nid, float(presupuesto))
+                        except FacebookRequestError as e:
+                            _log(f"Anuncio (copia de campaña) falló: {_fmt_fb_error(e)}")
+                resultado["exitosas"].append({"id": nueva_camp_id, "nivel": "campaign",
+                                              "conjuntos_creados": conjuntos})
+                _log(f"Campaña duplicada (manual): {nueva_camp_id} · {conjuntos} conjuntos.")
         except FacebookRequestError as e:
-            msg = _fmt_fb_error(e)
-            # Pista específica: no se puede copiar un CONJUNTO cuando la campaña lleva
-            # el presupuesto (CBO/Advantage+). La solución es duplicar la CAMPAÑA.
-            try:
-                sub = e.api_error_subcode()
-            except Exception:
-                sub = None
-            if nivel == "adset" and sub == 3858504:
-                msg += (" · Suele ser porque la campaña maneja el presupuesto (CBO) o es "
-                        "Advantage+. Prueba: cambia arriba 'Ver por' a Campaña y duplica la "
-                        "CAMPAÑA completa en vez del conjunto.")
-            resultado["fallidas"].append({"nombre": f"{etiqueta} {i}", "error": msg})
+            resultado["fallidas"].append({"nombre": f"{etiqueta} {i}", "error": _fmt_fb_error(e)})
         except Exception as e:
             resultado["fallidas"].append({"nombre": f"{etiqueta} {i}", "error": str(e)})
     return resultado
