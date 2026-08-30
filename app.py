@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v131 · 2026-08-24"
+APP_VERSION = "v132 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -562,7 +562,11 @@ def sidebar_filtros():
         return cid in (None, 0, "0") or str(cid) in _cx_ids
     # Excluir de TODO el sidebar los anuncios de conexiones eliminadas (huérfanos).
     todos = [a for a in todos if _biz_real(a)]
-    business = sorted({_alias_conexion(a.get("conexion_id"), conexiones) for a in todos})
+    # Business a listar: los que ya tienen anuncios + TODAS las conexiones activas
+    # (para que un Business recién agregado aparezca aunque aún no hayas Recargado).
+    business = sorted(
+        {_alias_conexion(a.get("conexion_id"), conexiones) for a in todos}
+        | {_alias_conexion(c["id"], conexiones) for c in conexiones if c.get("activo")})
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
     campanas = sorted({a.get("campaign_nombre") for a in todos if a.get("campaign_nombre")})

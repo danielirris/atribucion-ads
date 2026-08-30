@@ -1100,32 +1100,46 @@ def _crear_adset_manual(api, act: str, src: dict, presupuesto_nat=None,
     """PASO 3 — reconstruye un conjunto con los mismos ajustes del origen.
     Reglas: nunca daily+lifetime a la vez; si la campaña es CBO no se manda
     presupuesto; start_time en el pasado se omite; targeting/promoted_object
-    completos."""
-    p = {"name": f"{src.get('name') or 'Conjunto'} {sufijo}"[:390],
-         "campaign_id": src.get("campaign_id"), "status": status}
-    for k in ("billing_event", "optimization_goal", "bid_amount", "bid_strategy",
-              "targeting", "promoted_object", "attribution_spec", "destination_type"):
-        v = src.get(k)
-        if v not in (None, "", [], {}):
-            p[k] = v
-    # end_time: solo si está en el futuro; start_time se omite (empieza ya).
-    try:
-        et = src.get("end_time")
-        if et:
-            p["end_time"] = et
-    except Exception:
-        pass
-    # Presupuesto: solo si la campaña NO es CBO/Advantage (si lo es, Meta lo rechaza).
-    if not _campaign_es_cbo(api, src.get("campaign_id")):
-        if presupuesto_nat and float(presupuesto_nat) > 0:
-            p["daily_budget"] = int(round(float(presupuesto_nat) * 100))
-        elif src.get("daily_budget"):
-            p["daily_budget"] = src.get("daily_budget")
-        elif src.get("lifetime_budget"):
-            p["lifetime_budget"] = src.get("lifetime_budget")
+    completos. Si Meta rechaza el optimization_goal (2490408 — objetivo de
+    rendimiento incompatible), reintenta dejando que Meta elija el compatible."""
+    es_cbo = _campaign_es_cbo(api, src.get("campaign_id"))
+
+    def _params(omit=()):
+        p = {"name": f"{src.get('name') or 'Conjunto'} {sufijo}"[:390],
+             "campaign_id": src.get("campaign_id"), "status": status}
+        for k in ("billing_event", "optimization_goal", "bid_amount", "bid_strategy",
+                  "targeting", "promoted_object", "attribution_spec", "destination_type"):
+            if k in omit:
+                continue
+            v = src.get(k)
+            if v not in (None, "", [], {}):
+                p[k] = v
+        if src.get("end_time"):
+            p["end_time"] = src.get("end_time")   # start_time se omite (empieza ya)
+        if not es_cbo:   # presupuesto solo si la campaña NO es CBO/Advantage
+            if presupuesto_nat and float(presupuesto_nat) > 0:
+                p["daily_budget"] = int(round(float(presupuesto_nat) * 100))
+            elif src.get("daily_budget"):
+                p["daily_budget"] = src.get("daily_budget")
+            elif src.get("lifetime_budget"):
+                p["lifetime_budget"] = src.get("lifetime_budget")
+        return p
+
     if dry_run:
-        return {"dry_run": True, "endpoint": f"{act}/adsets", "params": p}
-    return _con_backoff(lambda: AdAccount(act, api=api).create_ad_set(params=p))
+        return {"dry_run": True, "endpoint": f"{act}/adsets", "params": _params()}
+    try:
+        return _con_backoff(lambda: AdAccount(act, api=api).create_ad_set(params=_params()))
+    except FacebookRequestError as e:
+        try:
+            sub = e.api_error_subcode()
+        except Exception:
+            sub = None
+        msg = (getattr(e, "api_error_message", lambda: "")() or "").lower()
+        if sub == 2490408 or "performance goal" in msg or "objetivo de rendimiento" in msg:
+            _log("Adset: optimization_goal incompatible; reintento sin ese campo.")
+            return _con_backoff(lambda: AdAccount(act, api=api).create_ad_set(
+                params=_params(omit=("optimization_goal", "bid_amount"))))
+        raise
 
 
 def _ads_de_adset(api, adset_id: str) -> list:
