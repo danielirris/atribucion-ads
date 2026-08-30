@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v129 · 2026-08-24"
+APP_VERSION = "v130 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -387,6 +387,7 @@ def sidebar_estado(pagina: str = "dashboard"):
 _PAGINAS = {
     "dashboard": ("Dashboard", ":material/dashboard:"),
     "graficos": ("Gráficos", ":material/insights:"),
+    "productos": ("Productos", ":material/category:"),
     "ventas": ("Ventas (3 días)", ":material/receipt_long:"),
     "tutoriales": ("Tutoriales", ":material/school:"),
     "configuracion": ("Configuración", ":material/settings:"),
@@ -3871,6 +3872,107 @@ def pagina_graficos():
                    "Recargar). Ventas salen de tus fuentes importadas.")
 
 
+def pagina_productos():
+    """Rendimiento por producto: gasto (por nombre de campaña) + ventas/ingresos
+    (por la columna 'producto' de las ventas). Da ROAS, CPA y ganancia por producto."""
+    st.title("Rendimiento por producto")
+    ahora = db.ahora()
+    st.selectbox("📅 Rango",
+                 ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes", "Máximo"],
+                 key="f_rango")
+    date_preset, since, until, cutoff, hasta = _rango_actual(ahora)
+
+    todos = db.obtener_anuncios(solo_activos=False)
+    _cx = {str(c["id"]) for c in db.obtener_conexiones()}
+    todos = [a for a in todos
+             if a.get("conexion_id") in (None, 0, "0") or str(a.get("conexion_id")) in _cx]
+    insights = _insights_cache(date_preset, "ad", since, until)
+
+    _rate_cache = {}
+    def _rate(m):
+        m = (m or "USD").upper()
+        if m not in _rate_cache:
+            _rate_cache[m] = fx.tasa_a_usd(m)
+        return _rate_cache[m]
+
+    # Ventas por producto (columna 'producto' de las ventas) -> USD.
+    vprod = db.ventas_por_producto(cutoff, hasta)
+    mv = db.get_config("moneda_ventas", "auto")
+    if mv == "auto":
+        mons = [a.get("cuenta_moneda") for a in todos if a.get("cuenta_moneda")]
+        mv = max(set(mons), key=mons.count) if mons else "USD"
+    rate_v = fx.tasa_a_usd(mv)
+
+    # Lista de productos: de las ventas (columna) + de los nombres de campaña.
+    prods_camp = _extraer_productos([a.get("campaign_nombre") for a in todos
+                                     if a.get("campaign_nombre")])
+    productos = sorted(set(vprod.keys()) | set(prods_camp), key=lambda s: s.lower())
+    if not productos:
+        st.info("Aún no detecto productos. El producto se saca del **nombre de la campaña** "
+                "y/o de la **columna 'producto'** de tus ventas (configúrala en "
+                "Configuración → Fuentes de ventas). Pulsa **Recargar** en el Dashboard "
+                "para traer campañas.")
+        return
+
+    filas = []
+    for P in productos:
+        pn = _norm_txt(P)
+        # Gasto: anuncios cuyo nombre (campaña/conjunto/anuncio) contiene el producto.
+        gP = 0.0
+        for a in todos:
+            blob = _norm_txt((a.get("campaign_nombre") or "") + " "
+                             + (a.get("adset_nombre") or "") + " " + (a.get("nombre") or ""))
+            if pn and pn in blob:
+                m = insights.get(str(a["ad_id"]))
+                if m and m.get("spend"):
+                    gP += m["spend"] * _rate(a.get("cuenta_moneda"))
+        # Ventas/ingresos: por la columna 'producto' (match normalizado, tolerante).
+        nP, iP = 0, 0.0
+        for prod, d in vprod.items():
+            pnv = _norm_txt(prod)
+            if pn and (pn in pnv or pnv in pn):
+                nP += int(d["num"])
+                iP += d["ingreso_nat"] * rate_v
+        roas = (iP / gP) if gP > 0 else 0.0
+        cpa = (gP / nP) if nP > 0 else 0.0
+        filas.append({"Producto": P, "Gasto (USD)": round(gP, 2), "Ventas": nP,
+                      "Ingresos (USD)": round(iP, 2), "ROAS": round(roas, 2),
+                      "CPA (USD)": round(cpa, 2), "Ganancia (USD)": round(iP - gP, 2)})
+
+    df = pd.DataFrame(filas).sort_values("Ingresos (USD)", ascending=False)
+    # Totales arriba.
+    tg = df["Gasto (USD)"].sum(); ti = df["Ingresos (USD)"].sum(); tv = int(df["Ventas"].sum())
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Productos", f"{len(df)}")
+    c2.metric("Gasto total", _usd(tg))
+    c3.metric("Ingresos", _usd(ti))
+    c4.metric("Ganancia", _usd(ti - tg))
+
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config={
+        "Gasto (USD)": st.column_config.NumberColumn(format="$%.2f"),
+        "Ingresos (USD)": st.column_config.NumberColumn(format="$%.2f"),
+        "CPA (USD)": st.column_config.NumberColumn(format="$%.2f"),
+        "Ganancia (USD)": st.column_config.NumberColumn(format="$%.2f"),
+        "ROAS": st.column_config.NumberColumn(format="%.2f x"),
+    })
+
+    # Gráfica: ganancia por producto (verde gana, rojo pierde).
+    if not df.empty:
+        dch = df.sort_values("Ganancia (USD)", ascending=True)
+        cols = ["#1F8A4C" if g >= 0 else "#E11D48" for g in dch["Ganancia (USD)"]]
+        fig = go.Figure(go.Bar(x=dch["Ganancia (USD)"], y=dch["Producto"], orientation="h",
+                               marker_color=cols))
+        fig.update_layout(height=max(240, 42 * len(df)), margin=dict(t=20, b=10, l=10, r=10),
+                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                          font=dict(color="#18181B"), xaxis=dict(gridcolor="#DED9D0"))
+        st.subheader("Ganancia por producto")
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.caption("El **gasto** se atribuye por el **nombre de la campaña** (que contenga el producto) "
+               "y las **ventas/ingresos** por la **columna 'producto'** de tus ventas. Para que "
+               "cuadren perfecto, usa el mismo nombre de producto en la campaña y en esa columna.")
+
+
 def pagina_ventas():
     """Historial de TODAS las ventas de los últimos 3 días (todas las fuentes)."""
     st.title("Ventas — últimos 3 días")
@@ -4267,6 +4369,8 @@ def main():
         pagina_ventas()
     elif pagina == "graficos":
         pagina_graficos()
+    elif pagina == "productos":
+        pagina_productos()
     else:
         pagina_dashboard()
     # La navegación va al FINAL para que quede al pie de la barra lateral,

@@ -902,6 +902,25 @@ def ingresos_diarios_por_ad(desde: datetime,
     return out
 
 
+def ventas_por_producto(cutoff: Optional[datetime] = None,
+                        hasta: Optional[datetime] = None) -> dict:
+    """Ventas agrupadas por la columna 'producto': {producto: {'num', 'ingreso_nat'}}.
+    Solo ventas que traen producto (las demás no se pueden clasificar aquí)."""
+    cond = ["producto IS NOT NULL", "TRIM(producto) <> ''"]
+    args = []
+    if cutoff is not None:
+        cond.append("hora_venta >= ?"); args.append(a_texto(cutoff))
+    if hasta is not None:
+        cond.append("hora_venta < ?"); args.append(a_texto(hasta))
+    where = " WHERE " + " AND ".join(cond)
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT TRIM(producto) AS p, COUNT(*) num,
+                       COALESCE(SUM(valor_venta),0) total
+                FROM ventas{where} GROUP BY p""", args)
+        return {r["p"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+
+
 def ventas_por_hora(cutoff: datetime, hasta: Optional[datetime] = None) -> dict:
     """Ventas agrupadas por HORA del día (00-23): {'HH': {'num', 'ingreso_nat'}}."""
     cond = ["hora_venta >= ?"]
