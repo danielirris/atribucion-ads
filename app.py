@@ -31,11 +31,12 @@ import supabase_source as supa
 import gsheets as gs
 import fx
 import ia
+import capi
 
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v133 · 2026-08-24"
+APP_VERSION = "v134 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3700,12 +3701,109 @@ queda etiquetada con su país real.
         """)
 
 
+def _panel_capi():
+    st.subheader("Pixel / Conversions API (CAPI)")
+    st.caption("Envía las **COMPRAS** a tu Pixel/Conjunto de datos para que Facebook las "
+               "registre (Click-to-WhatsApp ocurre fuera de la web y el pixel no las ve solo). "
+               "Se mandan servidor→servidor con `ctwa_clid` + teléfono/email **hasheados**, "
+               "y se deduplican por el id de cada venta.")
+    pix = db.get_config(capi.K_PIXEL, "") or ""
+    tok = db.get_config(capi.K_TOKEN, "") or ""
+    if capi.configurado():
+        st.success(f"✅ Configurado · Pixel …{pix[-6:]} · token …{tok[-4:]}")
+    else:
+        st.info("Aún no configurado. Pega tu **Pixel/Dataset ID** y el **token CAPI** abajo.")
+
+    with st.form("form_capi"):
+        n_pix = st.text_input("Pixel / Dataset ID", value=pix,
+                              help="Events Manager → tu conjunto de datos → Configuración → Id.")
+        n_tok = st.text_input("Token de acceso CAPI", value="", type="password",
+                              placeholder="(déjalo vacío para NO cambiar el guardado)",
+                              help="Events Manager → Configuración → Conversions API → "
+                                   "Generar token de acceso.")
+        n_test = st.text_input("Código de evento de prueba (opcional)",
+                               value=db.get_config(capi.K_TEST, "") or "",
+                               help="Events Manager → Eventos de prueba. Para ver eventos en "
+                                    "vivo sin tocar los reales.")
+        st.markdown("**Columnas de tu tabla `compradores` para el match** (nombre EXACTO en Supabase):")
+        c1, c2 = st.columns(2)
+        n_ctwa = c1.text_input("Columna ctwa_clid", value=db.get_config(capi.K_COL_CTWA, "") or "",
+                               help="El id del clic de WhatsApp (lo mejor para atribuir CTWA).")
+        n_fbc = c2.text_input("Columna fbc (opcional)", value=db.get_config(capi.K_COL_FBC, "") or "")
+        n_phone = c1.text_input("Columna teléfono", value=db.get_config(capi.K_COL_PHONE, "") or "")
+        n_email = c2.text_input("Columna email", value=db.get_config(capi.K_COL_EMAIL, "") or "")
+        guardado = st.form_submit_button("Guardar configuración CAPI", type="primary")
+    if guardado:
+        db.set_config(capi.K_PIXEL, n_pix.strip())
+        if n_tok.strip():
+            db.set_config(capi.K_TOKEN, n_tok.strip())
+        db.set_config(capi.K_TEST, n_test.strip())
+        db.set_config(capi.K_COL_CTWA, n_ctwa.strip())
+        db.set_config(capi.K_COL_FBC, n_fbc.strip())
+        db.set_config(capi.K_COL_PHONE, n_phone.strip())
+        db.set_config(capi.K_COL_EMAIL, n_email.strip())
+        st.success("Guardado.")
+        st.rerun()
+
+    if st.button("Ver columnas de mi tabla de compradores"):
+        r = supa.probar_conexion()
+        if r.get("ok"):
+            st.caption("Columnas detectadas: " + ", ".join(f"`{c}`" for c in r["columnas"]))
+        else:
+            st.error(r.get("error"))
+
+    st.divider()
+    st.markdown("**Probar y enviar**")
+    cc1, cc2 = st.columns(2)
+    if cc1.button("🧪 Enviar evento de PRUEBA", use_container_width=True):
+        tc = db.get_config(capi.K_TEST, "") or ""
+        if not tc:
+            st.warning("Primero pon el **Código de evento de prueba** arriba "
+                       "(Events Manager → Eventos de prueba) y guarda.")
+        else:
+            r = capi.enviar_evento_prueba(tc)
+            if r.get("ok"):
+                st.success(f"Enviado. Facebook recibió **{r['recibidos']}** evento(s). "
+                           "Míralo en **Events Manager → Eventos de prueba**.")
+                with st.expander("Respuesta de Facebook"):
+                    st.json(r.get("respuesta"))
+            else:
+                st.error(r.get("error"))
+    if cc2.button("📤 Enviar compras pendientes", type="primary", use_container_width=True):
+        with st.spinner("Enviando compras a la Conversions API..."):
+            r = capi.enviar_compras()
+        if r.get("ok"):
+            st.success(f"Enviadas **{r.get('enviados', 0)}** · Facebook recibió "
+                       f"**{r.get('recibidos', 0)}**.")
+            extra = []
+            if r.get("viejas"):
+                extra.append(f"{r['viejas']} muy viejas (>7 días; Meta no las acepta)")
+            if r.get("sin_match"):
+                extra.append(f"{r['sin_match']} sin datos de match")
+            if extra:
+                st.caption("No enviadas: " + " · ".join(extra))
+            if r.get("nota"):
+                st.info(r["nota"])
+            with st.expander("Respuesta de Facebook"):
+                st.json(r.get("respuesta"))
+        else:
+            st.error(r.get("error"))
+    st.caption("Flujo recomendado: **1)** guarda Pixel + token + columnas · **2)** manda un "
+               "**evento de PRUEBA** con el código de Events Manager y verifícalo en vivo · "
+               "**3)** cuando llegue bien, **Enviar compras pendientes** (reales).")
+    st.markdown("**👀 ¿Se registran otros eventos?** Míralo en "
+                "**Events Manager → tu conjunto de datos → Descripción general**: ahí ves TODOS "
+                "los eventos que llegan (Purchase, Lead, etc.), su origen (pixel/CAPI) y la "
+                "calidad de coincidencia. Aquí abajo, la 'Respuesta de Facebook' te dice cuántos "
+                "recibió de este envío.")
+
+
 def pagina_configuracion():
     st.title("Configuración")
     st.caption("Organizada por tipo: de dónde entran tus ventas, cómo conectas tus Business "
                "de Facebook, y cómo conectas la IA. Cada grupo tiene sus propias pestañas.")
     grupos = st.tabs(["📥 Fuentes de ventas", "🔗 Conectar Business",
-                      "🤖 Inteligencia Artificial", "🛠️ Herramientas"])
+                      "📡 Pixel / CAPI", "🤖 Inteligencia Artificial", "🛠️ Herramientas"])
 
     # --- Grupo 1: de dónde entran las ventas ---
     with grupos[0]:
@@ -3732,14 +3830,18 @@ def pagina_configuracion():
         with t[1]:
             _panel_cuentas()
 
-    # --- Grupo 3: IA ---
+    # --- Grupo 3: Pixel / Conversions API ---
     with grupos[2]:
+        _panel_capi()
+
+    # --- Grupo 4: IA ---
+    with grupos[3]:
         st.caption("Conecta el asistente de IA (OpenAI o Anthropic) que responde preguntas "
                    "sobre tus anuncios.")
         _panel_ia()
 
-    # --- Grupo 4: herramientas / diagnóstico ---
-    with grupos[3]:
+    # --- Grupo 5: herramientas / diagnóstico ---
+    with grupos[4]:
         t = st.tabs(["Auditoría de ventas", "Limpieza de ventas", "Diagnóstico API"])
         with t[0]:
             _panel_auditoria_ventas()
