@@ -35,7 +35,7 @@ import ia
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v128 · 2026-08-24"
+APP_VERSION = "v129 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3585,6 +3585,54 @@ Cada Business usa su propia app + token. **Más piezas que mantener** (por eso N
 
 > **En resumen: usa A.** Una sola app central para todos los Business. B solo si por alguna razón
 > no puedes darle acceso a la app central desde el Business de Perfil 2.
+        """)
+
+    with st.expander("📲 Compartir la app central con otro Business (paso clave del Camino A)"):
+        st.markdown("""
+**Objetivo:** que tu **app central** (la de Perfil 1) **aparezca** cuando generes el token del
+Usuario del Sistema en el **Business de Perfil 2**. Sin esto, la app central no sale en la lista.
+
+**Antes de empezar — ten a mano dos IDs:**
+- **App ID** de tu app central: developers.facebook.com/apps → tu app → **Configuración → Información
+  básica → Identificador de la app**.
+- **ID del Business de Perfil 2**: business.facebook.com (con Perfil 2) → **Configuración del negocio →
+  Información del negocio → Id. del negocio**.
+
+**Requisito:** tu app central debe estar **reclamada por el Business de Perfil 1**. Si no lo hiciste:
+Business de Perfil 1 → **Configuración del negocio → Cuentas → Apps → Agregar → Reclamar una app** →
+pon el App ID → reclamar.
+
+---
+
+### ✅ Método recomendado — Conectar la app desde el Business de Perfil 2 (por App ID)
+Como eres **admin/developer** de la app (Perfil 1), puedes conectarla directo, **sin solicitud
+pendiente**:
+
+1. Entra al **Business de Perfil 2** (cambia de negocio arriba a la izquierda, o inicia sesión con
+   Perfil 2).
+2. **Configuración del negocio → Cuentas → Apps**.
+3. **Agregar → Conectar un identificador de app (App ID)**.
+4. Pega el **App ID de la app central** → **Conectar**.
+5. Listo: ahora, al **Generar token** en **Usuarios del sistema** de Perfil 2, la **app central**
+   ya aparece en la lista de apps. Sigue el Camino A (elige esa app, permisos, token).
+
+---
+
+### 🅱️ Método alternativo — Compartir la app desde el Business de Perfil 1
+Si el método de arriba no te deja, comparte la app desde el lado de Perfil 1:
+
+1. **(Perfil 1)** Configuración del negocio → **Cuentas → Apps** → selecciona la **app central**.
+2. **Asignar socios** (o **Agregar → Compartir con otro negocio**) → pega el **ID del Business de
+   Perfil 2** → dale acceso.
+3. **(Perfil 2)** Si aparece una **solicitud pendiente**, **acéptala tú** (como administras ese
+   Business): Configuración del negocio → **Solicitudes / Socios** → **Aceptar**.
+4. Ya conectada, genera el token del Usuario del Sistema de Perfil 2 eligiendo la app central.
+
+---
+
+> **Nota:** Meta cambia a veces los nombres de los menús ("Apps", "Aplicaciones", "Cuentas"…),
+> pero la idea es siempre la misma: **la app central debe estar disponible en el Business de Perfil 2**.
+> Cuando lo esté, aparecerá en el selector de app al generar el token.
         """)
 
     with st.expander("② ¿No tienes App de Facebook? Créala una vez (App ID y secreto)"):
