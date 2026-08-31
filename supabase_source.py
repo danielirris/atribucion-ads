@@ -106,6 +106,15 @@ def _parse_hora(valor, deteccion: datetime) -> datetime:
         ts = pd.to_datetime(valor, errors="coerce")
         if pd.isna(ts):
             return deteccion
+        # Convertir a la zona horaria de la operación (Bogotá) ANTES de quitar la tz.
+        # Supabase guarda timestamptz en UTC; si solo se hiciera replace(tzinfo=None)
+        # las ventas nocturnas UTC quedarían con la fecha del día siguiente y el
+        # dashboard las descartaría como "futuras".
+        try:
+            if ts.tzinfo is not None:
+                ts = ts.tz_convert(config.APP_TZ)
+        except Exception:
+            pass
         return ts.to_pydatetime().replace(microsecond=0, tzinfo=None)
     except Exception:
         return deteccion

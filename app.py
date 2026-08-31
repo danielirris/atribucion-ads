@@ -36,7 +36,7 @@ import capi
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v136 · 2026-08-24"
+APP_VERSION = "v137 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3357,6 +3357,21 @@ def _panel_supabase():
                         "que no se pudo leer. Revisa la **'Columna valor de venta'**.")
         else:
             st.error(f"{r['error']}")
+
+    st.divider()
+    st.caption("Si tus ventas ya importadas tienen la **fecha corrida** (por ejemplo, las de la "
+               "noche aparecían al día siguiente), usa esto para borrarlas y volver a traerlas "
+               "con la fecha ya convertida a tu zona horaria.")
+    if st.button("🔁 Borrar ventas de Supabase y re-importar (corrige fechas)"):
+        n = db.borrar_ventas(supa.HOJA)
+        with st.spinner("Re-importando desde Supabase..."):
+            r2 = supa.sincronizar()
+        db.set_config("ventas_cambio", db.a_texto(db.ahora()))
+        if r2.get("ok"):
+            st.success(f"Borradas {n} · Re-importadas {r2['insertadas']} venta(s) con la "
+                       f"fecha corregida (de {r2.get('leidas', 0)} leídas).")
+        else:
+            st.error(r2.get("error"))
 
 
 def _panel_business_fuente():
