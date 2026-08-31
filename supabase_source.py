@@ -79,8 +79,22 @@ def probar_conexion() -> dict:
             return {"ok": False, "columnas": [], "muestra": [], "error":
                     f"HTTP {r.status_code}: {r.text[:200]}"}
         filas = r.json()
-        columnas = list(filas[0].keys()) if filas else []
-        return {"ok": True, "columnas": columnas, "muestra": filas, "error": None}
+        if filas:
+            columnas = list(filas[0].keys())
+            return {"ok": True, "columnas": columnas, "muestra": filas,
+                    "error": None, "vacia": False}
+        # 0 filas: la conexión funciona pero no devolvió datos. Intentamos leer las
+        # columnas del ESQUEMA (OpenAPI) y avisamos la causa probable (RLS o vacía).
+        columnas = []
+        try:
+            rs = requests.get(f"{config.SUPABASE_URL}/rest/v1/",
+                              headers=_headers(), timeout=15)
+            props = ((rs.json().get("definitions") or {}).get(m[K_TABLA]) or {}).get("properties") or {}
+            columnas = list(props.keys())
+        except Exception:
+            pass
+        return {"ok": True, "columnas": columnas, "muestra": [], "error": None,
+                "vacia": True}
     except Exception as e:
         return {"ok": False, "columnas": [], "muestra": [], "error": str(e)}
 

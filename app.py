@@ -36,7 +36,7 @@ import capi
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v134 · 2026-08-24"
+APP_VERSION = "v135 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3317,9 +3317,22 @@ def _panel_supabase():
         supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id, col_pais)
         r = supa.probar_conexion()
         if r["ok"]:
-            st.success(f"Conectado Columnas de tu tabla: {', '.join(r['columnas'])}")
-            if r["muestra"]:
-                st.dataframe(pd.DataFrame(r["muestra"]), use_container_width=True, hide_index=True)
+            if r.get("vacia"):
+                st.warning("Conectado ✅, pero la tabla **devolvió 0 filas**. Causas más comunes:\n\n"
+                           "1. **RLS (Row Level Security):** la key `anon` no tiene permiso de "
+                           "lectura. → Usa la key **`service_role`** en `SUPABASE_KEY` (Supabase → "
+                           "Settings → API), o crea una política de lectura.\n"
+                           "2. **Nombre de tabla incorrecto** (revisa mayúsculas/espacios).\n"
+                           "3. La **tabla está vacía** (no tiene registros aún).")
+                if r["columnas"]:
+                    st.caption("Columnas del esquema: " + ", ".join(f"`{c}`" for c in r["columnas"]))
+                else:
+                    st.caption("No pude leer ni el esquema (probable RLS bloqueando también el "
+                               "esquema con la key `anon`). Usa `service_role`.")
+            else:
+                st.success(f"Conectado. Columnas de tu tabla: {', '.join(r['columnas'])}")
+                if r["muestra"]:
+                    st.dataframe(pd.DataFrame(r["muestra"]), use_container_width=True, hide_index=True)
         else:
             st.error(f"{r['error']}")
 
@@ -3748,7 +3761,11 @@ def _panel_capi():
     if st.button("Ver columnas de mi tabla de compradores"):
         r = supa.probar_conexion()
         if r.get("ok"):
-            st.caption("Columnas detectadas: " + ", ".join(f"`{c}`" for c in r["columnas"]))
+            if r["columnas"]:
+                st.caption("Columnas detectadas: " + ", ".join(f"`{c}`" for c in r["columnas"]))
+            if r.get("vacia"):
+                st.warning("La tabla devolvió 0 filas (probable RLS: usa la key `service_role`, "
+                           "o revisa el nombre de la tabla).")
         else:
             st.error(r.get("error"))
 
