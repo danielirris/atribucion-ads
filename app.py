@@ -36,7 +36,7 @@ import capi
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v135 · 2026-08-24"
+APP_VERSION = "v136 · 2026-08-24"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3339,10 +3339,22 @@ def _panel_supabase():
     if st.button("Sincronizar ventas de Supabase ahora", type="primary"):
         r = supa.sincronizar()
         if r["ok"]:
-            msg = f"{r['insertadas']} venta(s) importada(s) de Supabase."
-            if r["sin_periodo"]:
-                msg += f" ({r['sin_periodo']} sin período/anuncio activo a esa hora)."
-            st.success(msg)
+            st.success(f"{r['insertadas']} venta(s) importada(s) de Supabase.")
+            # Desglose: por qué se saltaron filas (para entender el '3 de 6').
+            st.caption(
+                f"📋 Leídas: **{r.get('leidas', 0)}** · "
+                f"Importadas: **{r['insertadas']}** · "
+                f"Ya existían / id repetido: **{r.get('ya_existian', 0)}** · "
+                f"Sin valor legible: **{r.get('sin_valor', 0)}** · "
+                f"Sin período: {r.get('sin_periodo', 0)}")
+            if r.get("ya_existian"):
+                st.info("**Ya existían / id repetido:** son ventas cuyo *id único* ya estaba "
+                        "importado, o que **comparten el mismo id** en tu tabla. Revisa que la "
+                        "**'Columna id único (dedup)'** apunte a una columna REALMENTE única (la "
+                        "clave primaria). Si varias ventas tienen el mismo id, solo entra una.")
+            if r.get("sin_valor"):
+                st.info("**Sin valor legible:** el valor de la venta viene vacío o con un formato "
+                        "que no se pudo leer. Revisa la **'Columna valor de venta'**.")
         else:
             st.error(f"{r['error']}")
 

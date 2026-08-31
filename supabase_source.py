@@ -143,15 +143,22 @@ def sincronizar() -> dict:
     deteccion = db.ahora()
     insertadas = 0
     sin_periodo = 0
+    ya_existian = 0     # saltadas por dedup (id ya importado / id repetido)
+    sin_valor = 0       # saltadas porque el valor no se pudo leer
+    _ids_lote = set()   # ids vistos en ESTE mismo lote (para detectar duplicados)
     col_prod = m[K_PRODUCTO]
 
     for fila in filas:
         ext_id = str(fila.get(m[K_ID])) if fila.get(m[K_ID]) is not None else None
-        if ext_id and db.venta_existe(HOJA, ext_id):
-            continue  # ya importada
+        if ext_id and (ext_id in _ids_lote or db.venta_existe(HOJA, ext_id)):
+            ya_existian += 1
+            continue  # ya importada (o id repetido en la misma tabla)
         valor = _parse_valor(fila.get(m[K_VALOR]))
         if valor is None:
+            sin_valor += 1
             continue
+        if ext_id:
+            _ids_lote.add(ext_id)
         ad_id = fila.get(m[K_ADID])
         ad_id = str(ad_id).strip() if ad_id is not None else ""
         hora = _parse_hora(fila.get(m[K_HORA]), deteccion)
@@ -170,4 +177,6 @@ def sincronizar() -> dict:
                           HOJA, ext_id=ext_id, producto=producto, pais=pais)
         insertadas += 1
 
-    return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo, "error": None}
+    return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo,
+            "leidas": len(filas), "ya_existian": ya_existian, "sin_valor": sin_valor,
+            "error": None}
