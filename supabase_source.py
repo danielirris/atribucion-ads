@@ -27,6 +27,7 @@ K_HORA = "sb_col_hora"
 K_PRODUCTO = "sb_col_producto"
 K_ID = "sb_col_id"
 K_PAIS = "sb_col_pais"
+K_MONEDA = "sb_col_moneda"
 
 DEFAULTS = {
     K_TABLA: "ventas",
@@ -36,7 +37,48 @@ DEFAULTS = {
     K_PRODUCTO: "producto",
     K_ID: "id",
     K_PAIS: "",
+    K_MONEDA: "",
 }
+
+# País (ISO-2) → moneda local en que se ingresó el `valor`. Cada venta se convierte
+# a USD con la tasa de SU moneda, no con una sola tasa global.
+PAIS_A_MONEDA = {
+    "CO": "COP", "PE": "PEN", "CL": "CLP", "VE": "VES", "EC": "USD",
+    "MX": "MXN", "AR": "ARS", "BR": "BRL", "US": "USD", "BO": "BOB",
+    "PY": "PYG", "UY": "UYU", "GT": "GTQ", "DO": "DOP", "PA": "USD",
+    "CR": "CRC", "ES": "EUR", "HN": "HNL", "NI": "NIO", "SV": "USD",
+    "GT2": "GTQ",
+}
+# País escrito con nombre (no ISO-2) → ISO-2, por si la columna trae el nombre.
+_NOMBRE_A_ISO = {
+    "colombia": "CO", "peru": "PE", "chile": "CL", "venezuela": "VE",
+    "ecuador": "EC", "mexico": "MX", "argentina": "AR", "brasil": "BR",
+    "brazil": "BR", "estados unidos": "US", "usa": "US", "bolivia": "BO",
+    "paraguay": "PY", "uruguay": "UY", "guatemala": "GT", "panama": "PA",
+    "costa rica": "CR", "espana": "ES", "republica dominicana": "DO",
+    "honduras": "HN", "nicaragua": "NI", "el salvador": "SV",
+}
+
+
+def _moneda_de(pais: Optional[str], moneda_col: Optional[str]) -> Optional[str]:
+    """Determina la moneda de la venta: columna moneda (si existe) tiene prioridad;
+    si no, se deriva del país. Devuelve None si no se puede determinar."""
+    if moneda_col:
+        mc = str(moneda_col).strip().upper()
+        if mc and mc not in ("NAN", "NONE"):
+            return mc
+    if not pais:
+        return None
+    p = str(pais).strip()
+    if not p:
+        return None
+    # ISO-2 directo, o nombre de país normalizado (sin acentos, minúsculas).
+    if len(p) == 2 and p.upper() in PAIS_A_MONEDA:
+        return PAIS_A_MONEDA[p.upper()]
+    import unicodedata
+    norm = unicodedata.normalize("NFKD", p.lower()).encode("ascii", "ignore").decode().strip()
+    iso = _NOMBRE_A_ISO.get(norm)
+    return PAIS_A_MONEDA.get(iso) if iso else PAIS_A_MONEDA.get(p.upper())
 
 
 def get_mapeo() -> dict:
@@ -48,7 +90,7 @@ def get_mapeo() -> dict:
 
 
 def guardar_mapeo(tabla, col_ad_id, col_valor, col_hora, col_producto, col_id,
-                  col_pais="") -> None:
+                  col_pais="", col_moneda="") -> None:
     db.set_config(K_TABLA, tabla or DEFAULTS[K_TABLA])
     db.set_config(K_ADID, col_ad_id or DEFAULTS[K_ADID])
     db.set_config(K_VALOR, col_valor or DEFAULTS[K_VALOR])
@@ -56,6 +98,7 @@ def guardar_mapeo(tabla, col_ad_id, col_valor, col_hora, col_producto, col_id,
     db.set_config(K_PRODUCTO, col_producto or "")
     db.set_config(K_ID, col_id or DEFAULTS[K_ID])
     db.set_config(K_PAIS, col_pais or "")
+    db.set_config(K_MONEDA, col_moneda or "")
 
 
 def _headers() -> dict:
@@ -176,6 +219,10 @@ def sincronizar() -> dict:
         pais = str(fila.get(col_pais)).strip() if col_pais and fila.get(col_pais) is not None else None
         if pais and pais.lower() in ("nan", "none", ""):
             pais = None
+        col_moneda = m.get(K_MONEDA)
+        moneda_col = str(fila.get(col_moneda)).strip() if col_moneda and fila.get(col_moneda) is not None else None
+        # Moneda de ESTA venta: columna moneda si existe, si no se deriva del país.
+        moneda = _moneda_de(pais, moneda_col)
 
         periodo = db.periodo_para_hora(ad_id, hora) if ad_id else None
         periodo_id = periodo["id"] if periodo else None
@@ -183,7 +230,8 @@ def sincronizar() -> dict:
             sin_periodo += 1
 
         db.insertar_venta(ad_id or "(sin anuncio)", valor, hora, periodo_id,
-                          HOJA, ext_id=ext_id, producto=producto, pais=pais)
+                          HOJA, ext_id=ext_id, producto=producto, pais=pais,
+                          moneda=moneda)
         insertadas += 1
 
     return {"ok": True, "insertadas": insertadas, "sin_periodo": sin_periodo,

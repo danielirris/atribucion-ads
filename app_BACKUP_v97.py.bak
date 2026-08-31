@@ -10,7 +10,6 @@ import os
 import time
 import json
 import html as _html
-import urllib.parse as _urlparse
 from datetime import datetime, timedelta
 
 # Frescura del gasto/insights de Facebook (segundos). Configurable por entorno.
@@ -31,47 +30,11 @@ import supabase_source as supa
 import gsheets as gs
 import fx
 import ia
-import capi
 
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v138 · 2026-08-30"
-
-# --------------------------------------------------------------------------- #
-#  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
-#  generados desde Python. Los estilos globales viven en _inject_css().
-# --------------------------------------------------------------------------- #
-C_PAPER = "#F3F1EC"     # fondo papel
-C_INK = "#18181B"       # texto principal (tinta)
-C_MUTED = "#71717A"     # texto secundario
-C_LINE = "#DED9D0"      # bordes/hairlines sobre papel
-C_SIGNAL = "#D7FF3A"    # acento neón (lima)
-C_OK = "#5E8C00"        # verde legible sobre papel
-
-# --------------------------------------------------------------------------- #
-#  Patrón de ondas SVG (marca de agua tecnológica en la parte superior).
-#  Líneas Bézier finas en neón a baja opacidad, con máscara que las desvanece
-#  hacia abajo. Se codifica como data-URI para usarlo como capa de background.
-# --------------------------------------------------------------------------- #
-_WAVES_SVG = (
-    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 400' preserveAspectRatio='none'>"
-    "<defs><linearGradient id='f' x1='0' y1='0' x2='0' y2='1'>"
-    "<stop offset='0.35' stop-color='white'/><stop offset='1' stop-color='black'/>"
-    "</linearGradient><mask id='m'><rect width='1440' height='400' fill='url(#f)'/></mask></defs>"
-    "<g fill='none' stroke='#B6E400' stroke-width='0.8' mask='url(#m)'>"
-    "<path d='M0 80 C 240 20 480 150 720 85 S 1200 20 1440 95' opacity='0.55'/>"
-    "<path d='M0 120 C 260 60 520 190 760 115 S 1220 60 1440 135' opacity='0.50'/>"
-    "<path d='M0 160 C 300 100 560 230 820 155 S 1240 100 1440 175' opacity='0.45'/>"
-    "<path d='M0 200 C 220 140 500 270 760 195 S 1180 140 1440 215' opacity='0.42'/>"
-    "<path d='M0 245 C 320 185 600 315 880 235 S 1260 185 1440 260' opacity='0.38'/>"
-    "<path d='M0 295 C 260 235 540 365 800 285 S 1220 235 1440 310' opacity='0.34'/>"
-    "<path d='M0 345 C 300 290 580 410 840 335 S 1250 285 1440 360' opacity='0.30'/>"
-    "</g></svg>"
-)
-_WAVES_URI = "data:image/svg+xml," + _urlparse.quote(_WAVES_SVG)
-C_WARN = "#F59E0B"      # ámbar/naranja legible sobre papel
-C_BAD = "#E11D48"       # rojo legible sobre papel
+APP_VERSION = "v97 · 2026-08-24"
 
 
 # --------------------------------------------------------------------------- #
@@ -129,25 +92,27 @@ def _norm_txt(s) -> str:
 
 def _roas_color(r):
     if r is None:
-        return "#9a968c"
+        return "#9ca3af"
     if r >= 2:
-        return "#1F8A4C"      # bueno → verde normal
+        return "#22c55e"
     if r >= 1:
-        return C_WARN         # medio → ámbar
-    return C_BAD              # malo → crimson
+        return "#eab308"
+    return "#ef4444"
 
 
 def _roas_pill(r):
-    """Badge tipo pill para el ROAS sobre papel: verde / ámbar / rojo (tinta legible)."""
+    """Badge tipo pill para el ROAS: verde alto (brillo extra si >5x), amarillo, rojo."""
     r = r or 0.0
-    if r > 2:
-        bg, c = "rgba(31,138,76,.15)", "#1F8A4C"     # bueno → verde normal
+    if r >= 5:
+        bg, c, glow = "rgba(16,185,129,.18)", "#34f5b0", ";box-shadow:0 0 12px rgba(16,185,129,.45)"
+    elif r > 2:
+        bg, c, glow = "rgba(16,185,129,.15)", "#10b981", ""
     elif r >= 1:
-        bg, c = "rgba(245,158,11,.16)", C_WARN
+        bg, c, glow = "rgba(245,196,81,.15)", "#f5c451", ""
     else:
-        bg, c = "rgba(225,29,72,.14)", C_BAD
+        bg, c, glow = "rgba(239,68,68,.15)", "#ff8b84", ""
     return (f'<span style="display:inline-block;padding:3px 9px;border-radius:8px;'
-            f'background:{bg};color:{c};font-weight:700;font-size:15px">{r:.2f}x</span>')
+            f'background:{bg};color:{c};font-weight:700;font-size:13px{glow}">{r:.2f}x</span>')
 
 
 def _spark_svg(serie, color="#22c55e", w=78, h=26):
@@ -170,17 +135,17 @@ def _spark_svg(serie, color="#22c55e", w=78, h=26):
 
 
 def _salud_color_vivo(r):
-    """Color de las barras del mini-gráfico según salud."""
+    """Color vivo (alto contraste) para las barras del mini-gráfico según salud."""
     if r is None:
-        return "#9a968c"
+        return "#c3ccd6"
     if r >= 2:
-        return "#1F8A4C"      # bueno → verde normal
+        return "#2ee6a0"      # verde neón
     if r >= 1:
-        return C_WARN         # ámbar
-    return C_BAD              # rojo
+        return "#ffcf3f"      # ámbar brillante
+    return "#ff6b6b"          # rojo brillante
 
 
-def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color="#18181B"):
+def _spark_bars(serie, color="#10b981", w=82, h=28, linea=None, linea_color="#c4b5fd"):
     """Mini-gráfica de BARRAS (una barra por día) para la facturación diaria, con
     una LÍNEA opcional encima (p. ej. el gasto). Barras y línea comparten la misma
     escala (el máximo de ambas series), así se ven a la par: si la línea de gasto
@@ -194,15 +159,15 @@ def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color="#18181B"
     hi = max((vals + lvals) or [0.0])
     gap = 2.0
     bw = (w - gap * (n - 1)) / n
-    # Fondo papel redondeado (sutil) para enmarcar el mini-gráfico.
+    # Fondo oscuro redondeado: hace que las barras de color resalten (más contraste).
     partes = [f'<rect x="0" y="0" width="{w}" height="{h}" rx="4" '
-              f'fill="rgba(17,17,17,.04)"/>']
+              f'fill="rgba(6,8,16,.55)"/>']
     # Track tenue detrás de cada barra (altura completa) para dar cuerpo visual.
     for i, v in enumerate(vals):
         x = i * (bw + gap)
         partes.append(f'<rect x="{x:.1f}" y="1" width="{bw:.1f}" height="{h - 2:.1f}" '
-                      f'rx="1.5" fill="rgba(17,17,17,.05)"/>')
-    # Barras: facturación por día (color según salud).
+                      f'rx="1.5" fill="rgba(255,255,255,.05)"/>')
+    # Barras: facturación por día (color vivo, borde sutil para separar del fondo).
     for i, v in enumerate(vals):
         x = i * (bw + gap)
         if hi > 0 and v > 0:
@@ -210,7 +175,7 @@ def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color="#18181B"
             fill = color
         else:
             bh = 2.0                      # día sin ventas: barrita gris al piso
-            fill = "rgba(17,17,17,.18)"
+            fill = "rgba(255,255,255,.22)"
         partes.append(f'<rect x="{x:.1f}" y="{h - 1 - bh:.1f}" width="{bw:.1f}" '
                       f'height="{bh:.1f}" rx="1.5" fill="{fill}"/>')
     # Línea: gasto por día (por el centro de cada barra).
@@ -261,27 +226,6 @@ def _gasto_diario_cache(date_preset: str = "last_7d"):
     return fb.gasto_diario_todos(date_preset)
 
 
-@st.cache_data(ttl=INSIGHTS_TTL, show_spinner=False)
-def _gasto_lifetime_cache():
-    """Gasto acumulado (lifetime) por anuncio, para 'gasto desde el último cambio'
-    con el método snapshot (gasto_actual - snapshot)."""
-    return fb.gasto_lifetime_todos()
-
-
-def _cambiar_periodo_snapshot(ad_ids, nativo):
-    """Cambia el período (presupuesto) de cada anuncio Y guarda el SNAPSHOT del gasto
-    acumulado (lifetime) en ese instante. Así el 'gasto desde el cambio' luego es
-    exacto: gasto_lifetime_actual - snapshot. Una sola llamada a FB para el snapshot."""
-    try:
-        life = fb.gasto_lifetime_todos()   # snapshot fresco del gasto acumulado
-    except Exception:
-        life = {}
-    for aid in ad_ids:
-        pid = db.cambiar_periodo(aid, nativo)
-        if life:
-            db.set_periodo_snapshot(pid, float(life.get(str(aid), 0.0) or 0.0))
-
-
 def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
     """
     Flujo Parte 8: envía el cambio a Facebook y SOLO si Facebook confirma,
@@ -300,12 +244,11 @@ def cambio_presupuesto_completo(ad_id: str, nuevo_monto: float) -> dict:
 
     # Si hay API/conexión disponible, intentamos el cambio en Facebook.
     if fb.SDK_DISPONIBLE and hay_conexion and obj_id:
-        r = fb.actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id,
-                                      anuncio.get("cuenta_moneda"))
+        r = fb.actualizar_presupuesto(obj_id, nivel, nuevo_monto, conexion_id)
         if not r["ok"]:
             # NO cerramos el período en SQLite.
             return {"ok": False, "error": r["error"], "solo_local": False}
-        _cambiar_periodo_snapshot([ad_id], nuevo_monto)
+        db.cambiar_periodo(ad_id, nuevo_monto)
         return {"ok": True, "error": None, "solo_local": False}
 
     # Sin API disponible: registro local solamente (advertencia).
@@ -321,21 +264,13 @@ def _recargar_facebook():
     """Trae datos nuevos de Facebook (se usa desde el botón del top-right)."""
     with st.spinner("Consultando Facebook (todas las conexiones)..."):
         r = fb.cargar_todo()
-        # Limpia anuncios de conexiones (business) ya eliminadas (cuentas fantasma).
-        try:
-            _huerf = db.borrar_anuncios_huerfanos()
-        except Exception:
-            _huerf = 0
         try:
             _insights_cache.clear()
             _gasto_diario_cache.clear()
-            _gasto_lifetime_cache.clear()
         except Exception:
             pass
     if r["num_anuncios"]:
         st.toast(f"{r['num_anuncios']} anuncios de {r['num_cuentas']} cuenta(s).", icon="✅")
-    if _huerf:
-        st.toast(f"Limpiadas {_huerf} cuenta(s)/anuncio(s) de conexiones eliminadas.", icon="🧹")
     if r["errores"]:
         st.error("Errores: " + "; ".join(r["errores"])[:300])
     st.rerun()
@@ -388,27 +323,10 @@ def sidebar_estado(pagina: str = "dashboard"):
 # Páginas de la app (para la navegación propia en el pie de la barra lateral).
 _PAGINAS = {
     "dashboard": ("Dashboard", ":material/dashboard:"),
-    "graficos": ("Gráficos", ":material/insights:"),
-    "productos": ("Productos", ":material/category:"),
-    "ventas": ("Ventas (3 días)", ":material/receipt_long:"),
     "tutoriales": ("Tutoriales", ":material/school:"),
     "configuracion": ("Configuración", ":material/settings:"),
     "actividad": ("Bitácora", ":material/history:"),
 }
-
-
-def _top_tabs(active: str):
-    """Pestañas grandes arriba: DASHBOARD | GRÁFICOS (misma tipografía de título).
-    La activa se ve en tinta; las otras en gris y clicables para cambiar de vista."""
-    st.markdown('<span class="toptabs-anchor"></span>', unsafe_allow_html=True)
-    cols = st.columns([1.35, 1.35, 4], vertical_alignment="bottom")
-    for i, (key, label) in enumerate([("dashboard", "DASHBOARD"), ("graficos", "GRÁFICOS")]):
-        with cols[i]:
-            if key == active:
-                st.markdown(f'<div class="toptab active">{label}</div>', unsafe_allow_html=True)
-            elif st.button(label, key=f"toptab_{key}", use_container_width=True):
-                st.session_state["_pagina"] = key
-                st.rerun()
 
 
 def _sidebar_nav(pagina: str):
@@ -419,19 +337,6 @@ def _sidebar_nav(pagina: str):
                              type="primary" if key == pagina else "secondary",
                              key=f"nav_{key}"):
             st.session_state["_pagina"] = key
-            st.rerun()
-    # Cerrar sesión (solo si hay contraseña configurada).
-    if config.APP_PASSWORD:
-        if st.sidebar.button("Cerrar sesión", icon=":material/logout:",
-                             use_container_width=True, key="logout_btn"):
-            st.session_state["_auth_ok"] = False
-            try:
-                del st.query_params["s"]      # olvida la sesión recordada en la URL
-            except Exception:
-                try:
-                    st.query_params.clear()
-                except Exception:
-                    pass
             st.rerun()
     st.sidebar.caption(f"Versión: {APP_VERSION}")
 
@@ -562,13 +467,8 @@ def sidebar_filtros():
     def _biz_real(a):
         cid = a.get("conexion_id")
         return cid in (None, 0, "0") or str(cid) in _cx_ids
-    # Excluir de TODO el sidebar los anuncios de conexiones eliminadas (huérfanos).
-    todos = [a for a in todos if _biz_real(a)]
-    # Business a listar: los que ya tienen anuncios + TODAS las conexiones activas
-    # (para que un Business recién agregado aparezca aunque aún no hayas Recargado).
-    business = sorted(
-        {_alias_conexion(a.get("conexion_id"), conexiones) for a in todos}
-        | {_alias_conexion(c["id"], conexiones) for c in conexiones if c.get("activo")})
+    business = sorted({_alias_conexion(a.get("conexion_id"), conexiones)
+                       for a in todos if _biz_real(a)})
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
     campanas = sorted({a.get("campaign_nombre") for a in todos if a.get("campaign_nombre")})
@@ -584,10 +484,6 @@ def sidebar_filtros():
     n_act = sum(bool(st.session_state.get(k)) for k in
                 ("f_business", "f_cuenta", "f_campana", "f_producto")) \
         + (1 if st.session_state.get("f_pais", "Todos") not in ("Todos", None) else 0)
-    # Filtro rápido: mostrar solo los anuncios en vigilancia.
-    n_vig = len(_get_vigilados())
-    st.sidebar.toggle(f"👁️ Solo en vigilancia ({n_vig})", key="f_solo_vig",
-                      help="Muestra únicamente los anuncios que tienes marcados en vigilancia.")
     titulo = f"🎚️ Filtros ({n_act})" if n_act else "🎚️ Filtros"
     with st.sidebar.expander(titulo, expanded=False):
         st.multiselect("Business", business, key="f_business",
@@ -690,15 +586,6 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             _rate_cache[moneda] = fx.tasa_a_usd(moneda)
         return _rate_cache[moneda]
 
-    def _ing_usd(por_moneda, fallback):
-        """Convierte un desglose {moneda: total_nativo} a USD usando la tasa de CADA
-        moneda. Las ventas cuya moneda quedó desconocida ('?') usan `fallback` (la
-        moneda de la cuenta o la configurada). Cada venta se convierte con SU moneda."""
-        tot = 0.0
-        for mon, val in (por_moneda or {}).items():
-            tot += val * _rate(fallback if mon == "?" else mon)
-        return tot
-
     # Moneda en la que vienen las ventas (Excel/Supabase): 'auto' = la de la cuenta.
     moneda_ventas_cfg = db.get_config("moneda_ventas", "auto")
     # Fuente de ventas del dashboard: excel / gsheets / supabase / todas / meta.
@@ -717,9 +604,6 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
     # Gasto diario por anuncio (Facebook) para dibujar la LÍNEA de gasto sobre las
     # barras. Vacío si no hay conexión; se cachea aparte (una llamada por cuenta).
     _gastodia7 = _gasto_diario_cache("last_7d") if hay_conexion else {}
-    # Gasto acumulado (lifetime) por anuncio, para el gasto REAL desde el cambio
-    # con el método snapshot (gasto_actual - snapshot guardado al cambiar).
-    _gastolife = _gasto_lifetime_cache() if hay_conexion else {}
 
     grupos = {}
     for a in anuncios:
@@ -762,13 +646,7 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         else:
             num = sum(ventas_agg.get(x["ad_id"], {}).get("num_ventas", 0) for x in ads)
             ingresos_nat = sum(ventas_agg.get(x["ad_id"], {}).get("ingreso_total", 0.0) for x in ads)
-            # Cada venta se convierte con SU moneda (país). moneda_v es el respaldo
-            # para las ventas cuya moneda no se pudo determinar ('?').
-            _pm = {}
-            for x in ads:
-                for mon, val in (ventas_agg.get(x["ad_id"], {}).get("por_moneda") or {}).items():
-                    _pm[mon] = _pm.get(mon, 0.0) + val
-            ingresos = _ing_usd(_pm, moneda_v) if _pm else ingresos_nat * rate_v  # -> USD
+            ingresos = ingresos_nat * rate_v  # -> USD
 
         if nivel == "campaign":
             # ¿CBO? (presupuesto a nivel CAMPAÑA). Si lo es, el presupuesto es UNO
@@ -829,47 +707,17 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         if ab:
             inicio_mod = db.a_fecha(ab["hora_inicio"])
             mins = max(0.0, (ahora - inicio_mod).total_seconds() / 60.0) if inicio_mod else 0.0
-            # Gasto REAL desde el cambio. Preferencia:
-            #  1) SNAPSHOT (exacto): gasto_lifetime_actual - snapshot guardado al cambiar.
-            #  2) Suma del gasto diario real desde la fecha del cambio (aprox. por día).
-            #  3) Estimado por presupuesto (solo sin conexión a Facebook).
-            _snaps = db.snapshots_periodo_abierto(ad_ids_grupo)
-            _todos_snap = bool(_gastolife) and all(
-                _snaps.get(aid) is not None for aid in ad_ids_grupo)
-            if _todos_snap:
-                gmod_nat = sum(max(0.0, (_gastolife.get(str(aid), 0.0) or 0.0) - _snaps[aid])
-                               for aid in ad_ids_grupo)
-                gmod_es_real = True
-            elif _gastodia7:
-                _desde_dia = inicio_mod.strftime("%Y-%m-%d") if inicio_mod else "9999"
-                gmod_nat = sum(
-                    sp for aid in ad_ids_grupo
-                    for d, sp in _gastodia7.get(aid, {}).items()
-                    if d >= _desde_dia and sp)
-                gmod_es_real = True
-            else:
-                gmod_nat = (float(ab["presupuesto"]) / config.MINUTOS_POR_DIA) * mins
-                gmod_es_real = False
+            gmod_nat = (float(ab["presupuesto"]) / config.MINUTOS_POR_DIA) * mins
             vs_mod = db.ventas_suma(ad_ids_grupo, inicio_mod)
             imod_nat = vs_mod["ingreso_nat"]
-            imod_usd = _ing_usd(vs_mod.get("por_moneda"), moneda_v)
             ventas_mod = int(vs_mod.get("num", 0))
-            # ROAS "desde el cambio" en USD (gasto e ingreso convertidos, cada uno con
-            # su moneda) para que sea correcto aunque cuenta y ventas usen monedas distintas.
-            gmod_usd = gmod_nat * rate_c
-            roas_mod = (imod_usd / gmod_usd) if gmod_usd > 0 else 0.0
+            roas_mod = (imod_nat / gmod_nat) if gmod_nat > 0 else 0.0
         else:
-            inicio_mod, gmod_nat, imod_nat, imod_usd, roas_mod, ventas_mod = \
-                None, 0.0, 0.0, 0.0, 0.0, 0
-            gmod_es_real = False
+            inicio_mod, gmod_nat, imod_nat, roas_mod, ventas_mod = None, 0.0, 0.0, 0.0, 0
         # Presupuesto ANTERIOR (período previo al último cambio), en USD.
         _periodos = db.obtener_periodos(rep["ad_id"])
         presup_anterior = ((float(_periodos[-2]["presupuesto"]) * rate_c)
                            if len(_periodos) >= 2 else None)
-        _ncambios = max(0, len(_periodos) - 1)
-        # Clave de orden para "Últ. cambio": ISO del último cambio (vacío = sin cambios,
-        # queda al fondo). Ordena de más reciente a más antiguo.
-        _ultmod_ts = inicio_mod.isoformat() if (inicio_mod and _ncambios > 0) else ""
 
         # Serie de facturación de los últimos 7 días (en USD) para el mini gráfico.
         # Suma, por día, lo facturado por todos los anuncios del grupo.
@@ -879,11 +727,8 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
         gasto7 = [] if not _gastodia7 else None
         _g_tmp = []
         for _d in _dias7:
-            _pm_d = {}
-            for aid in ad_ids_grupo:
-                for mon, val in (_diario7.get(aid, {}).get(_d) or {}).items():
-                    _pm_d[mon] = _pm_d.get(mon, 0.0) + val
-            serie7.append(round(_ing_usd(_pm_d, moneda_v), 2))
+            _ing = sum(_diario7.get(aid, {}).get(_d, 0.0) for aid in ad_ids_grupo)
+            serie7.append(round(_ing * rate_v, 2))
             _gas = sum(_gastodia7.get(aid, {}).get(_d, 0.0) for aid in ad_ids_grupo)
             _g_tmp.append(round(_gas * rate_c, 2))
         if gasto7 is None:
@@ -902,10 +747,8 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "num": num, "ingresos": ingresos, "ingresos_nat": ingresos_nat,
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
             "creado": rep.get("fecha_creacion"), "ult_mod": inicio_mod,
-            "num_cambios": _ncambios, "ult_mod_ts": _ultmod_ts,
-            "roas_mod": roas_mod, "ingresos_mod": imod_usd,
+            "roas_mod": roas_mod, "ingresos_mod": imod_nat * rate_v,
             "gasto_mod": gmod_nat * rate_c, "ventas_mod": ventas_mod,
-            "gmod_es_real": gmod_es_real,
             "conv": ins.get("conversaciones"),
             "impresiones": ins.get("impressions"), "clics": ins.get("clicks"),
             "spend_nat": spend_nat, "compras_meta": ins.get("compras"),
@@ -947,10 +790,11 @@ def _aplicar_presupuesto_grupo(fila, nuevo_usd):
     hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
     if fb.SDK_DISPONIBLE and hay and fila.get("budget_obj_id"):
         r = fb.actualizar_presupuesto(fila["budget_obj_id"], fila.get("budget_nivel", "adset"),
-                                      nativo, fila.get("conexion_id"), fila.get("moneda"))
+                                      nativo, fila.get("conexion_id"))
         if not r["ok"]:
             return {"ok": False, "error": r["error"]}
-        _cambiar_periodo_snapshot(fila["ad_ids"], nativo)
+        for aid in fila["ad_ids"]:
+            db.cambiar_periodo(aid, nativo)
         return {"ok": True, "solo_local": False, "nativo": nativo}
     for aid in fila["ad_ids"]:
         db.cambiar_periodo(aid, nativo)
@@ -1019,21 +863,11 @@ def seccion_por_pais():
     if mv == "auto":
         monedas = [a.get("cuenta_moneda") for a in db.obtener_anuncios() if a.get("cuenta_moneda")]
         mv = max(set(monedas), key=monedas.count) if monedas else "USD"
-    _rc = {}
-
-    def _r(m):
-        m = (m or "USD").upper()
-        if m not in _rc:
-            _rc[m] = fx.tasa_a_usd(m)
-        return _rc[m]
-
+    rate_v = fx.tasa_a_usd(mv)
     ingresos, ventas_n = {}, {}
     for pais_raw, d in db.ventas_por_pais(cutoff, hasta).items():
         nombre = fb.pais_nombre(pais_raw) if len(str(pais_raw)) <= 3 else str(pais_raw).strip().title()
-        # Cada venta se convierte con SU moneda (la del país); '?' usa el respaldo mv.
-        ing_usd = sum(val * _r(mv if mon == "?" else mon)
-                      for mon, val in (d.get("por_moneda") or {}).items())
-        ingresos[nombre] = ingresos.get(nombre, 0.0) + ing_usd
+        ingresos[nombre] = ingresos.get(nombre, 0.0) + d["ingreso_nat"] * rate_v
         ventas_n[nombre] = ventas_n.get(nombre, 0) + d["num"]
 
     st.subheader("Rendimiento por país")
@@ -1113,10 +947,22 @@ def seccion_vista_general():
             default=st.session_state.get("f_nivel", "Conjunto de anuncios"),
             key="f_nivel") or "Conjunto de anuncios"
     with ct2:
-        # "Estado" usa el MISMO estilo neón que "Ver por" (unificado con toda la app).
+        st.markdown('<span class="estado-anchor"></span>', unsafe_allow_html=True)
         st.segmented_control(
             "Estado", ["Activos", "Apagados", "Todos"],
             default=st.session_state.get("f_estado", "Activos"), key="f_estado")
+        _est = st.session_state.get("f_estado") or "Activos"
+        _bg, _bd = {
+            "Activos": ("rgba(16,185,129,.2)", "rgba(16,185,129,.5)"),
+            "Apagados": ("rgba(239,68,68,.2)", "rgba(239,68,68,.5)"),
+            "Todos": ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"),
+        }.get(_est, ("rgba(255,255,255,.12)", "rgba(255,255,255,.25)"))
+        st.markdown(
+            '<style>[data-testid="stElementContainer"]:has(.estado-anchor) + '
+            '[data-testid="stElementContainer"] '
+            'button[data-variant="segmented_control"][data-selected="true"]{'
+            f'background:{_bg} !important;border:1px solid {_bd} !important;'
+            'color:#fff !important;}</style>', unsafe_allow_html=True)
     nivel = _NIVELES.get(nivel_lbl, "adset")
 
     filtro = st.session_state.get("f_estado") or "Activos"
@@ -1128,11 +974,6 @@ def seccion_vista_general():
     date_preset, since, until, cutoff, hasta_dt = _rango_actual(ahora)
 
     todos = db.obtener_anuncios(solo_activos=False)
-    # Excluir anuncios HUÉRFANOS: los de una conexión (business) que ya se eliminó.
-    # (ENV = conexion_id NULL/0 siempre válido.) Así no aparecen cuentas fantasma.
-    _cx_ids = {str(c["id"]) for c in db.obtener_conexiones()}
-    todos = [a for a in todos
-             if a.get("conexion_id") in (None, 0, "0") or str(a.get("conexion_id")) in _cx_ids]
     if filtro == "Activos":
         anuncios = [a for a in todos if _es_activo(a)]
     elif filtro == "Apagados":
@@ -1159,10 +1000,6 @@ def seccion_vista_general():
         anuncios = [a for a in anuncios if _tiene_producto(a)]
     if pais_sel != "Todos":
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
-    # Solo en vigilancia: deja únicamente los anuncios marcados.
-    if st.session_state.get("f_solo_vig"):
-        _vig = _get_vigilados()
-        anuncios = [a for a in anuncios if str(a.get("ad_id")) in _vig]
 
     # Búsqueda: sobre los anuncios crudos, en TODOS los nombres (anuncio, conjunto,
     # campaña, cuenta) y el ID; insensible a acentos y por palabras (todas deben estar).
@@ -1197,13 +1034,7 @@ def seccion_vista_general():
     # con un ID que no coincide con ningún anuncio (huérfanas) NO se cuentan aquí:
     # esas se explican en el "Cuadre de ventas" para no inflar el número.
     sin_adid = None
-    # Las ventas "sin ad id" NO se pueden atribuir a una campaña/anuncio/cuenta concreta.
-    # Si hay un filtro que acota por debajo del Business (campaña, producto, cuenta, país,
-    # búsqueda o vigilancia), NO se suman al total (si no, inflan la ganancia como si
-    # fueran de ese filtro). Con solo Business (o sin filtro) sí se incluyen.
-    _filtro_acota = bool(cuentas_sel or campanas_sel or productos_sel
-                         or (pais_sel != "Todos") or q or st.session_state.get("f_solo_vig"))
-    if fuente != "meta" and not _filtro_acota:
+    if fuente != "meta":
         moneda_v = db.get_config("moneda_ventas", "auto")
         if moneda_v and moneda_v != "auto":
             rate_sa = fx.tasa_a_usd(moneda_v)
@@ -1215,21 +1046,16 @@ def seccion_vista_general():
         # filtro de Business activo, solo cuentan las fuentes de ESE Business.
         sin_por_fuente = db.ventas_sin_adid_por_fuente(cutoff, hasta_dt)
         mapa_biz = _business_por_fuente()
-        _fb_moneda = (moneda_v if (moneda_v and moneda_v != "auto")
-                      else (monc.most_common(1)[0][0] if monc else "USD"))
-        sa_num, sa_ing_usd = 0, 0.0
+        sa_num, sa_ing_nat = 0, 0.0
         for fnt, d in sin_por_fuente.items():
             if business_sel:
                 bizs = mapa_biz.get(fnt) or []
                 if not (set(bizs) & set(business_sel)):
                     continue   # ninguna de sus Business está en el filtro
             sa_num += int(d.get("num") or 0)
-            # Cada venta sin ad_id se convierte con SU moneda (por país); las de moneda
-            # desconocida ('?') usan el respaldo _fb_moneda.
-            for mon, val in (d.get("por_moneda") or {}).items():
-                sa_ing_usd += val * fx.tasa_a_usd(_fb_moneda if mon == "?" else mon)
+            sa_ing_nat += float(d.get("ingreso_nat") or 0.0)
         if sa_num:
-            sin_adid = {"num": sa_num, "ingreso_usd": sa_ing_usd}
+            sin_adid = {"num": sa_num, "ingreso_usd": sa_ing_nat * rate_sa}
 
     _render_totales(filas, sin_adid)
 
@@ -1266,7 +1092,6 @@ _COLS_SORT = {
     "ingresos": ("ingresos", False), "ganancia": ("ganancia", False),
     "roas": ("roas", False), "conv": ("conv", False), "costo_conv": ("costo_conv", False),
     "costo_venta": ("costo_venta", False), "cuenta": ("cuenta", True),
-    "ult_mod": ("ult_mod_ts", True),
 }
 
 
@@ -1369,52 +1194,39 @@ def _render_totales(filas, sin_adid=None):
     else:
         nat = {}
 
-    # Paleta uniforme: tinta para números de venta, cobalto para inversión (Gasto),
-    # semáforo (ámbar/crimson) solo para señalar. Sin neón como texto, sin efectos.
     tarjetas = [
-        ("Gasto total", _usd(gasto), "#1D4ED8"),          # cobalto = inversión
-        ("Ventas", f"{num:,}".replace(",", "."), "#6D28D9"),  # púrpura
-        ("Ingresos", _usd(ingresos), "#1F8A4C"),          # verde
-        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),      # semáforo (verde bueno)
-        ("Costo/venta", _usd(costo_venta), "#F59E0B"),    # ámbar
-        ("Costo/conv", _usd(costo_conv), "#06B6D4"),      # cian
+        ("Gasto total", _usd(gasto), "#C7C4FF"),
+        ("Ventas", f"{num:,}".replace(",", "."), "#e6e7ee"),
+        ("Ingresos", _usd(ingresos), "#BFF2E2"),
+        ("ROAS", f"{roas:.2f}x", _roas_color(roas)),
+        ("Costo/venta", _usd(costo_venta), "#e6e7ee"),
+        ("Costo/conv", _usd(costo_conv), "#e6e7ee"),
         ("Ganancia", ("+" if ganancia >= 0 else "") + _usd(ganancia),
-         "#1F8A4C" if ganancia >= 0 else "#E11D48"),      # verde / crimson
+         "#5ee7a0" if ganancia >= 0 else "#ff8b84"),
     ]
-    # Tasa de conversión: % de conversaciones que terminan en compra (ventas/conv * 100).
-    # Va como línea pequeña bajo la tarjeta de Ganancia (UTIL.).
-    conv_pct = (num / conv * 100.0) if conv > 0 else 0.0
-    extras = {
-        "Ganancia": (f'<div class="tnat" style="color:#6D28D9" '
-                     f'title="Conversaciones que terminan en compra (ventas ÷ conversaciones)">'
-                     f'Conv→compra {conv_pct:.1f}%</div>'),
-    }
     cards = "".join(
         f'<div class="tcard"><div class="tlbl">{t}</div>'
         f'<div class="tval" style="color:{c}">{v}</div>'
         + (f'<div class="tnat">{nat.get(t)}</div>' if nat.get(t) else '')
-        + extras.get(t, '')
         + '</div>'
         for t, v, c in tarjetas)
     st.markdown(
         '<style>.trow{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0 10px;}'
-        '.tcard{flex:1;min-width:120px;background:#FFFFFF;'
-        'border:1px solid #DED9D0;border-radius:16px;padding:16px 16px 14px;}'
-        ".tlbl{font-family:'Space Mono',monospace;font-size:10.5px;text-transform:uppercase;"
-        'letter-spacing:.1em;color:#71717A;font-weight:400;}'
-        ".tval{font-family:Anton,sans-serif;font-weight:400;font-size:39px;margin-top:8px;line-height:1;}"
-        ".tnat{font-family:'Space Mono',monospace;font-size:11px;font-weight:400;"
-        'color:#9a968c;margin-top:6px;}</style>'
+        '.tcard{flex:1;min-width:120px;background:rgba(255,255,255,.03);backdrop-filter:blur(12px);'
+        'border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:14px 16px 13px;}'
+        '.tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:600;}'
+        '.tval{font-family:Geist,sans-serif;font-weight:800;font-size:28px;margin-top:5px;line-height:1.1;}'
+        '.tnat{font-family:Inter,sans-serif;font-size:12px;font-weight:500;'
+        'color:#475569;margin-top:4px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
 
     # Nota chica de ventas sin ad_id (van incluidas en el total de arriba).
     if sa_num:
         st.markdown(
-            f'<div style="font-size:11px;color:#71717A;margin:-4px 0 10px;'
-            f"font-family:'Space Mono',monospace;\" "
+            f'<div style="font-size:11px;color:#94a3b8;margin:-4px 0 10px;" '
             f'title="Sí están incluidas en el total; no se pudieron atribuir a un anuncio '
             f'(fila sin POST ID o ID que no coincide).">'
-            f'🏷️ Sin ad id: <b style="color:{C_WARN};">{sa_num}</b> venta(s) · {_usd(sa_ing)}'
+            f'🏷️ Sin ad id: <b style="color:#f5c451;">{sa_num}</b> venta(s) · {_usd(sa_ing)}'
             f'</div>', unsafe_allow_html=True)
 
 
@@ -1456,19 +1268,10 @@ def _perf_help_text(f, ahora) -> str:
         return ("Sin cambios de presupuesto registrados.\n\n"
                 "Haz clic para ver el detalle y la gráfica de 7 días.")
     roas = f.get("roas_mod") or 0.0
+    emoji = "🟢" if roas > 2 else "🟡" if roas >= 1 else "🔴"
     ventas = int(f.get("ventas_mod") or 0)
     ingreso = f.get("ingresos_mod") or 0.0
     gasto_mod = f.get("gasto_mod") or 0.0
-    # ROAS: con gasto 0 no se puede dividir. Si hay ventas, es "excelente" (no 0.00x rojo);
-    # normalmente es porque Facebook aún no reporta el gasto de la última hora.
-    if gasto_mod <= 0:
-        if ingreso > 0:
-            roas_txt, emoji = "— · aún sin gasto reportado desde el cambio", "⏳"
-        else:
-            roas_txt, emoji = "—", ""
-    else:
-        roas_txt = f"{roas:.2f}x"
-        emoji = "🟢" if roas > 2 else "🟡" if roas >= 1 else "🔴"
     # El "$" activa el modo fórmula (LaTeX) del tooltip -> hay que escaparlo.
     def _d(v):
         return _usd(v).replace("$", "\\$")
@@ -1481,14 +1284,13 @@ def _perf_help_text(f, ahora) -> str:
         presup_line = f"Presupuesto: **{_d(p_act)}** (sin cambios previos)  \n"
     else:
         presup_line = ""
-    _glbl = "Gasto publicitario" if f.get("gmod_es_real") else "Gasto (estimado)"
     return (
         f"**Rendimiento desde el último cambio** · {_hace_amigable(umod, ahora)}\n\n"
         f"{presup_line}"
         f"Ventas: **{ventas}**  \n"
-        f"{_glbl}: **{_d(gasto_mod)}**  \n"
+        f"Gasto publicitario: **{_d(gasto_mod)}**  \n"
         f"Ingreso: **{_d(ingreso)}**  \n"
-        f"ROAS: **{roas_txt}** {emoji}\n\n"
+        f"ROAS: **{roas:.2f}x** {emoji}\n\n"
         f"Haz clic para ver el detalle y la gráfica de 7 días.")
 
 
@@ -1586,8 +1388,7 @@ def _barra_acciones_conjunto(filas):
                 if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
                     fb.actualizar_presupuesto_async(
                         f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
-                        f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40],
-                        moneda=f.get("moneda"))
+                        f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40])
             resumen = btn_lbl if factor is not None else f"→ {_usd(nuevo)}"
             st.session_state["_estado_msg"] = ("ok",
                 f"Presupuesto de {len(sel)} anuncio(s): {resumen}. "
@@ -1607,25 +1408,6 @@ def _barra_acciones_conjunto(filas):
             st.rerun()
 
 
-def _get_vigilados() -> set:
-    """Conjunto de ad_ids marcados en VIGILANCIA (persistido en config_kv)."""
-    try:
-        return set(json.loads(db.get_config("vigilados", "") or "[]"))
-    except Exception:
-        return set()
-
-
-def _set_vigilancia(ad_ids, activar: bool) -> None:
-    """Marca/desmarca en vigilancia todos los ad_ids de un anuncio/grupo."""
-    v = _get_vigilados()
-    for a in (ad_ids or []):
-        if activar:
-            v.add(str(a))
-        else:
-            v.discard(str(a))
-    db.set_config("vigilados", json.dumps(sorted(v), ensure_ascii=False))
-
-
 def _render_lista_nativa(filas, nivel):
     esc = _html.escape
     ahora = db.ahora()
@@ -1635,49 +1417,44 @@ def _render_lista_nativa(filas, nivel):
     primera = {"ad": "Anuncio", "adset": "Conjunto", "campaign": "Campaña"}[nivel]
     # Encabezado y datos usan la MISMA rejilla de columnas nativas -> alineación exacta.
     labels = [primera, "Cuenta", "Presup.", "Gastado", "Conv.", "C/conv",
-              "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS", "Últ. cambio", "Fact. 7d"]
+              "CPM", "Ventas", "C/venta", "Ingr.", "Util.", "ROAS", "Fact. 7d"]
     keys = ["nombre", "cuenta", "presupuesto", "gasto", "conv", "costo_conv",
-            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas", "ult_mod", "serie7"]
+            "cpm", "num", "costo_venta", "ingresos", "ganancia", "roas", "serie7"]
     # Ancho de la columna del conjunto/anuncio (ampliable con el toggle).
-    name_w = 5.2 if st.session_state.get("f_ancho_nombre") else 2.6
-    GRID_W = [name_w, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6, 1.05, 1.1]
+    name_w = 5.2 if st.session_state.get("f_ancho_nombre") else 3.0
+    GRID_W = [name_w, 0.85, 0.8, 0.85, 0.5, 0.8, 0.72, 0.5, 0.8, 0.9, 0.85, 0.6, 1.1]
     ayudas = {"Presup.": "Presupuesto diario", "Gastado": "Importe gastado",
               "C/conv": "Costo por conversación", "CPM": "CPM / CTR",
               "C/venta": "Costo por venta", "Ingr.": "Ingresos",
               "Util.": "Utilidad (ganancia)", "Conv.": "Conversaciones",
               "ROAS": "Retorno sobre la inversión",
-              "Últ. cambio": ("Fecha del último cambio de presupuesto y cuántos cambios lleva. "
-                              "Ordena por esta columna para ver los que más has modificado (más recientes primero)."),
-              "Fact. 7d": ("Últimos 7 días: barras = facturación, línea = gasto. "
+              "Fact. 7d": ("Últimos 7 días: barras = facturación, línea lila = gasto. "
                            "Si la línea va por debajo de las barras, ese día hubo ganancia.")}
     st.markdown(
-        "<style>.meta-mini{font-size:11px;color:#71717A;line-height:1.25;margin-top:1px;"
-        "font-family:'Space Mono',monospace;}"
-        '.meta-mini b{color:#18181B;font-weight:600;}'
+        '<style>.meta-mini{font-size:9.5px;color:#7f8b9c;line-height:1.25;margin-top:1px;}'
+        '.meta-mini b{color:#9fb0c2;font-weight:600;}'
         # Datos centrados en cada columna (igual que sus títulos).
         '.gcell,.gcell .big,.gcell .sub,.gcell .meta-mini{text-align:center !important;}'
         # Botones de encabezado (ordenar) CENTRADOS, igual que los valores, sin recuadro.
         '.stButton button[kind="tertiary"]{padding:0 !important;min-height:0 !important;'
-        'color:#71717A !important;letter-spacing:0;line-height:1.1;'
+        'color:#8fd6db !important;letter-spacing:0;line-height:1.1;'
         'justify-content:center !important;text-align:center !important;'
         'border:none !important;box-shadow:none !important;background:transparent !important;}'
         '.stButton button[kind="tertiary"]:focus,.stButton button[kind="tertiary"]:active,'
         '.stButton button[kind="tertiary"]:focus-visible{box-shadow:none !important;'
-        'outline:none !important;border:none !important;color:#71717A !important;}'
+        'outline:none !important;border:none !important;color:#8fd6db !important;}'
         '.stButton button[kind="tertiary"] div[data-testid="stMarkdownContainer"]'
         '{width:100% !important;text-align:center !important;}'
-        ".stButton button[kind=\"tertiary\"] p{font-size:10px !important;font-weight:700 !important;"
-        "font-family:'Space Mono',monospace;"
+        '.stButton button[kind="tertiary"] p{font-size:10px !important;font-weight:700 !important;'
         'text-transform:uppercase;margin:0 !important;white-space:nowrap;text-align:center !important;}'
-        '.stButton button[kind="tertiary"]:hover p{color:#18181B !important;}</style>',
+        '.stButton button[kind="tertiary"]:hover p{color:#BFF2E2 !important;}</style>',
         unsafe_allow_html=True)
 
     # Encabezados clicables (botones nativos): reordenan SIN recargar la página.
     sort_c = st.query_params.get("sort", "roas")
     dir_c = st.query_params.get("dir", "desc")
 
-    ACC = [0.5, 10.5, 0.55, 0.55, 0.55]
-    vigilados = _get_vigilados()
+    ACC = [0.5, 11.0, 0.55, 0.55]
     # Marcador para fijar (sticky) la fila de títulos al hacer scroll.
     st.markdown('<span class="tbl-hdr-anchor"></span>', unsafe_allow_html=True)
     hc = st.columns(ACC, vertical_alignment="center")
@@ -1688,9 +1465,8 @@ def _render_lista_nativa(filas, nivel):
             # La columna del mini gráfico no se ordena: título simple (sin botón).
             if key == "serie7":
                 col.markdown(
-                    f'<div style="text-align:center;font-size:10px;font-weight:700;'
-                    f'font-family:\'Space Mono\',monospace;'
-                    f'color:#71717A;text-transform:uppercase;letter-spacing:.06em" '
+                    f'<div class="h2" style="text-align:center;font-size:10px;'
+                    f'color:#8fd6db;text-transform:uppercase;letter-spacing:.06em" '
                     f'title="{esc(ayudas.get(label, ""))}">{esc(label)}</div>',
                     unsafe_allow_html=True)
                 continue
@@ -1703,7 +1479,6 @@ def _render_lista_nativa(filas, nivel):
                 st.rerun()
     hc[2].markdown('<div class="h2" style="text-align:center">Info</div>', unsafe_allow_html=True)
     hc[3].markdown('<div class="h2" style="text-align:center">Pres.</div>', unsafe_allow_html=True)
-    hc[4].markdown('<div class="h2" style="text-align:center">Dup.</div>', unsafe_allow_html=True)
     st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
     for f in filas:
@@ -1719,25 +1494,16 @@ def _render_lista_nativa(filas, nivel):
         # Color del nombre según estado: verde=activo, rojo=apagado, amarillo=mixto.
         a_n, t_n = f["activos"], f["total"]
         if t_n and a_n == t_n:
-            est_col = C_OK
+            est_col = "#10b981"
         elif a_n == 0:
-            est_col = C_BAD
+            est_col = "#ff8b84"
         else:
-            est_col = C_WARN
-        est_txt = ("Activo" if est_col == C_OK
-                   else "Apagado" if est_col == C_BAD else "Mixto (unos activos)")
-        # El nombre siempre en tinta (legible); el estado lo comunica el punto de color.
-        nombre_col = C_INK
-        # Cuenta + fecha de creación en UNA sola línea compacta (sin guión, "CRE.").
+            est_col = "#f5c451"
+        est_txt = ("Activo" if est_col == "#10b981"
+                   else "Apagado" if est_col == "#ff8b84" else "Mixto (unos activos)")
+        # Fecha de creación (se mantiene bajo Cuenta).
         creado = _fecha_corta(f.get("creado"))
-        _cta = esc(str(f["cuenta"]))[:16]
-        if _cta and _cta != "—":
-            cuenta_cell = (f'<div class="sub" style="white-space:nowrap;overflow:hidden;'
-                           f'text-overflow:ellipsis;font-size:12px">{_cta}'
-                           f'<span style="color:#9a968c;margin-left:7px">CRE. {creado}</span></div>')
-        else:
-            cuenta_cell = (f'<div class="sub" style="white-space:nowrap;font-size:12px;'
-                           f'color:#9a968c">CRE. {creado}</div>')
+        creado_mini = f'<div class="meta-mini" title="Fecha de creación">Creado <b>{creado}</b></div>'
         # El rendimiento "desde el último cambio" ya NO va fijo en la fila (ruido
         # visual); sale en el tooltip del botón ⓘ (abajo) y en la card de detalle.
         # Degradado rojo SOLO para los que van muy mal: gastan y su ROAS < 1 (pierden).
@@ -1745,25 +1511,16 @@ def _render_lista_nativa(filas, nivel):
         roas_alto = bool(f["roas"] and f["roas"] > 5)
         # Nombre coloreado por ESTADO (verde activo / rojo apagado / amarillo mixto);
         # acento verde a la izquierda si ROAS > 5.
-        borde = f"border-left:3px solid {C_OK};padding-left:8px;" if roas_alto else ""
-        # ¿Este anuncio está EN VIGILANCIA? (cualquiera de sus ad_ids marcado).
-        es_vig = any(str(a) in vigilados for a in f.get("ad_ids", []))
-        # Subrayado de atención + ojo cuando está vigilado.
-        vig_style = ("text-decoration:underline;text-decoration-color:#6D28D9;"
-                     "text-decoration-thickness:2px;text-underline-offset:3px;") if es_vig else ""
-        ojo_html = ('<span title="En vigilancia" style="color:#6D28D9;margin-right:5px;'
-                    'font-size:14px;vertical-align:middle">👁️</span>') if es_vig else ""
-        # Punto de estado JUNTO al nombre (verde activo / rojo apagado / ámbar mixto).
+        borde = "border-left:3px solid #10b981;padding-left:8px;" if roas_alto else ""
+        # Punto de estado JUNTO al nombre (verde activo / rojo apagado / amarillo mixto).
         dot_html = (f'<span title="{est_txt}" style="color:{est_col};font-size:12px;'
                     f'margin-right:7px;vertical-align:middle;line-height:1">●</span>')
-        # Identificador del anuncio/conjunto/campaña, en chico (mono), debajo del nombre.
-        id_html = (f'<div class="sub" style="font-size:12px;color:#9a968c;'
-                   f"font-family:'Space Mono',monospace;"
-                   f'margin-top:2px;letter-spacing:.02em">{esc(str(f["sub"]))}</div>')
-        nombre_html = (f'<div class="ad-name" style="{borde}color:{nombre_col};font-weight:600;'
-                       f'font-size:17px;line-height:1.18;white-space:normal;word-break:break-word">'
-                       f'{dot_html}{ojo_html}<span style="{vig_style}">'
-                       f'{esc(str(f["nombre"]))[:120]}</span></div>{id_html}')
+        # Identificador del anuncio/conjunto/campaña, en chico, debajo del nombre.
+        id_html = (f'<div class="sub" style="font-size:11px;color:#7f8b9c;'
+                   f'margin-top:1px;letter-spacing:.02em">{esc(str(f["sub"]))}</div>')
+        nombre_html = (f'<div class="ad-name" style="{borde}color:{est_col};font-weight:700;'
+                       f'font-size:15px;line-height:1.2;white-space:normal;word-break:break-word">'
+                       f'{dot_html}{esc(str(f["nombre"]))[:120]}</div>{id_html}')
         if muy_mal:
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
                            f'debajo de 1x con gasto. Considera pausar o ajustar.">'
@@ -1783,26 +1540,17 @@ def _render_lista_nativa(filas, nivel):
         _tip = " · ".join(
             f'{d[5:]}: fact {_usd(i)} / gasto {_usd(g)}'
             for d, i, g in zip(dias7, serie7, (gasto7 or [0] * len(serie7))))
-        # Total facturado y, si hay línea, total gastado (tinta tenue) debajo.
-        _gasto_lbl = (f'<span style="color:#71717A"> · {_usd(totg7)}</span>'
+        # Total facturado (verde) y, si hay línea, total gastado (lila) debajo.
+        _gasto_lbl = (f'<span style="color:#c4b5fd"> · {_usd(totg7)}</span>'
                       if gasto7 else '')
         spark_cell = (
             f'<div title="Últimos 7 días — {esc(_tip)}">{spark7}'
             f'<div class="sub" style="font-size:10.5px;margin-top:1px">'
             f'{_usd(tot7)}{_gasto_lbl}</div></div>')
-        # Celda "Últ. cambio": fecha del último cambio de presupuesto + nº de cambios.
-        _ult = f.get("ult_mod")
-        _nc = int(f.get("num_cambios") or 0)
-        if _ult is not None and _nc > 0:
-            _cambios_txt = f'{_nc} cambio{"s" if _nc != 1 else ""}'
-            ultmod_cell = (
-                f'<div class="big" style="font-size:13.5px">{_fecha_corta(_ult.isoformat())}</div>'
-                f'<div class="sub" style="font-size:11px">{_hace_amigable(_ult, ahora)} · {_cambios_txt}</div>')
-        else:
-            ultmod_cell = '<div class="sub" style="font-size:12px">Sin cambios</div>'
         cells = [
             nombre_html,
-            cuenta_cell,
+            f'<div class="sub" style="font-size:12.5px">{esc(str(f["cuenta"]))[:18]}</div>'
+            + creado_mini,
             _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
             gastado_cell,
             f'<div class="big">{conv}</div>',
@@ -1811,13 +1559,9 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big">{f["num"]}</div>',
             costov,
             _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
-            f'<div class="big" style="color:{"#1F8A4C" if g>=0 else "#E11D48"};font-weight:700">'
+            f'<div class="big" style="color:{"#10b981" if g>=0 else "#ff8b84"};font-weight:700">'
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
-            _roas_pill(f["roas"] or 0.0)
-            + (f'<div class="sub" style="font-size:11px;margin-top:3px" '
-               f'title="Anuncios activos ahora mismo (de {f["total"]} en total)">'
-               f'{f["activos"]}/{f["total"]} activos</div>'),
-            ultmod_cell,
+            _roas_pill(f["roas"] or 0.0),
             spark_cell,
         ]
         rc = st.columns(ACC, vertical_alignment="center")
@@ -1831,24 +1575,16 @@ def _render_lista_nativa(filas, nivel):
             dcols = st.columns(GRID_W, gap="small", vertical_alignment="top")
             for col, cell in zip(dcols, cells):
                 col.markdown(f'<div class="gcell">{cell}</div>', unsafe_allow_html=True)
-        rc[2].markdown('<span class="iconbtn-anchor"></span>', unsafe_allow_html=True)
         if rc[2].button("", icon=":material/info:", key=f"info_{f['sub']}",
                         help=_perf_help_text(f, ahora)):
             st.session_state["info_row"] = f
             _dialog_info()
         # Presupuesto y Duplicar: botones (no popovers) que abren un diálogo —
         # los popovers no se renderizaban en columnas angostas.
-        rc[3].markdown('<span class="iconbtn-anchor"></span>', unsafe_allow_html=True)
         if rc[3].button("", icon=":material/edit:", key=f"presb_{f['sub']}",
                         help="Modificar presupuesto"):
             st.session_state["pres_row"] = f
             _dialog_presupuesto()
-        # Duplicar el anuncio/conjunto/campaña (según la vista actual).
-        rc[4].markdown('<span class="iconbtn-anchor"></span>', unsafe_allow_html=True)
-        if rc[4].button("", icon=":material/content_copy:", key=f"dupb_{f['sub']}",
-                        help="Duplicar"):
-            st.session_state["dup_row"] = f
-            _dialog_duplicar()
         st.markdown('<hr class="rowline">', unsafe_allow_html=True)
 
 
@@ -1912,37 +1648,27 @@ def _dialog_info():
         }
         st.table(pd.DataFrame(list(ver.items()), columns=["Métrica", "Valor"]))
 
-    # Gráfica: gasto (Facebook) e ingresos (tus ventas). Rango de días configurable.
+    # Gráfica de los últimos 7 días: gasto (Facebook) e ingresos (tus ventas).
     ahora = db.ahora()
-    _rangos = {"7 días": (7, "last_7d"), "14 días": (14, "last_14d"),
-               "30 días": (30, "last_30d"), "90 días": (90, "last_90d")}
-    _sel = st.segmented_control("Días de la gráfica", list(_rangos.keys()),
-                                default="7 días", key=f"chart_dias_{f.get('sub')}") or "7 días"
-    ndias, preset = _rangos[_sel]
-    dias = [(ahora - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(ndias - 1, -1, -1)]
+    dias = [(ahora - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
     serie = fb.serie_diaria(f.get("status_obj_id"), f.get("status_nivel", "ad"),
-                            f.get("conexion_id"), date_preset=preset)
+                            f.get("conexion_id"))
     gasto_por_dia = {s["date"]: s["spend"] * rate for s in serie if s.get("date")}
-    vd = db.ventas_diarias(f["ad_ids"], ahora - timedelta(days=ndias))
-    # Cada venta se convierte con SU moneda (país); '?' usa la moneda de la cuenta.
-    _mv_fb = f.get("moneda") or "USD"
-    ing_por_dia = {d: sum(val * fx.tasa_a_usd(_mv_fb if mon == "?" else mon)
-                          for mon, val in (v.get("por_moneda") or {}).items())
-                   for d, v in vd.items()}
+    vd = db.ventas_diarias(f["ad_ids"], ahora - timedelta(days=7))
+    ing_por_dia = {d: v["ingreso_nat"] * rate for d, v in vd.items()}
 
     gastos = [round(gasto_por_dia.get(d, 0.0), 2) for d in dias]
     ingresos = [round(ing_por_dia.get(d, 0.0), 2) for d in dias]
     etiquetas = [d[5:] for d in dias]  # MM-DD
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#18181B"))
+    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#7c3aed"))
     fig.add_trace(go.Scatter(x=etiquetas, y=ingresos, name="Ingresos (USD)", mode="lines+markers",
-                             line=dict(color="#1F8A4C", width=3)))
+                             line=dict(color="#10b981", width=3)))
     fig.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10),
                       legend=dict(orientation="h", y=1.15),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                      font=dict(color="#18181B"),
-                      xaxis=dict(gridcolor="#DED9D0"), yaxis=dict(gridcolor="#DED9D0"))
+                      font=dict(color="#c3ccd6"))
     st.plotly_chart(fig, use_container_width=True)
     if not serie:
         st.caption("El gasto por día se llena cuando hay conexión de Facebook. Los ingresos "
@@ -2001,41 +1727,26 @@ def _pop_presupuesto(f):
                                 value=actual, step=1.0, key=f"pres_{f['sub']}")
     if (f["moneda"] or "USD").upper() != "USD":
         st.caption(f"Se enviará a Facebook ≈ {_num(nuevo / (f['rate_c'] or 1))} {f['moneda']}")
-    _vig_now = any(str(a) in _get_vigilados() for a in f.get("ad_ids", []))
-    if _vig_now:
-        st.caption("👁️ Este anuncio está **en vigilancia** ahora mismo.")
-
-    def _aplicar_cambio(vigilar: bool):
+    if st.button("Aplicar", type="primary", key=f"presbtn_{f['sub']}",
+                 use_container_width=True):
         # Rápido: aplica local al instante y empuja a Facebook en SEGUNDO PLANO.
         rate = f.get("rate_c") or 1.0
         nativo = (nuevo / rate) if rate else nuevo
-        _cambiar_periodo_snapshot(f["ad_ids"], nativo)  # guarda snapshot del gasto
-        _set_vigilancia(f["ad_ids"], vigilar)     # vigila o quita según el botón
+        for aid in f["ad_ids"]:
+            db.cambiar_periodo(aid, nativo)
         _bitacora_presupuesto(f, actual, nuevo)   # registra en la bitácora
-        _ojo = " · 👁️ en vigilancia" if vigilar else ""
         hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
         if fb.SDK_DISPONIBLE and hay and f.get("budget_obj_id"):
             fb.actualizar_presupuesto_async(
                 f["budget_obj_id"], f.get("budget_nivel", "adset"), nativo,
-                f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40],
-                moneda=f.get("moneda"))
+                f.get("conexion_id"), etiqueta=str(f.get("nombre", ""))[:40])
             st.session_state["_estado_msg"] = (
-                "ok", f"Presupuesto de '{str(f['nombre'])[:35]}' → {_usd(nuevo)}.{_ojo} "
+                "ok", f"Presupuesto de '{str(f['nombre'])[:35]}' → {_usd(nuevo)}. "
                 "Aplicándose en Facebook en segundo plano.")
         else:
             st.session_state["_estado_msg"] = (
-                "ok", f"Presupuesto guardado localmente (sin conexión de Facebook).{_ojo}")
+                "ok", "Presupuesto guardado localmente (sin conexión de Facebook).")
         st.rerun()
-
-    # DOS botones: cambiar sin más, o vigilar (subrayar) + cambiar.
-    cbt1, cbt2 = st.columns([1, 1.25])
-    if cbt1.button("Cambiar presupuesto", type="primary", key=f"presbtn_{f['sub']}",
-                   use_container_width=True):
-        _aplicar_cambio(False)
-    if cbt2.button("👁️ Vigilar y cambiar presupuesto", key=f"presbtnvig_{f['sub']}",
-                   use_container_width=True,
-                   help="Cambia el presupuesto Y deja el anuncio subrayado en vigilancia."):
-        _aplicar_cambio(True)
 
 
 def _pop_duplicar(f):
@@ -2044,10 +1755,8 @@ def _pop_duplicar(f):
     obj_id = f.get("status_obj_id")
     lbl = {"ad": "anuncio", "adset": "conjunto", "campaign": "campaña"}.get(nivel, "anuncio")
     st.markdown(f"**Duplicar {lbl}: {esc_nombre(f)}**")
-    st.caption(f"Estás en la vista **{lbl}**. Se duplica el {lbl} de forma **manual** "
-               "(sin `/copies`), reutilizando el mismo creativo → **conserva la publicación "
-               "y su prueba social** (likes, comentarios, compartidos). Las copias quedan "
-               "**pausadas** por defecto.")
+    st.caption(f"Estás en la vista **{lbl}**, así que se duplica el {lbl} completo "
+               "en su misma campaña.")
     hay = bool(fb._conexiones_efectivas()) if fb.SDK_DISPONIBLE else False
     if not hay:
         st.info("Necesitas una conexión de Facebook activa para duplicar.")
@@ -2056,32 +1765,30 @@ def _pop_duplicar(f):
                         key=f"dupn_{f['sub']}")
     presu = st.number_input(f"Presupuesto por copia (USD)", min_value=0.0,
                             value=4.0, step=1.0, key=f"dupp_{f['sub']}",
-                            help="Se aplica al conjunto nuevo (si la campaña no es CBO).")
+                            help="Por defecto 4 USD por copia.")
     activar = st.toggle("Activar copias de inmediato", value=False, key=f"dupa_{f['sub']}")
     reutilizar = True
-    dry = st.toggle("🔎 Solo ver el payload (dry-run, no crea nada)", value=False,
-                    key=f"dupdry_{f['sub']}",
-                    help="Muestra exactamente lo que se enviaría a Facebook, sin ejecutar.")
-    if st.button("Duplicar ahora" if not dry else "Ver payload (dry-run)", type="primary",
-                 key=f"dupbtn_{f['sub']}", use_container_width=True):
+    if nivel == "ad":
+        reutilizar = st.toggle("Conservar interacciones (usar la misma publicación)",
+                               value=True, key=f"dupr_{f['sub']}",
+                               help="Fuerza a la copia a usar el MISMO post del original, así "
+                                    "arrastra los likes, comentarios y compartidos.")
+    else:
+        st.caption("Las interacciones se conservan si los anuncios del "
+                   f"{lbl} usan publicaciones existentes (deep copy de Facebook).")
+    if st.button("Duplicar ahora", type="primary", key=f"dupbtn_{f['sub']}",
+                 use_container_width=True):
         nativo = presu / (f["rate_c"] or 1)
-        with st.spinner(f"{'Calculando payload' if dry else 'Duplicando'} ({lbl})..."):
+        with st.spinner(f"Duplicando {lbl} en Facebook..."):
             res = fb.duplicar_objeto(nivel, obj_id, int(n), float(nativo),
                                      activar=bool(activar), conexion_id=f.get("conexion_id"),
                                      cuenta_id=f.get("cuenta_id"),
                                      cuenta_nombre=f.get("cuenta_nombre"),
-                                     reutilizar_post=bool(reutilizar), dry_run=bool(dry),
-                                     moneda=f.get("moneda"))
+                                     reutilizar_post=bool(reutilizar))
         ok = res.get("exitosas", [])
         fail = res.get("fallidas", [])
         if res.get("error_global"):
             st.error(res["error_global"])
-        if dry:
-            st.info("Dry-run: esto es lo que se enviaría a Facebook (no se creó nada).")
-            st.json(ok if ok else res)
-            for x in fail:
-                st.error(f"{x['nombre']}: {x['error']}")
-            return
         if ok:
             st.success(f"{len(ok)} copia(s) de {lbl} creada(s).")
             if nivel == "ad" and reutilizar:
@@ -2108,65 +1815,66 @@ def esc_nombre(f):
 # --------------------------------------------------------------------------- #
 _TABLA_CSS = """
 <style>
-.tbl-wrap { overflow-x:auto; border:1px solid #DED9D0; border-radius:18px;
-    background:#FBFAF7; box-shadow:none; }
-table.ads { width:100%; border-collapse:collapse; font-size:12px; color:#18181B;
+.tbl-wrap { overflow-x:auto; border:1px solid rgba(255,255,255,.08); border-radius:18px;
+    background:rgba(23,26,34,.55); backdrop-filter:blur(16px);
+    box-shadow:0 12px 34px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.04); }
+table.ads { width:100%; border-collapse:collapse; font-size:12px; color:#e6e7ee;
     background:transparent; min-width:1080px; }
-table.ads thead th { text-align:left; font-weight:700; color:#71717A; font-size:10px;
-    text-transform:uppercase; letter-spacing:.08em; padding:12px 12px; white-space:nowrap;
-    font-family:'Space Mono',monospace;
-    background:transparent; border-bottom:1px solid #DED9D0; }
-table.ads td { padding:11px 12px; border-bottom:1px solid #EAE6DD; vertical-align:middle; }
-table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
-.big { font-size:17px; font-weight:600; color:#18181B; line-height:1.15; }
-.sub { font-size:13.5px; color:#71717A; }
-.m-mint{ color:#1F8A4C; } .m-lav{ color:#18181B; } .m-peri{ color:#18181B; }
+table.ads thead th { text-align:left; font-weight:700; color:#8fd6db; font-size:10px;
+    text-transform:uppercase; letter-spacing:.06em; padding:12px 12px; white-space:nowrap;
+    background:linear-gradient(180deg, rgba(140,210,215,.08), transparent);
+    border-bottom:1px solid rgba(140,210,215,.18); }
+table.ads td { padding:11px 12px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:middle; }
+table.ads tbody tr:hover td { background:linear-gradient(90deg, rgba(140,210,215,.07), rgba(199,196,255,.05)); }
+.big { font-size:15px; font-weight:600; color:#f2f4f8; line-height:1.2; }
+.sub { font-size:12px; color:#9aa7b6; }
+.m-mint{ color:#BFF2E2; } .m-lav{ color:#E6D5FF; } .m-peri{ color:#C7C4FF; }
 /* Alerta: solo el nombre, con difuminado rojo hacia la derecha */
-.name-alert{ background:linear-gradient(90deg, rgba(192,57,43,.16), rgba(192,57,43,0) 88%);
+.name-alert{ background:linear-gradient(90deg, rgba(239,68,68,.30), rgba(239,68,68,0) 88%);
     border-radius:8px; padding:3px 10px; margin:-3px -10px; }
 .alert-badge{ display:inline-flex; align-items:center; justify-content:center;
-    width:20px; height:20px; border-radius:50%; background:#E11D48; color:#fff;
-    font-weight:800; font-size:12px; cursor:help; }
+    width:20px; height:20px; border-radius:50%; background:#ef4444; color:#fff;
+    font-weight:800; font-size:12px; cursor:help; box-shadow:0 0 10px rgba(239,68,68,.4); }
 .ok-dot{ display:inline-block; width:8px; height:8px; border-radius:50%;
-    background:rgba(94,140,0,.6); }
+    background:rgba(94,231,160,.5); }
 .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px;
     border-radius:999px; font-size:10.5px; font-weight:600; }
-.pill-run { background:rgba(215,255,58,.55); color:#18181B; }
-.pill-off { background:rgba(17,17,17,.07); color:#71717A; }
+.pill-run { background:rgba(74,222,128,.14); color:#7ef0a9; box-shadow:0 0 12px rgba(74,222,128,.15); }
+.pill-off { background:rgba(148,163,184,.14); color:#b6c0cd; }
 .dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
 .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px;
-    font-weight:700; color:#18181B; }
-.bar { height:5px; background:rgba(17,17,17,.08); border-radius:4px; margin-top:5px; overflow:hidden; }
-.bar > span { display:block; height:100%; background:#18181B; }
-.chip { display:inline-block; background:rgba(215,255,58,.5); color:#18181B; border-radius:6px;
+    font-weight:700; color:#0b1220; }
+.bar { height:5px; background:rgba(255,255,255,.08); border-radius:4px; margin-top:5px; overflow:hidden; }
+.bar > span { display:block; height:100%; background:linear-gradient(90deg,#8cd2d7,#c7c4ff); }
+.chip { display:inline-block; background:rgba(191,242,226,.14); color:#BFF2E2; border-radius:6px;
     padding:2px 8px; font-size:10px; font-weight:600; }
-.up { color:#18181B; } .down { color:#E11D48; } .flat { color:#71717A; }
-.hcol { color:#71717A; font-size:10px; font-weight:700; text-transform:uppercase;
+.up { color:#5ee7a0; } .down { color:#ff8b84; } .flat { color:#9ca3af; }
+.hcol { color:#8fd6db; font-size:10px; font-weight:700; text-transform:uppercase;
     letter-spacing:.06em; padding:4px 0 2px; }
-hr.rowline { margin:2px 0; border:none; border-top:1px solid #EAE6DD; }
+hr.rowline { margin:2px 0; border:none; border-top:1px solid rgba(255,255,255,.06); }
 /* Fija (sticky) la fila de títulos de la tabla al hacer scroll hacia abajo.
    El hermano siguiente al marcador puede ser stLayoutWrapper o stHorizontalBlock. */
 [data-testid="stElementContainer"]:has(.tbl-hdr-anchor) + *{
-    position:sticky; top:0; z-index:30; background:#F3F1EC;
-    box-shadow:0 6px 10px -10px rgba(17,17,17,.3); padding:6px 0 4px;
-    border-bottom:1px solid #DED9D0;
+    position:sticky; top:0; z-index:30; background:#080810;
+    box-shadow:0 6px 12px -8px rgba(0,0,0,.7); padding:6px 0 4px;
+    border-bottom:1px solid rgba(255,255,255,.08);
 }
 /* Bloque "Rendimiento desde el último cambio" (fila + card) */
-.perf-block{ background:#F1EEE6; border-radius:8px; padding:6px 10px;
+.perf-block{ background:rgba(255,255,255,.03); border-radius:8px; padding:6px 10px;
     margin-top:5px; border:1px solid transparent; }
-.perf-block.perf-alert{ border:1px solid rgba(192,57,43,.45); }
-.perf-line{ font-size:10.5px; color:#333333; line-height:1.35; }
-.perf-line b{ color:#18181B; font-weight:600; }
-.perf-time{ color:#71717A; }
-.perf-sep{ color:#b3ac9e; margin:0 1px; }
+.perf-block.perf-alert{ border:1px solid rgba(239,68,68,.4); }
+.perf-line{ font-size:10.5px; color:#dbe2ea; line-height:1.35; }
+.perf-line b{ color:#fff; font-weight:600; }
+.perf-time{ color:#8a93a6; }
+.perf-sep{ color:#5a6474; margin:0 1px; }
 .perf-warn{ margin-right:5px; animation:perfBlink 1s steps(1) infinite; }
 @keyframes perfBlink{ 50%{ opacity:.15; } }
 .perf-bar{ position:relative; height:5px; border-radius:3px;
-    background:rgba(17,17,17,.08); margin-top:5px; }
+    background:rgba(255,255,255,.08); margin-top:5px; }
 .perf-fill{ height:100%; border-radius:3px;
-    background:#18181B; transition:width .4s ease; }
+    background:linear-gradient(90deg,#7c3aed,#10b981); transition:width .4s ease; }
 .perf-marker{ position:absolute; top:-1px; left:66.6%; width:2px; height:7px;
-    background:#18181B; opacity:.8; border-radius:1px; }
+    background:#e6e7ee; opacity:.8; border-radius:1px; }
 </style>
 """
 
@@ -2398,45 +2106,6 @@ def seccion_venta_manual():
             st.rerun()
 
 
-def seccion_corregir_ventas():
-    """Corregir/borrar una venta puntual mal importada (p. ej. 9000 en vez de 90)."""
-    with st.sidebar.expander("🩹 Corregir venta", expanded=False):
-        st.caption("¿Se subió una venta con el valor equivocado (ej. 9000 en vez de 90)? "
-                   "Corrige el valor aquí mismo, o bórrala y vuelve a leer el Excel/Sheet "
-                   "ya corregido.")
-        recientes = db.ventas_recientes(25)
-        if not recientes:
-            st.caption("Aún no hay ventas registradas.")
-            return
-        etiquetas = {}
-        for v in recientes:
-            fch = str(v.get("hora_venta") or "")[:16].replace("T", " ")
-            aid = (str(v.get("ad_id") or "").strip() or "(sin ad_id)")[:14]
-            etq = (f"#{v['id']} · {_num(v['valor_venta'])} · {aid} · {fch} · "
-                   f"{v.get('hoja_origen') or '—'}")
-            etiquetas[etq] = v
-        sel = st.selectbox("Venta a corregir (más recientes primero)", list(etiquetas.keys()),
-                           key="corr_sel")
-        v = etiquetas[sel]
-        nuevo = st.number_input("Valor correcto (en la moneda de la venta)", min_value=0.0,
-                                value=float(v.get("valor_venta") or 0.0), step=1.0,
-                                key=f"corr_val_{v['id']}")
-        c1, c2 = st.columns(2)
-        if c1.button("Guardar valor", type="primary", use_container_width=True, key="corr_save"):
-            db.actualizar_valor_venta(v["id"], nuevo)
-            db.set_config("ventas_cambio", db.a_texto(db.ahora()))  # refresca el dashboard
-            st.success(f"Venta #{v['id']} corregida a {_num(nuevo)}.")
-            time.sleep(0.6)
-            st.rerun()
-        if c2.button("Borrar venta", use_container_width=True, key="corr_del"):
-            db.borrar_venta(v["id"])
-            db.set_config("ventas_cambio", db.a_texto(db.ahora()))
-            st.warning(f"Venta #{v['id']} borrada. Si la corriges en el Excel/Sheet y "
-                       "vuelves a **Leer ventas del Sheet**, entrará ya corregida.")
-            time.sleep(0.9)
-            st.rerun()
-
-
 # --------------------------------------------------------------------------- #
 #  Sección 2 — Detalle por anuncio
 # --------------------------------------------------------------------------- #
@@ -2635,36 +2304,37 @@ def seccion_manual():
 # --------------------------------------------------------------------------- #
 _LOGIN_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap');
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="collapsedControl"], header[data-testid="stHeader"], [data-testid="stToolbar"]{ display:none !important; }
-[data-testid="stAppViewContainer"], .stApp{ background:#F3F1EC !important; overflow:hidden; }
+[data-testid="stAppViewContainer"], .stApp{ background:#080810 !important; overflow:hidden; }
 /* Centrado perfecto: una sola columna en el centro exacto */
 [data-testid="stMain"]{ display:flex !important; align-items:center !important; justify-content:center !important; min-height:100vh; }
 [data-testid="stMainBlockContainer"], .block-container{ max-width:420px !important; width:100%;
     padding:2.5vh 1.1rem !important; position:relative; z-index:2; }
 
-/* ---------- Fondo papel con verde MUY difuminado (patrón suave) ---------- */
-.login-bg{ position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background:#F3F1EC; }
+/* ---------- Fondo animado (aurora + grid + blobs + partículas) ---------- */
+.login-bg{ position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background:#080810; }
 .login-bg .aurora{ position:absolute; inset:-40%;
     background:
-      radial-gradient(45% 45% at 26% 26%, rgba(94,140,0,.20) 0%, transparent 60%),
-      radial-gradient(40% 40% at 74% 52%, rgba(14,116,105,.16) 0%, transparent 60%),
-      radial-gradient(52% 52% at 50% 82%, rgba(120,190,120,.18) 0%, transparent 62%),
-      radial-gradient(35% 35% at 82% 20%, rgba(215,255,58,.22) 0%, transparent 60%);
-    filter:blur(70px); animation:aurora 22s ease-in-out infinite alternate; }
+      radial-gradient(45% 45% at 30% 30%, #1a0533 0%, transparent 60%),
+      radial-gradient(40% 40% at 72% 55%, #020818 0%, transparent 60%),
+      radial-gradient(50% 50% at 50% 80%, #14082e 0%, transparent 62%),
+      radial-gradient(35% 35% at 82% 22%, #0a1a3a 0%, transparent 60%);
+    filter:blur(40px); animation:aurora 22s ease-in-out infinite alternate; }
 .login-bg .grid{ position:absolute; inset:0;
-    background-image:linear-gradient(rgba(17,17,17,.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(17,17,17,.03) 1px, transparent 1px);
+    background-image:linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
     background-size:46px 46px;
     -webkit-mask:radial-gradient(circle at 50% 42%, #000 0%, transparent 78%);
     mask:radial-gradient(circle at 50% 42%, #000 0%, transparent 78%); }
-.login-bg .blob{ position:absolute; width:460px; height:460px; border-radius:50%;
-    filter:blur(90px); opacity:.22; }
-.login-bg .blob-1{ background:#5E8C00; top:-140px; left:-120px; animation:blob1 20s ease-in-out infinite alternate; }
-.login-bg .blob-2{ background:#0E7469; bottom:-150px; right:-120px; animation:blob2 26s ease-in-out infinite alternate; }
+.login-bg .blob{ position:absolute; width:440px; height:440px; border-radius:50%;
+    filter:blur(80px); opacity:.15; }
+.login-bg .blob-1{ background:#7c3aed; top:-130px; left:-120px; animation:blob1 20s ease-in-out infinite alternate; }
+.login-bg .blob-2{ background:#2563eb; bottom:-140px; right:-120px; animation:blob2 26s ease-in-out infinite alternate; }
 .login-bg .particles span{ position:absolute; width:3px; height:3px; border-radius:50%;
-    background:#5E8C00; opacity:.22; animation:floaty linear infinite; }
+    background:#c9d3ff; opacity:.35; box-shadow:0 0 6px rgba(201,211,255,.6);
+    animation:floaty linear infinite; }
 @keyframes aurora{
     0%{ transform:translate(-4%,-3%) rotate(0deg) scale(1.1); }
     50%{ transform:translate(4%,3%) rotate(7deg) scale(1.28); }
@@ -2672,67 +2342,71 @@ _LOGIN_CSS = """
 @keyframes blob1{ 0%{transform:translate(0,0) scale(1)} 100%{transform:translate(60px,50px) scale(1.15)} }
 @keyframes blob2{ 0%{transform:translate(0,0) scale(1)} 100%{transform:translate(-50px,-40px) scale(1.1)} }
 @keyframes floaty{ 0%{transform:translate(0,0); opacity:0}
-    10%{opacity:.3} 90%{opacity:.3} 100%{transform:translate(14px,-120px); opacity:0} }
+    10%{opacity:.4} 90%{opacity:.4} 100%{transform:translate(14px,-120px); opacity:0} }
 
 /* ---------- Logo + título ---------- */
 .login-brand{ text-align:center; margin:0 0 22px; animation:fadeInDown .6s cubic-bezier(.2,.7,.3,1) both; }
 .login-logo{ width:76px; height:76px; margin:0 auto 20px; border-radius:22px;
-    background:#18181B; display:flex; align-items:center; justify-content:center; }
+    background:linear-gradient(150deg,#7c3aed,#2563eb); display:flex; align-items:center; justify-content:center;
+    animation:logoPulse 2.6s ease-in-out infinite; }
 .login-logo svg{ width:40px; height:40px; }
-.login-title{ font-family:'Anton',sans-serif; font-weight:400; font-size:40px; line-height:.92; margin:0;
-    text-transform:uppercase; letter-spacing:-.02em; color:#18181B; }
-.login-sub{ font-family:'Space Mono',monospace; color:#71717A; font-size:12px; margin:12px 0 0;
-    text-transform:uppercase; letter-spacing:.12em; }
+.login-title{ font-family:'Geist',sans-serif; font-weight:800; font-size:33px; line-height:1.1; margin:0;
+    background:linear-gradient(92deg,#ffffff 30%,#a855f7 100%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.login-sub{ font-family:'Inter',sans-serif; color:#9aa3b8; font-size:14px; margin:10px 0 0; }
+@keyframes logoPulse{
+    0%,100%{ box-shadow:0 0 22px 4px rgba(124,58,237,.35), 0 0 44px 10px rgba(37,99,235,.18); }
+    50%{ box-shadow:0 0 40px 10px rgba(124,58,237,.6), 0 0 70px 18px rgba(37,99,235,.38); } }
 
-/* ---------- Tarjeta blanca ---------- */
+/* ---------- Tarjeta glass ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"]{
     position:relative; overflow:hidden;
-    background:#FFFFFF !important; backdrop-filter:none;
-    border:1px solid #DED9D0 !important; border-radius:20px !important;
-    box-shadow:0 24px 60px -30px rgba(17,17,17,.25);
+    background:rgba(255,255,255,.03) !important; backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,.08) !important; border-radius:20px !important;
+    box-shadow:0 30px 80px rgba(0,0,0,.5);
     animation:fadeInUp .8s cubic-bezier(.2,.7,.3,1) .15s both; }
 div[data-testid="stVerticalBlockBorderWrapper"]::before{
-    content:""; position:absolute; top:0; left:0; right:0; height:3px;
-    background:#D7FF3A; }
-.login-cardtitle{ font-family:'Anton',sans-serif; font-weight:400; font-size:26px; color:#18181B;
-    text-transform:uppercase; letter-spacing:-.01em; margin:4px 0 14px; }
+    content:""; position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg,#7c3aed,#2563eb); }
+.login-cardtitle{ font-family:'Geist',sans-serif; font-weight:700; font-size:28px; color:#fff; margin:4px 0 14px; }
 
 /* Campos */
 .stTextInput{ animation:fadeInUp .5s ease both; }
 .stTextInput:nth-of-type(1){ animation-delay:.30s; }
 .stTextInput:nth-of-type(2){ animation-delay:.40s; }
-.stTextInput label p, .stTextInput label{ color:#71717A !important; font-family:'Space Mono',monospace;
-    font-size:11px !important; font-weight:400 !important; text-transform:uppercase; letter-spacing:.1em; }
-.stTextInput div[data-baseweb="input"], .stTextInput input{ background:#FBFAF7 !important;
+.stTextInput label p, .stTextInput label{ color:#8a93a6 !important; font-family:'Inter',sans-serif;
+    font-size:11px !important; font-weight:600 !important; text-transform:uppercase; letter-spacing:.09em; }
+.stTextInput div[data-baseweb="input"], .stTextInput input{ background:rgba(255,255,255,.05) !important;
     border-radius:10px !important; }
-.stTextInput input{ border:1px solid #CDC8BE !important; color:#18181B !important;
+.stTextInput input{ border:1px solid rgba(255,255,255,.1) !important; color:#fff !important;
     padding:13px 14px !important; font-family:'Inter',sans-serif; }
-.stTextInput input:focus{ border-color:#18181B !important;
-    box-shadow:0 0 0 3px rgba(215,255,58,.55) !important; }
+.stTextInput input:focus{ border-color:#7c3aed !important;
+    box-shadow:0 0 0 3px rgba(124,58,237,.25), 0 0 18px rgba(124,58,237,.35) !important; }
 .stTextInput div[data-baseweb="input"]{ border:none !important; }
 
-/* Botón: PÍLDORA neón lima (mismo look que el resto de la app) */
+/* Botón con shimmer */
 .stButton{ animation:fadeInUp .5s ease .5s both; }
-.stButton>button{ position:relative; overflow:hidden; width:100%;
-    border:1px solid #18181B !important; border-radius:9999px !important;
-    background:#D7FF3A !important; color:#18181B !important;
-    font-family:'Space Mono',monospace; font-weight:700 !important; text-transform:uppercase;
-    letter-spacing:.06em; padding:12px 0 !important;
-    box-shadow:none !important; transition:transform .3s ease-out, box-shadow .3s ease-out; }
-.stButton>button:hover{ transform:translateY(-2px); box-shadow:0 10px 22px -10px rgba(17,17,17,.4) !important; }
-.stButton>button p{ color:#18181B !important; }
+.stButton>button{ position:relative; overflow:hidden; width:100%; border:none !important; border-radius:10px !important;
+    background:linear-gradient(90deg,#7c3aed,#2563eb) !important; color:#fff !important;
+    font-family:'Geist',sans-serif; font-weight:700 !important; padding:12px 0 !important;
+    box-shadow:0 8px 26px rgba(124,58,237,.35) !important; transition:box-shadow .25s, transform .1s; }
+.stButton>button:hover{ box-shadow:0 0 34px rgba(124,58,237,.65) !important; transform:translateY(-1px); }
+.stButton>button::after{ content:""; position:absolute; top:0; left:-70%; width:45%; height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent); transform:skewX(-20deg); }
+.stButton>button:hover::after{ animation:shimmer .9s ease; }
+@keyframes shimmer{ 0%{left:-70%} 100%{left:150%} }
 
 /* Features abajo */
 .login-feats2{ display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
     margin:20px auto 0; animation:fadeInUp .6s ease .7s both; }
-.login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#71717A;
-    font-family:'Space Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; }
-.login-feats2 .feat svg{ width:15px; height:15px; stroke:#5E8C00; opacity:.9; }
-.login-feats2 .sep{ width:1px; height:14px; background:#DED9D0; }
+.login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#8a93a6;
+    font-family:'Inter',sans-serif; font-size:11.5px; }
+.login-feats2 .feat svg{ width:15px; height:15px; stroke:#a855f7; opacity:.9; }
+.login-feats2 .sep{ width:1px; height:14px; background:rgba(255,255,255,.12); }
 .login-foot{ position:fixed; left:0; right:0; bottom:14px; text-align:center;
-    font-family:'Space Mono',monospace; color:#9a968c; font-size:11px; z-index:3; line-height:1.7; }
-.login-foot .ver{ color:#b3ac9e; font-size:10.5px; }
-.login-foot .hp{ color:#5E8C00; }
+    font-family:'Inter',sans-serif; color:#5a6478; font-size:11.5px; z-index:3; line-height:1.7; }
+.login-foot .ver{ color:#4a5265; font-size:11px; }
+.login-foot .hp{ color:#a855f7; }
 
 @keyframes fadeInDown{ 0%{opacity:0; transform:translateY(-18px)} 100%{opacity:1; transform:translateY(0)} }
 @keyframes fadeInUp{ 0%{opacity:0; transform:translateY(18px)} 100%{opacity:1; transform:translateY(0)} }
@@ -2914,220 +2588,187 @@ def seccion_conexiones():
 def _inject_css():
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
     :root{
-        --bg:#F3F1EC; --card:#FFFFFF; --card-brd:#DED9D0;
-        --txt:#18181B; --sub:#71717A; --ter:#9a968c;
-        --p1:#18181B; --p2:#18181B; --ok:#5E8C00; --warn:#E11D48; --plight:#18181B;
-        --signal:#D7FF3A;
+        --bg:#080810; --card:rgba(255,255,255,.03); --card-brd:rgba(255,255,255,.07);
+        --txt:#ffffff; --sub:#94a3b8; --ter:#475569;
+        --p1:#7c3aed; --p2:#2563eb; --ok:#10b981; --warn:#ef4444; --plight:#a78bfa;
     }
-    /* Base crema en body/stApp; los contenedores TRANSPARENTES para que se vea el
-       fondo (verde difuminado + ondas) que va en .stApp::before / ::after (2º inject). */
-    html, body{ background:#F3F1EC; }
-    .stApp{ background:#F3F1EC !important; color:var(--txt) !important; }
-    [data-testid="stAppViewContainer"], [data-testid="stMain"],
-    [data-testid="stMainBlockContainer"], .block-container,
-    [data-testid="stHeader"]{ background:transparent !important; }
-    [data-testid="stMainBlockContainer"], .block-container{ position:relative; z-index:1; }
+    html, body, .stApp, [data-testid="stAppViewContainer"]{ color:var(--txt); background:var(--bg) !important; }
+
+    /* ---------- Fondo premium: aurora (30%) + blobs (10%) + grid ---------- */
+    .app-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:#080810; }
+    .app-bg .aurora{ position:absolute; inset:-40%; opacity:.5;
+        background:
+          radial-gradient(46% 46% at 26% 24%, #2a0a55 0%, transparent 60%),
+          radial-gradient(42% 42% at 72% 40%, #1a0533 0%, transparent 60%),
+          radial-gradient(40% 40% at 78% 70%, #061336 0%, transparent 60%),
+          radial-gradient(50% 50% at 50% 88%, #1c0940 0%, transparent 62%);
+        filter:blur(50px); animation:dashAurora 26s ease-in-out infinite alternate; }
+    .app-bg .grid{ position:absolute; inset:0;
+        background-image:linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+        background-size:48px 48px;
+        -webkit-mask:radial-gradient(circle at 50% 30%, #000, transparent 85%);
+        mask:radial-gradient(circle at 50% 30%, #000, transparent 85%); }
+    .app-bg .blob{ position:absolute; width:460px; height:460px; border-radius:50%;
+        filter:blur(80px); opacity:.10; }
+    .app-bg .b1{ background:#7c3aed; top:-150px; left:-130px; animation:dashBlob1 22s ease-in-out infinite alternate; }
+    .app-bg .b2{ background:#2563eb; bottom:-160px; right:-130px; animation:dashBlob2 28s ease-in-out infinite alternate; }
+    @keyframes dashAurora{ 0%{transform:translate(-3%,-2%) rotate(0) scale(1.1)} 100%{transform:translate(3%,4%) rotate(6deg) scale(1.22)} }
+    @keyframes dashBlob1{ 0%{transform:translate(0,0)} 100%{transform:translate(50px,40px)} }
+    @keyframes dashBlob2{ 0%{transform:translate(0,0)} 100%{transform:translate(-45px,-35px)} }
+    [data-testid="stAppViewContainer"] .main .block-container{ position:relative; z-index:1; }
     [data-testid="stSidebar"]{ position:relative; z-index:1; }
 
-    /* Scrollbar delgado neutro */
+    /* Scrollbar delgado púrpura */
     ::-webkit-scrollbar{ width:9px; height:9px; }
-    ::-webkit-scrollbar-thumb{ background:rgba(17,17,17,.18); border-radius:8px; }
-    ::-webkit-scrollbar-thumb:hover{ background:rgba(17,17,17,.32); }
+    ::-webkit-scrollbar-thumb{ background:rgba(124,58,237,.3); border-radius:8px; }
+    ::-webkit-scrollbar-thumb:hover{ background:rgba(124,58,237,.5); }
     ::-webkit-scrollbar-track{ background:transparent; }
 
-    body, .stMarkdown, p, label, input, textarea, button, li, td, th{ font-family:'Inter',sans-serif; color:var(--txt); }
-    /* Títulos masivos estilo editorial (Anton condensada) */
-    h1,.stMarkdown h1{ font-family:'Anton',sans-serif !important; font-weight:400 !important;
-        text-transform:uppercase; letter-spacing:-.02em; line-height:.92;
-        color:var(--txt) !important; -webkit-text-fill-color:var(--txt) !important;
-        background:none !important; font-size:clamp(34px,4.4vw,60px); }
-    h2,.stMarkdown h2{ font-family:'Anton',sans-serif !important; font-weight:400 !important;
-        text-transform:uppercase; letter-spacing:-.01em; color:var(--txt) !important;
-        -webkit-text-fill-color:var(--txt) !important; background:none !important; }
-    h3,h4,.stMarkdown h3,.stMarkdown h4{ font-family:'Inter',sans-serif !important; font-weight:600;
-        color:var(--txt) !important; -webkit-text-fill-color:var(--txt) !important; background:none !important; }
-    /* Etiquetas / captions en mono, tono editorial */
-    [data-testid="stCaptionContainer"], .stCaption, small{ color:var(--sub) !important; }
+    body, .stMarkdown, p, label, input, textarea, button, li, td, th{ font-family:'Inter',sans-serif; }
+    h1,.stMarkdown h1{ font-family:'Geist',sans-serif !important; letter-spacing:-.02em; font-weight:800;
+        background:linear-gradient(92deg,#ffffff 35%,#a78bfa 100%);
+        -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+    h2,.stMarkdown h2{ font-family:'Geist',sans-serif !important; letter-spacing:-.01em; color:#eef2f6; }
+    h3,h4,.stMarkdown h3,.stMarkdown h4{ font-family:'Geist',sans-serif !important; color:var(--plight); }
     /* Restaurar la fuente de iconos de Material */
     [class*="material-symbols"], [class*="material-icons"], .material-icons,
     span[data-testid="stIconMaterial"], [data-testid="stIconMaterial"]{
         font-family:'Material Symbols Outlined','Material Symbols Rounded','Material Icons' !important;
         -webkit-text-fill-color:initial;
     }
-    /* Sidebar: papel un punto más cálido, con línea a la derecha */
-    [data-testid="stSidebar"]{ background:#ECE9E1 !important; border-right:1px solid var(--card-brd); }
+    /* Sidebar */
+    [data-testid="stSidebar"]{ background:#0a0a16 !important; border-right:1px solid rgba(255,255,255,.05); }
     /* Marca ACC arriba a la izquierda */
     .acc-brand{ display:flex; align-items:center; gap:11px; padding:2px 2px 8px; }
     .acc-logo{ width:42px; height:42px; border-radius:12px; flex:none;
-        background:#18181B; display:flex; align-items:center; justify-content:center; }
+        background:linear-gradient(150deg,#7c3aed,#2563eb); display:flex; align-items:center;
+        justify-content:center; animation:accGlow 2.8s ease-in-out infinite; }
     .acc-logo svg{ width:23px; height:23px; }
-    .acc-name{ font-family:'Anton',sans-serif; font-weight:400; font-size:18px; line-height:1;
-        text-transform:uppercase; letter-spacing:-.01em; color:#18181B; }
-    .acc-name small{ display:block; font-family:'Space Mono',monospace; font-size:8.5px; font-weight:400;
-        letter-spacing:.16em; color:var(--sub); -webkit-text-fill-color:var(--sub); margin-top:4px; }
+    @keyframes accGlow{ 0%,100%{box-shadow:0 0 12px 2px rgba(124,58,237,.35)}
+        50%{box-shadow:0 0 20px 5px rgba(124,58,237,.6)} }
+    .acc-name{ font-family:'Geist',sans-serif; font-weight:800; font-size:15px; line-height:1.08;
+        background:linear-gradient(92deg,#fff 40%,#a78bfa); -webkit-background-clip:text;
+        background-clip:text; -webkit-text-fill-color:transparent; }
+    .acc-name small{ display:block; font-family:'Inter',sans-serif; font-size:8.5px; font-weight:600;
+        letter-spacing:.14em; color:#6b7488; -webkit-text-fill-color:#6b7488; margin-top:3px; }
     [data-testid="stSidebar"] h3{ color:var(--sub); text-transform:uppercase; font-size:12px;
-        letter-spacing:.12em; font-weight:600; font-family:'Space Mono',monospace; }
-    /* "Letras" de la columna izquierda: etiquetas de filtros/inputs en mono editorial */
-    [data-testid="stSidebar"] label, [data-testid="stSidebar"] label p{
-        font-family:'Space Mono',monospace !important; text-transform:uppercase;
-        letter-spacing:.08em; font-size:11px !important; font-weight:400 !important; color:#4a4a4a !important; }
-    [data-testid="stSidebar"] [data-testid="stCaptionContainer"], [data-testid="stSidebar"] small{
-        font-family:'Space Mono',monospace; color:var(--sub) !important; }
-    /* Encabezados de expanders del sidebar (Filtros, Cuadre…): mono uppercase */
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary p{
-        font-family:'Space Mono',monospace !important; text-transform:uppercase;
-        letter-spacing:.06em; font-size:12px !important; font-weight:700 !important; }
-    /* Navegación del pie (Dashboard/Config/Bitácora): mono uppercase */
-    [data-testid="stSidebar"] .stButton>button p{ font-family:'Space Mono',monospace !important;
-        text-transform:uppercase; letter-spacing:.05em; font-size:12px !important; }
+        letter-spacing:.12em; font-weight:600; }
     [data-testid="stStatusWidget"]{ display:none !important; }
 
-    /* TODOS los botones: PÍLDORA neón lima con borde y texto negro
-       (mismo look que el segmentado activo "CONJUNTO DE ANUNCIOS"). Se eleva al hover.
-       Selectores amplios + color hardcodeado para ganarle al tema primario negro. */
-    .stButton button, .stDownloadButton button, .stFormSubmitButton button,
-    [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-secondary"],
-    [data-testid="baseButton-primary"], [data-testid="baseButton-secondary"],
-    button[kind="primary"], button[kind="secondary"]{
-        border-radius:9999px !important; font-weight:700 !important; color:#18181B !important;
-        transition:all .3s ease-out; background:#D7FF3A !important; background-color:#D7FF3A !important;
-        border:1px solid #18181B !important; box-shadow:none !important;
-        font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.04em;
+    /* Botones secundarios (glass con borde púrpura al hover) */
+    .stButton>button, .stDownloadButton>button, .stFormSubmitButton>button{
+        border-radius:10px; font-weight:600; color:#fff; transition:all .18s ease;
+        background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
     }
-    .stButton button:hover, .stDownloadButton button:hover, .stFormSubmitButton button:hover,
-    [data-testid="stBaseButton-primary"]:hover, [data-testid="stBaseButton-secondary"]:hover,
-    button[kind="primary"]:hover, button[kind="secondary"]:hover{
-        border-color:#18181B !important; transform:translateY(-2px);
-        box-shadow:0 10px 22px -10px rgba(17,17,17,.45) !important; filter:brightness(1.03);
+    .stButton>button:hover, .stDownloadButton>button:hover{
+        border-color:var(--p1); box-shadow:0 0 18px rgba(124,58,237,.3);
     }
-    .stButton button p, .stDownloadButton button p, .stFormSubmitButton button p,
-    button[kind="primary"] p, button[kind="secondary"] p{ color:#18181B !important; }
+    /* Botones primarios: gradiente púrpura→azul + shimmer */
+    .stButton>button[kind="primary"], .stFormSubmitButton>button[kind="primary"]{
+        background:linear-gradient(90deg,#7c3aed,#2563eb) !important; color:#fff !important;
+        border:none !important; border-radius:10px !important; position:relative; overflow:hidden;
+        box-shadow:0 8px 26px rgba(124,58,237,.35) !important;
+    }
+    .stButton>button[kind="primary"]:hover, .stFormSubmitButton>button[kind="primary"]:hover{
+        box-shadow:0 0 30px rgba(124,58,237,.6) !important; transform:translateY(-1px);
+    }
+    .stButton>button[kind="primary"]::after, .stFormSubmitButton>button[kind="primary"]::after{
+        content:""; position:absolute; top:0; left:-70%; width:45%; height:100%;
+        background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent); transform:skewX(-20deg);
+    }
+    .stButton>button[kind="primary"]:hover::after{ animation:dashShimmer .9s ease; }
+    @keyframes dashShimmer{ 0%{left:-70%} 100%{left:150%} }
 
-    /* Inputs y selects: fondo blanco, borde línea, foco tinta con anillo neón sutil */
+    /* Inputs y selects */
     .stTextInput input, .stNumberInput input, [data-baseweb="textarea"] textarea{
-        background:#ffffff !important; border:1px solid #CDC8BE !important;
-        border-radius:10px !important; color:var(--txt) !important;
+        background:rgba(255,255,255,.04) !important; border:1px solid rgba(255,255,255,.08) !important;
+        border-radius:10px !important; color:#fff !important;
     }
     .stTextInput input:focus, .stNumberInput input:focus{
-        border-color:#18181B !important;
-        box-shadow:0 0 0 3px rgba(215,255,58,.55) !important;
+        border-color:var(--p1) !important;
+        box-shadow:0 0 0 3px rgba(124,58,237,.2), 0 0 16px rgba(124,58,237,.3) !important;
     }
     input::placeholder{ color:var(--ter) !important; }
-    [data-baseweb="select"]>div{ background:#ffffff !important;
-        border:1px solid #CDC8BE !important; border-radius:10px !important; color:var(--txt) !important; }
-    [data-baseweb="popover"] li:hover, [role="option"]:hover{ background:rgba(17,17,17,.06) !important; }
+    [data-baseweb="select"]>div{ background:rgba(255,255,255,.04) !important;
+        border:1px solid rgba(255,255,255,.08) !important; border-radius:10px !important; }
+    [data-baseweb="popover"] li:hover, [role="option"]:hover{ background:rgba(124,58,237,.12) !important; }
 
-    /* Cards / contenedores / expanders: superficie blanca, borde línea, bien redondeado */
+    /* Cards / contenedores / expanders (glass) */
     [data-testid="stExpander"], div[data-testid="stVerticalBlockBorderWrapper"]{
-        background:#FBFAF7 !important; backdrop-filter:none;
-        border:1px solid var(--card-brd) !important; border-radius:16px;
-        box-shadow:none; transition:border-color .2s ease;
+        background:rgba(255,255,255,.03) !important; backdrop-filter:blur(12px);
+        border:1px solid rgba(255,255,255,.07) !important; border-radius:16px;
+        box-shadow:0 10px 30px rgba(0,0,0,.3); transition:border-color .2s ease;
     }
     [data-testid="stExpander"]:hover, div[data-testid="stVerticalBlockBorderWrapper"]:hover{
-        border-color:#18181B !important;
+        border-color:rgba(124,58,237,.4) !important;
     }
 
-    /* Controles segmentados (Ver por / Estado): SIN recuadro, activo tinta + neón */
+    /* Controles segmentados (Ver por / Estado): SIN recuadro, activo púrpura */
     [data-testid="stButtonGroup"]{ background:transparent !important;
         border:none !important; border-radius:0 !important; padding:0 !important; }
-    button[data-variant="segmented_control"]{ color:var(--sub) !important;
-        background:transparent !important; border:1px solid transparent !important; border-radius:9999px !important;
-        font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.06em; font-size:12px; }
-    button[data-variant="segmented_control"]:hover{ color:#18181B !important; background:rgba(17,17,17,.05) !important; }
+    button[data-variant="segmented_control"]{ color:#94a3b8 !important;
+        background:transparent !important; border:1px solid transparent !important; border-radius:8px !important; }
+    button[data-variant="segmented_control"]:hover{ color:#fff !important; background:rgba(124,58,237,.1) !important; }
     button[data-variant="segmented_control"][data-selected="true"]{
-        background:var(--signal) !important; border:1px solid #18181B !important;
-        color:#18181B !important; }
+        background:rgba(124,58,237,.2) !important; border:1px solid rgba(124,58,237,.5) !important;
+        color:#fff !important; }
 
-    /* KPI cards: acento superior neón (clase .tcard de _render_totales) */
+    /* KPI cards: acento superior + hover glow (clase .tcard de _render_totales) */
     .tcard{ position:relative; overflow:hidden; transition:border-color .2s ease, box-shadow .2s ease; }
-    .tcard::before{ content:""; position:absolute; top:0; left:0; right:0; height:3px;
-        background:var(--acc, var(--signal)); }
-    .tcard:hover{ border-color:#18181B !important; box-shadow:0 12px 26px -14px rgba(17,17,17,.22); }
+    .tcard::before{ content:""; position:absolute; top:0; left:0; right:0; height:2px;
+        background:linear-gradient(90deg,#7c3aed,#2563eb); }
+    .tcard:hover{ border-color:rgba(124,58,237,.45) !important; box-shadow:0 10px 30px rgba(124,58,237,.15); }
 
-    /* Botones de acción de la tabla (Info/Editar presupuesto): blancos, cuadrados
-       redondeados, NO píldora neón. Se identifican por un ANCLA (.iconbtn-anchor)
-       que se emite justo antes de cada botón -> selector de hermano, 100% fiable. */
-    [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button,
-    [data-testid="stPopoverButton"]{
-        background:#ffffff !important; background-color:#ffffff !important;
-        border:1px solid #CDC8BE !important; border-radius:9px !important;
-        color:#18181B !important; min-height:0 !important;
+    /* Botones de acción de la tabla (Info/Pres/Dup): visibles y UNIFORMES.
+       Los de Pres/Dup son popovers que antes salían casi invisibles. */
+    [data-testid="stPopoverButton"], .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)):not([kind="tertiary"]){
+        background:rgba(124,58,237,.12) !important; border:1px solid rgba(255,255,255,.14) !important;
+        border-radius:9px !important; color:#fff !important; min-height:0 !important;
         padding:6px 8px !important; transition:all .15s ease;
     }
-    [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button:hover,
-    [data-testid="stPopoverButton"]:hover{
-        background:#D7FF3A !important; background-color:#D7FF3A !important; border-color:#18181B !important;
+    [data-testid="stPopoverButton"]:hover, .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)):not([kind="tertiary"]):hover{
+        background:rgba(124,58,237,.28) !important; border-color:#7c3aed !important;
+        box-shadow:0 0 14px rgba(124,58,237,.3) !important;
     }
-    [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button [data-testid="stIconMaterial"]{
-        color:#18181B !important;
+    [data-testid="stPopoverButton"] [data-testid="stIconMaterial"],
+    .stButton>button:has([data-testid="stIconMaterial"]):not(:has(p)) [data-testid="stIconMaterial"]{
+        color:#c4b5fd !important;
     }
-    /* El popover de "Rango de fechas": dropdown claro y visible (con su "📅 Hoy"). */
+    /* El popover de "Rango de fechas" NO debe verse como los mini-botones de acción:
+       se muestra como un dropdown claro y visible (con su "📅 Hoy"). */
     [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]{
         padding:9px 12px !important; min-height:38px !important; width:100% !important;
         justify-content:space-between !important; font-size:14px !important;
-        background:#ffffff !important; border:1px solid #CDC8BE !important;
-        color:#18181B !important; border-radius:10px !important;
+        background:rgba(255,255,255,.05) !important; border:1px solid rgba(255,255,255,.14) !important;
+        color:#fff !important; border-radius:10px !important;
     }
     [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]:hover{
-        border-color:#18181B !important;
+        border-color:#7c3aed !important; box-shadow:0 0 14px rgba(124,58,237,.3) !important;
     }
-    /* Toggle On/Off: OFF gris claro, ON neón lima (mismo verde de los botones);
-       perilla oscura para que se vea sobre el neón. */
+    /* Toggle On/Off rediseñado: OFF gris, ON verde con glow (transición suave) */
     [data-testid="stCheckbox"] label > div:first-of-type{
-        background:#C7C2B8 !important; transition:background .2s ease, box-shadow .2s ease;
+        background:#374151 !important; transition:background .2s ease, box-shadow .2s ease;
     }
     [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type{
-        background:#D7FF3A !important; border:none !important; box-shadow:none !important;
-    }
-    [data-testid="stCheckbox"] label:has(input:checked) > div:first-of-type > div{
-        background:#18181B !important;
+        background:#34d399 !important; box-shadow:0 0 9px rgba(52,211,153,.45) !important;
     }
 
     /* Tabs (Configuración) */
-    .stTabs [data-baseweb="tab-list"]{ gap:6px; border-bottom:1px solid var(--card-brd); }
+    .stTabs [data-baseweb="tab-list"]{ gap:6px; border-bottom:1px solid rgba(255,255,255,.07); }
     .stTabs [data-baseweb="tab"]{ border-radius:10px 10px 0 0; color:var(--sub); }
-    .stTabs [aria-selected="true"]{ color:#18181B !important; }
-    .stTabs [data-baseweb="tab-highlight"]{ background:#18181B !important; height:3px; }
+    .stTabs [aria-selected="true"]{ color:var(--plight) !important; }
+    .stTabs [data-baseweb="tab-highlight"]{ background:linear-gradient(90deg,#7c3aed,#2563eb) !important; height:3px; }
 
     [data-testid="stAlert"]{ border-radius:14px; }
-    [data-testid="stMetricValue"]{ font-family:'Anton',sans-serif; color:#18181B; }
-    [data-testid="stMetricLabel"]{ font-family:'Space Mono',monospace; text-transform:uppercase;
-        letter-spacing:.08em; color:var(--sub); }
-    /* Pestañas grandes arriba (DASHBOARD | GRÁFICOS) con tipografía de título Anton.
-       La activa es un <div>; las inactivas son <button> estilizados como título gris. */
-    .toptab.active{ font-family:'Anton',sans-serif; text-transform:uppercase; letter-spacing:-.02em;
-        font-size:clamp(30px,4.2vw,56px); line-height:.92; color:#18181B; }
-    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button{
-        background:transparent !important; background-color:transparent !important;
-        border:none !important; box-shadow:none !important; padding:0 !important;
-        justify-content:flex-start !important; transform:none !important; min-height:0 !important; }
-    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button p{
-        font-family:'Anton',sans-serif !important; text-transform:uppercase; letter-spacing:-.02em;
-        font-size:clamp(30px,4.2vw,56px) !important; line-height:.92 !important; font-weight:400 !important;
-        color:#C4C0B4 !important; }
-    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button:hover p{
-        color:#18181B !important; }
-    hr{ border-color:var(--card-brd) !important; }
+    [data-testid="stMetricValue"]{ font-family:'Geist',sans-serif; color:#fff; }
+    hr{ border-color:rgba(255,255,255,.07) !important; }
     </style>
+    <div class="app-bg"><div class="aurora"></div><div class="grid"></div>
+    <div class="blob b1"></div><div class="blob b2"></div></div>
     """, unsafe_allow_html=True)
-
-    # Fondo definitivo con pseudo-elementos FIJOS de .stApp (siempre visibles detrás
-    # del contenido): ::before = verde muy difuminado; ::after = ONDAS SVG arriba.
-    st.markdown(
-        "<style>"
-        ".stApp::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;"
-        "background:"
-        "radial-gradient(50% 44% at 8% 4%, rgba(182,228,0,.30) 0%, transparent 58%),"
-        "radial-gradient(48% 44% at 92% 14%, rgba(94,140,0,.22) 0%, transparent 60%),"
-        "radial-gradient(60% 55% at 74% 94%, rgba(120,190,120,.24) 0%, transparent 64%),"
-        "radial-gradient(42% 40% at 24% 82%, rgba(14,116,105,.18) 0%, transparent 60%);}"
-        ".stApp::after{content:'';position:fixed;top:0;left:0;right:0;height:460px;z-index:0;"
-        "pointer-events:none;"
-        f"background:url(\"{_WAVES_URI}\") top center / 100% 460px no-repeat;}}"
-        "</style>",
-        unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -3347,83 +2988,33 @@ def _panel_supabase():
         col_prod = c4.text_input("Columna producto (opcional)", value=m[supa.K_PRODUCTO])
         col_id = c5.text_input("Columna id único (dedup)", value=m[supa.K_ID])
         col_pais = c6.text_input("Columna país (opcional)", value=m.get(supa.K_PAIS, ""),
-                                 help="Para ver la facturación por país. La moneda de "
-                                      "cada venta se deriva del país (Perú→PEN, Chile→CLP, "
-                                      "Venezuela→VES, Ecuador→USD, Colombia→COP…).")
-        col_moneda = st.text_input(
-            "Columna moneda (opcional)", value=m.get(supa.K_MONEDA, ""),
-            help="Solo si tu tabla tiene una columna con el código de moneda (PEN, COP, "
-                 "VES…). Si se llena, tiene prioridad sobre el país. Si la dejas vacía, la "
-                 "moneda se deriva del país de cada venta.")
+                                 help="Para ver la facturación por país.")
         gcol1, gcol2 = st.columns(2)
         probar = gcol1.form_submit_button("Probar y ver columnas")
         guardar = gcol2.form_submit_button("Guardar mapeo", type="primary")
 
     if guardar:
-        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id, col_pais, col_moneda)
+        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id, col_pais)
         st.success("Mapeo guardado.")
     if probar:
-        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id, col_pais, col_moneda)
+        supa.guardar_mapeo(tabla, col_ad, col_val, col_hora, col_prod, col_id, col_pais)
         r = supa.probar_conexion()
         if r["ok"]:
-            if r.get("vacia"):
-                st.warning("Conectado ✅, pero la tabla **devolvió 0 filas**. Causas más comunes:\n\n"
-                           "1. **RLS (Row Level Security):** la key `anon` no tiene permiso de "
-                           "lectura. → Usa la key **`service_role`** en `SUPABASE_KEY` (Supabase → "
-                           "Settings → API), o crea una política de lectura.\n"
-                           "2. **Nombre de tabla incorrecto** (revisa mayúsculas/espacios).\n"
-                           "3. La **tabla está vacía** (no tiene registros aún).")
-                if r["columnas"]:
-                    st.caption("Columnas del esquema: " + ", ".join(f"`{c}`" for c in r["columnas"]))
-                else:
-                    st.caption("No pude leer ni el esquema (probable RLS bloqueando también el "
-                               "esquema con la key `anon`). Usa `service_role`.")
-            else:
-                st.success(f"Conectado. Columnas de tu tabla: {', '.join(r['columnas'])}")
-                if r["muestra"]:
-                    st.dataframe(pd.DataFrame(r["muestra"]), use_container_width=True, hide_index=True)
+            st.success(f"Conectado Columnas de tu tabla: {', '.join(r['columnas'])}")
+            if r["muestra"]:
+                st.dataframe(pd.DataFrame(r["muestra"]), use_container_width=True, hide_index=True)
         else:
             st.error(f"{r['error']}")
 
     if st.button("Sincronizar ventas de Supabase ahora", type="primary"):
         r = supa.sincronizar()
         if r["ok"]:
-            st.success(f"{r['insertadas']} venta(s) importada(s) de Supabase.")
-            # Desglose: por qué se saltaron filas (para entender el '3 de 6').
-            st.caption(
-                f"📋 Leídas: **{r.get('leidas', 0)}** · "
-                f"Importadas: **{r['insertadas']}** · "
-                f"Ya existían / id repetido: **{r.get('ya_existian', 0)}** · "
-                f"Sin valor legible: **{r.get('sin_valor', 0)}** · "
-                f"Sin período: {r.get('sin_periodo', 0)}")
-            if r.get("ya_existian"):
-                st.info("**Ya existían / id repetido:** son ventas cuyo *id único* ya estaba "
-                        "importado, o que **comparten el mismo id** en tu tabla. Revisa que la "
-                        "**'Columna id único (dedup)'** apunte a una columna REALMENTE única (la "
-                        "clave primaria). Si varias ventas tienen el mismo id, solo entra una.")
-            if r.get("sin_valor"):
-                st.info("**Sin valor legible:** el valor de la venta viene vacío o con un formato "
-                        "que no se pudo leer. Revisa la **'Columna valor de venta'**.")
+            msg = f"{r['insertadas']} venta(s) importada(s) de Supabase."
+            if r["sin_periodo"]:
+                msg += f" ({r['sin_periodo']} sin período/anuncio activo a esa hora)."
+            st.success(msg)
         else:
             st.error(f"{r['error']}")
-
-    st.divider()
-    st.caption("Usa esto para borrar las ventas ya importadas de Supabase y volver a traerlas. "
-               "Corrige la **fecha** (zona horaria) y ahora también guarda la **moneda de cada "
-               "venta** según su país (Perú→PEN, Chile→CLP, Venezuela→VES, Ecuador→USD, "
-               "Colombia→COP…), para convertir cada una a USD con su tasa correcta. "
-               "**Hazlo una vez** después de esta actualización para que las ventas viejas "
-               "tomen su moneda.")
-    if st.button("🔁 Borrar ventas de Supabase y re-importar (corrige fechas y moneda)"):
-        n = db.borrar_ventas(supa.HOJA)
-        with st.spinner("Re-importando desde Supabase..."):
-            r2 = supa.sincronizar()
-        db.set_config("ventas_cambio", db.a_texto(db.ahora()))
-        if r2.get("ok"):
-            st.success(f"Borradas {n} · Re-importadas {r2['insertadas']} venta(s) con la "
-                       f"fecha corregida (de {r2.get('leidas', 0)} leídas).")
-        else:
-            st.error(r2.get("error"))
 
 
 def _panel_business_fuente():
@@ -3638,108 +3229,6 @@ Es la forma segura y permanente (no caduca como los tokens normales).
 > No importa que las cuentas estén en perfiles distintos: lo que manda es el Business.
         """)
 
-    with st.expander("🔗 Conectar el Business de OTRO perfil (Perfil 1 = dueño de la app · "
-                     "Perfil 2 = otro Business)"):
-        st.markdown("""
-**Tu caso:** hay dos perfiles de Facebook:
-- **PERFIL 1** — el tuyo, dueño de la app de Meta y del **Business propietario** de esta aplicación.
-- **PERFIL 2** — otro perfil, dueño de **otro Business**, que **tú también administras**.
-
-Quieres que la app lea también los anuncios del Business de **Perfil 2**. **No uses "Socios/Partners"**
-(eso pide que la otra parte acepte). Como administras ambos, hay dos caminos.
-**✅ Recomendado: Camino A** (UNA sola app central para todos los Business). Es lo mejor a largo plazo:
-mantienes una sola app, arreglas permisos y revisión (App Review) **una sola vez** para todo, y evitas
-repetir por cada Business el error `code 3` (capability) que sale al duplicar.
-
----
-
-### 🅰️ Camino A — UNA sola app central (la de Perfil 1) — **RECOMENDADO**
-Reutilizas tu app central de Perfil 1 también en el Business de Perfil 2. Solo hay que darle acceso
-una vez:
-
-1. **(Con Perfil 1)** En **developers.facebook.com/apps** abre tu **app central** →
-   **Roles → Roles del negocio (Business)** → **Agregar** el **Business de Perfil 2** con acceso a la app.
-   *(alternativa: en Configuración del negocio de Perfil 2 → Cuentas → **Apps** → "Conectar un App ID"
-   y pones el ID de tu app central).*
-2. **(En el Business de Perfil 2)** Configuración del negocio → **Usuarios → Usuarios del sistema** →
-   crea uno **Administrador**.
-3. **Asignar activos → Cuentas publicitarias** → marca las cuentas de Perfil 2 → **control total**.
-4. **Generar nuevo token** → **App:** la **app central de Perfil 1** (ya debe aparecer en la lista) →
-   **Permisos:** `ads_management`, `ads_read`, `business_management` → **copia el token**.
-5. **En esta app** → **Configuración → Conectar Business → Agregar conexión** → pega **solo el token**
-   (NO llenes "App propia": se usa la central) → Guarda → **Probar**.
-6. Vuelve al **Dashboard** y pulsa **🔄 Recargar Facebook**.
-
-✅ Ahora ves los anuncios de los **dos Business** juntos y puedes filtrar por Business.
-
----
-
-### 🅱️ Camino B — App propia por Business (alternativa, solo si no puedes compartir la app)
-Cada Business usa su propia app + token. **Más piezas que mantener** (por eso NO es la recomendada).
-
-1. En el Business de Perfil 2, crea una app en **developers.facebook.com/apps** (tipo Negocio,
-   agrega **Marketing API**) → copia **APP ID** y **APP SECRET**.
-2. Genera el token de Usuario del Sistema con **esa** app (mismos permisos y asignar cuentas).
-3. En esta app → Agregar conexión → pega el token + abre **"App propia"** y pon el APP ID/SECRET.
-4. **Recargar**.
-
-> Ojo con B: si algún día haces App Review (por ejemplo para arreglar el `code 3` al duplicar),
-> tendrías que hacerlo **en cada app** por separado. Con A lo haces una vez.
-
----
-
-> **En resumen: usa A.** Una sola app central para todos los Business. B solo si por alguna razón
-> no puedes darle acceso a la app central desde el Business de Perfil 2.
-        """)
-
-    with st.expander("📲 Compartir la app central con otro Business (paso clave del Camino A)"):
-        st.markdown("""
-**Objetivo:** que tu **app central** (la de Perfil 1) **aparezca** cuando generes el token del
-Usuario del Sistema en el **Business de Perfil 2**. Sin esto, la app central no sale en la lista.
-
-**Antes de empezar — ten a mano dos IDs:**
-- **App ID** de tu app central: developers.facebook.com/apps → tu app → **Configuración → Información
-  básica → Identificador de la app**.
-- **ID del Business de Perfil 2**: business.facebook.com (con Perfil 2) → **Configuración del negocio →
-  Información del negocio → Id. del negocio**.
-
-**Requisito:** tu app central debe estar **reclamada por el Business de Perfil 1**. Si no lo hiciste:
-Business de Perfil 1 → **Configuración del negocio → Cuentas → Apps → Agregar → Reclamar una app** →
-pon el App ID → reclamar.
-
----
-
-### ✅ Método recomendado — Conectar la app desde el Business de Perfil 2 (por App ID)
-Como eres **admin/developer** de la app (Perfil 1), puedes conectarla directo, **sin solicitud
-pendiente**:
-
-1. Entra al **Business de Perfil 2** (cambia de negocio arriba a la izquierda, o inicia sesión con
-   Perfil 2).
-2. **Configuración del negocio → Cuentas → Apps**.
-3. **Agregar → Conectar un identificador de app (App ID)**.
-4. Pega el **App ID de la app central** → **Conectar**.
-5. Listo: ahora, al **Generar token** en **Usuarios del sistema** de Perfil 2, la **app central**
-   ya aparece en la lista de apps. Sigue el Camino A (elige esa app, permisos, token).
-
----
-
-### 🅱️ Método alternativo — Compartir la app desde el Business de Perfil 1
-Si el método de arriba no te deja, comparte la app desde el lado de Perfil 1:
-
-1. **(Perfil 1)** Configuración del negocio → **Cuentas → Apps** → selecciona la **app central**.
-2. **Asignar socios** (o **Agregar → Compartir con otro negocio**) → pega el **ID del Business de
-   Perfil 2** → dale acceso.
-3. **(Perfil 2)** Si aparece una **solicitud pendiente**, **acéptala tú** (como administras ese
-   Business): Configuración del negocio → **Solicitudes / Socios** → **Aceptar**.
-4. Ya conectada, genera el token del Usuario del Sistema de Perfil 2 eligiendo la app central.
-
----
-
-> **Nota:** Meta cambia a veces los nombres de los menús ("Apps", "Aplicaciones", "Cuentas"…),
-> pero la idea es siempre la misma: **la app central debe estar disponible en el Business de Perfil 2**.
-> Cuando lo esté, aparecerá en el selector de app al generar el token.
-        """)
-
     with st.expander("② ¿No tienes App de Facebook? Créala una vez (App ID y secreto)"):
         st.markdown("""
 La **App** es solo el "contenedor" técnico que autoriza los llamados. Se crea **una vez** y
@@ -3793,113 +3282,12 @@ queda etiquetada con su país real.
         """)
 
 
-def _panel_capi():
-    st.subheader("Pixel / Conversions API (CAPI)")
-    st.caption("Envía las **COMPRAS** a tu Pixel/Conjunto de datos para que Facebook las "
-               "registre (Click-to-WhatsApp ocurre fuera de la web y el pixel no las ve solo). "
-               "Se mandan servidor→servidor con `ctwa_clid` + teléfono/email **hasheados**, "
-               "y se deduplican por el id de cada venta.")
-    pix = db.get_config(capi.K_PIXEL, "") or ""
-    tok = db.get_config(capi.K_TOKEN, "") or ""
-    if capi.configurado():
-        st.success(f"✅ Configurado · Pixel …{pix[-6:]} · token …{tok[-4:]}")
-    else:
-        st.info("Aún no configurado. Pega tu **Pixel/Dataset ID** y el **token CAPI** abajo.")
-
-    with st.form("form_capi"):
-        n_pix = st.text_input("Pixel / Dataset ID", value=pix,
-                              help="Events Manager → tu conjunto de datos → Configuración → Id.")
-        n_tok = st.text_input("Token de acceso CAPI", value="", type="password",
-                              placeholder="(déjalo vacío para NO cambiar el guardado)",
-                              help="Events Manager → Configuración → Conversions API → "
-                                   "Generar token de acceso.")
-        n_test = st.text_input("Código de evento de prueba (opcional)",
-                               value=db.get_config(capi.K_TEST, "") or "",
-                               help="Events Manager → Eventos de prueba. Para ver eventos en "
-                                    "vivo sin tocar los reales.")
-        st.markdown("**Columnas de tu tabla `compradores` para el match** (nombre EXACTO en Supabase):")
-        c1, c2 = st.columns(2)
-        n_ctwa = c1.text_input("Columna ctwa_clid", value=db.get_config(capi.K_COL_CTWA, "") or "",
-                               help="El id del clic de WhatsApp (lo mejor para atribuir CTWA).")
-        n_fbc = c2.text_input("Columna fbc (opcional)", value=db.get_config(capi.K_COL_FBC, "") or "")
-        n_phone = c1.text_input("Columna teléfono", value=db.get_config(capi.K_COL_PHONE, "") or "")
-        n_email = c2.text_input("Columna email", value=db.get_config(capi.K_COL_EMAIL, "") or "")
-        guardado = st.form_submit_button("Guardar configuración CAPI", type="primary")
-    if guardado:
-        db.set_config(capi.K_PIXEL, n_pix.strip())
-        if n_tok.strip():
-            db.set_config(capi.K_TOKEN, n_tok.strip())
-        db.set_config(capi.K_TEST, n_test.strip())
-        db.set_config(capi.K_COL_CTWA, n_ctwa.strip())
-        db.set_config(capi.K_COL_FBC, n_fbc.strip())
-        db.set_config(capi.K_COL_PHONE, n_phone.strip())
-        db.set_config(capi.K_COL_EMAIL, n_email.strip())
-        st.success("Guardado.")
-        st.rerun()
-
-    if st.button("Ver columnas de mi tabla de compradores"):
-        r = supa.probar_conexion()
-        if r.get("ok"):
-            if r["columnas"]:
-                st.caption("Columnas detectadas: " + ", ".join(f"`{c}`" for c in r["columnas"]))
-            if r.get("vacia"):
-                st.warning("La tabla devolvió 0 filas (probable RLS: usa la key `service_role`, "
-                           "o revisa el nombre de la tabla).")
-        else:
-            st.error(r.get("error"))
-
-    st.divider()
-    st.markdown("**Probar y enviar**")
-    cc1, cc2 = st.columns(2)
-    if cc1.button("🧪 Enviar evento de PRUEBA", use_container_width=True):
-        tc = db.get_config(capi.K_TEST, "") or ""
-        if not tc:
-            st.warning("Primero pon el **Código de evento de prueba** arriba "
-                       "(Events Manager → Eventos de prueba) y guarda.")
-        else:
-            r = capi.enviar_evento_prueba(tc)
-            if r.get("ok"):
-                st.success(f"Enviado. Facebook recibió **{r['recibidos']}** evento(s). "
-                           "Míralo en **Events Manager → Eventos de prueba**.")
-                with st.expander("Respuesta de Facebook"):
-                    st.json(r.get("respuesta"))
-            else:
-                st.error(r.get("error"))
-    if cc2.button("📤 Enviar compras pendientes", type="primary", use_container_width=True):
-        with st.spinner("Enviando compras a la Conversions API..."):
-            r = capi.enviar_compras()
-        if r.get("ok"):
-            st.success(f"Enviadas **{r.get('enviados', 0)}** · Facebook recibió "
-                       f"**{r.get('recibidos', 0)}**.")
-            extra = []
-            if r.get("viejas"):
-                extra.append(f"{r['viejas']} muy viejas (>7 días; Meta no las acepta)")
-            if r.get("sin_match"):
-                extra.append(f"{r['sin_match']} sin datos de match")
-            if extra:
-                st.caption("No enviadas: " + " · ".join(extra))
-            if r.get("nota"):
-                st.info(r["nota"])
-            with st.expander("Respuesta de Facebook"):
-                st.json(r.get("respuesta"))
-        else:
-            st.error(r.get("error"))
-    st.caption("Flujo recomendado: **1)** guarda Pixel + token + columnas · **2)** manda un "
-               "**evento de PRUEBA** con el código de Events Manager y verifícalo en vivo · "
-               "**3)** cuando llegue bien, **Enviar compras pendientes** (reales).")
-    st.markdown("**👀 ¿Se registran otros eventos?** Míralo en "
-                "**Events Manager → tu conjunto de datos → Descripción general**: ahí ves TODOS "
-                "los eventos que llegan (Purchase, Lead, etc.), su origen (pixel/CAPI) y la "
-                "calidad de coincidencia. Aquí abajo, la 'Respuesta de Facebook' te dice cuántos "
-                "recibió de este envío.")
-
-
 def pagina_configuracion():
     st.title("Configuración")
     st.caption("Organizada por tipo: de dónde entran tus ventas, cómo conectas tus Business "
                "de Facebook, y cómo conectas la IA. Cada grupo tiene sus propias pestañas.")
     grupos = st.tabs(["📥 Fuentes de ventas", "🔗 Conectar Business",
-                      "📡 Pixel / CAPI", "🤖 Inteligencia Artificial", "🛠️ Herramientas"])
+                      "🤖 Inteligencia Artificial", "🛠️ Herramientas"])
 
     # --- Grupo 1: de dónde entran las ventas ---
     with grupos[0]:
@@ -3926,18 +3314,14 @@ def pagina_configuracion():
         with t[1]:
             _panel_cuentas()
 
-    # --- Grupo 3: Pixel / Conversions API ---
+    # --- Grupo 3: IA ---
     with grupos[2]:
-        _panel_capi()
-
-    # --- Grupo 4: IA ---
-    with grupos[3]:
         st.caption("Conecta el asistente de IA (OpenAI o Anthropic) que responde preguntas "
                    "sobre tus anuncios.")
         _panel_ia()
 
-    # --- Grupo 5: herramientas / diagnóstico ---
-    with grupos[4]:
+    # --- Grupo 4: herramientas / diagnóstico ---
+    with grupos[3]:
         t = st.tabs(["Auditoría de ventas", "Limpieza de ventas", "Diagnóstico API"])
         with t[0]:
             _panel_auditoria_ventas()
@@ -3945,321 +3329,6 @@ def pagina_configuracion():
             _panel_limpieza_ventas()
         with t[2]:
             _panel_diagnostico_api()
-
-
-def _fig_editorial(fig, height=300):
-    """Aplica el estilo editorial (fondo transparente, tinta) a una figura Plotly."""
-    fig.update_layout(height=height, margin=dict(t=30, b=10, l=10, r=10),
-                      legend=dict(orientation="h", y=1.12),
-                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                      font=dict(color="#18181B", family="Inter"),
-                      xaxis=dict(gridcolor="#DED9D0"), yaxis=dict(gridcolor="#DED9D0"))
-    return fig
-
-
-def pagina_graficos():
-    """Pestaña de gráficos: ventas por hora, rendimiento, ganancia, conversión y embudo."""
-    _top_tabs("graficos")
-    ahora = db.ahora()
-    rlbl = st.segmented_control("Rango", ["7 días", "14 días", "30 días"],
-                                default="14 días", key="graf_dias") or "14 días"
-    ndias, preset = {"7 días": (7, "last_7d"), "14 días": (14, "last_14d"),
-                     "30 días": (30, "last_30d")}[rlbl]
-    medianoche = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
-    manana = medianoche + timedelta(days=1)
-    desde = medianoche - timedelta(days=ndias - 1)   # ndias calendario, incluye hoy
-
-    # Monedas y tasas a USD (gasto por cuenta, ventas por moneda de ventas).
-    anuncios = db.obtener_anuncios(solo_activos=False)
-    ad_mon = {a["ad_id"]: (a.get("cuenta_moneda") or "USD") for a in anuncios}
-    mv = db.get_config("moneda_ventas", "auto")
-    if mv == "auto":
-        mons = [m for m in ad_mon.values() if m]
-        mv = max(set(mons), key=mons.count) if mons else "USD"
-    rate_v = fx.tasa_a_usd(mv)
-
-    # ---------- 1) Ventas por hora (hoy) + comparativo con un día anterior ----------
-    st.subheader("Ventas por hora — hoy")
-    ayer = (medianoche - timedelta(days=1)).date()
-    cmp_dia = st.date_input("Comparar hoy con:", value=ayer, max_value=ayer,
-                            format="DD/MM/YYYY", key="graf_cmp_dia",
-                            help="Elige cualquier día anterior para compararlo con hoy, hora por hora.")
-    horas = [f"{h:02d}" for h in range(24)]
-    xh = [f"{h}:00" for h in horas]
-    vh = db.ventas_por_hora(medianoche, manana)                       # hoy
-    y_hoy = [vh.get(h, {}).get("num", 0) for h in horas]
-    cmp_ini = datetime.combine(cmp_dia, datetime.min.time())
-    vh_cmp = db.ventas_por_hora(cmp_ini, cmp_ini + timedelta(days=1))  # día elegido
-    y_cmp = [vh_cmp.get(h, {}).get("num", 0) for h in horas]
-    f1 = go.Figure()
-    f1.add_trace(go.Bar(x=xh, y=y_hoy, name="Hoy", marker_color="#1F8A4C",
-                        hovertemplate="%{x} · %{y} venta(s)<extra>Hoy</extra>"))
-    f1.add_trace(go.Scatter(x=xh, y=y_cmp, name=cmp_dia.strftime("%d/%m"),
-                            mode="lines+markers", line=dict(color="#6D28D9", width=2),
-                            hovertemplate="%{x} · %{y} venta(s)<extra>" + cmp_dia.strftime("%d/%m") + "</extra>"))
-    f1.update_layout(yaxis_title="Ventas")
-    st.plotly_chart(_fig_editorial(f1), use_container_width=True)
-
-    # Comparativo "a esta hora": acumulado hasta la hora actual (hoy vs día elegido).
-    h_act = ahora.hour
-    acum_hoy = sum(y_hoy[:h_act + 1])
-    acum_cmp = sum(y_cmp[:h_act + 1])
-    dif = acum_hoy - acum_cmp
-    ca, cb = st.columns(2)
-    ca.metric(f"Hoy a las {h_act:02d}:{ahora.minute:02d}", f"{acum_hoy} ventas",
-              delta=f"{dif:+d} vs {cmp_dia.strftime('%d/%m')}")
-    cb.metric(f"{cmp_dia.strftime('%d/%m')} a las {h_act:02d}:00 (misma hora)",
-              f"{acum_cmp} ventas")
-    _th, _tc = sum(y_hoy), sum(y_cmp)
-    st.caption(f"Totales del día completo — Hoy: **{_th}** · {cmp_dia.strftime('%d/%m')}: **{_tc}**.")
-
-    # ---------- Series diarias (gasto USD e ingresos USD) ----------
-    dias = [(medianoche - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(ndias - 1, -1, -1)]
-    gd = _gasto_diario_cache(preset)   # {ad_id: {dia: spend_nat}}; {} si no hay conexión
-    _rate_cache = {}
-
-    def _rc(m):
-        m = (m or "USD").upper()
-        if m not in _rate_cache:
-            _rate_cache[m] = fx.tasa_a_usd(m)
-        return _rate_cache[m]
-    gasto_dia = {d: 0.0 for d in dias}
-    for aid, serie in (gd or {}).items():
-        r = _rc(ad_mon.get(aid, "USD"))
-        for d, sp in serie.items():
-            if d in gasto_dia:
-                gasto_dia[d] += (sp or 0.0) * r
-    vdt = db.ventas_diarias_totales(desde, manana)   # {dia: {num, ingreso_nat, por_moneda}}
-    # Cada venta se convierte con SU moneda (país); '?' usa el respaldo mv.
-    ing_dia = {d: sum(val * _rc(mv if mon == "?" else mon)
-                      for mon, val in (vdt.get(d, {}).get("por_moneda") or {}).items())
-               for d in dias}
-    etq = [d[5:] for d in dias]  # MM-DD
-
-    # ---------- 2) Rendimiento general (gasto vs ingresos) ----------
-    st.subheader("Rendimiento general — últimos días")
-    f2 = go.Figure()
-    f2.add_trace(go.Bar(x=etq, y=[round(gasto_dia[d], 2) for d in dias],
-                        name="Gasto (USD)", marker_color="#18181B"))
-    f2.add_trace(go.Scatter(x=etq, y=[round(ing_dia[d], 2) for d in dias],
-                            name="Ingresos (USD)", mode="lines+markers",
-                            line=dict(color="#1F8A4C", width=3)))
-    st.plotly_chart(_fig_editorial(f2, 320), use_container_width=True)
-
-    # ---------- 4) Ganancia a través de los días ----------
-    st.subheader("Ganancia por día")
-    gan = [round(ing_dia[d] - gasto_dia[d], 2) for d in dias]
-    cols = ["#1F8A4C" if g >= 0 else "#E11D48" for g in gan]
-    f4 = go.Figure(go.Bar(x=etq, y=gan, marker_color=cols,
-                          hovertemplate="%{x} · %{y:$,.2f}<extra></extra>"))
-    f4.update_layout(yaxis_title="Ganancia (USD)")
-    st.plotly_chart(_fig_editorial(f4, 300), use_container_width=True)
-
-    # ---------- Insights del rango (para conversión y embudo) ----------
-    ins = _insights_cache(preset, "ad", "", "")   # {ad_id: {impressions, clicks, conversaciones, ...}}
-    impresiones = sum((m.get("impressions") or 0) for m in ins.values())
-    clics = sum((m.get("clicks") or 0) for m in ins.values())
-    conversaciones = sum((m.get("conversaciones") or 0) for m in ins.values())
-    ventas_rango = sum(v.get("num", 0) for v in vdt.values())
-
-    # ---------- 3) % de conversaciones que terminan en venta ----------
-    st.subheader("Conversión: conversaciones → ventas")
-    pct = (ventas_rango / conversaciones * 100.0) if conversaciones > 0 else 0.0
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Conversaciones", f"{int(conversaciones):,}".replace(",", "."))
-    m2.metric("Ventas", f"{int(ventas_rango):,}".replace(",", "."))
-    m3.metric("% conv. → venta", f"{pct:.1f}%")
-    st.caption("Este mismo porcentaje aparece también en los KPIs de arriba del Dashboard.")
-
-    # ---------- 5) Embudo: Impresiones → Clics → Conversaciones → Ventas ----------
-    st.subheader("Embudo")
-    f5 = go.Figure(go.Funnel(
-        y=["Impresiones", "Clics", "Conversaciones", "Ventas"],
-        x=[int(impresiones), int(clics), int(conversaciones), int(ventas_rango)],
-        textinfo="value+percent initial",
-        marker=dict(color=["#1D4ED8", "#06B6D4", "#F59E0B", "#1F8A4C"])))
-    st.plotly_chart(_fig_editorial(f5, 340), use_container_width=True)
-    if impresiones == 0:
-        st.caption("Impresiones/Clics/Conversaciones vienen de Facebook (conecta y pulsa "
-                   "Recargar). Ventas salen de tus fuentes importadas.")
-
-
-def pagina_productos():
-    """Rendimiento por producto: gasto (por nombre de campaña) + ventas/ingresos
-    (por la columna 'producto' de las ventas). Da ROAS, CPA y ganancia por producto."""
-    st.title("Rendimiento por producto")
-    ahora = db.ahora()
-    st.selectbox("📅 Rango",
-                 ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Este mes", "Máximo"],
-                 key="f_rango")
-    date_preset, since, until, cutoff, hasta = _rango_actual(ahora)
-
-    todos = db.obtener_anuncios(solo_activos=False)
-    _cx = {str(c["id"]) for c in db.obtener_conexiones()}
-    todos = [a for a in todos
-             if a.get("conexion_id") in (None, 0, "0") or str(a.get("conexion_id")) in _cx]
-    insights = _insights_cache(date_preset, "ad", since, until)
-
-    _rate_cache = {}
-    def _rate(m):
-        m = (m or "USD").upper()
-        if m not in _rate_cache:
-            _rate_cache[m] = fx.tasa_a_usd(m)
-        return _rate_cache[m]
-
-    # Ventas por producto (columna 'producto' de las ventas) -> USD.
-    vprod = db.ventas_por_producto(cutoff, hasta)
-    mv = db.get_config("moneda_ventas", "auto")
-    if mv == "auto":
-        mons = [a.get("cuenta_moneda") for a in todos if a.get("cuenta_moneda")]
-        mv = max(set(mons), key=mons.count) if mons else "USD"
-    rate_v = fx.tasa_a_usd(mv)
-
-    # Lista de productos: de las ventas (columna) + de los nombres de campaña.
-    prods_camp = _extraer_productos([a.get("campaign_nombre") for a in todos
-                                     if a.get("campaign_nombre")])
-    productos = sorted(set(vprod.keys()) | set(prods_camp), key=lambda s: s.lower())
-    if not productos:
-        st.info("Aún no detecto productos. El producto se saca del **nombre de la campaña** "
-                "y/o de la **columna 'producto'** de tus ventas (configúrala en "
-                "Configuración → Fuentes de ventas). Pulsa **Recargar** en el Dashboard "
-                "para traer campañas.")
-        return
-
-    filas = []
-    for P in productos:
-        pn = _norm_txt(P)
-        # Gasto: anuncios cuyo nombre (campaña/conjunto/anuncio) contiene el producto.
-        gP = 0.0
-        for a in todos:
-            blob = _norm_txt((a.get("campaign_nombre") or "") + " "
-                             + (a.get("adset_nombre") or "") + " " + (a.get("nombre") or ""))
-            if pn and pn in blob:
-                m = insights.get(str(a["ad_id"]))
-                if m and m.get("spend"):
-                    gP += m["spend"] * _rate(a.get("cuenta_moneda"))
-        # Ventas/ingresos: por la columna 'producto' (match normalizado, tolerante).
-        nP, iP = 0, 0.0
-        for prod, d in vprod.items():
-            pnv = _norm_txt(prod)
-            if pn and (pn in pnv or pnv in pn):
-                nP += int(d["num"])
-                # Cada venta se convierte con SU moneda (país); '?' usa el respaldo mv.
-                iP += sum(val * _rate(mv if mon == "?" else mon)
-                          for mon, val in (d.get("por_moneda") or {}).items())
-        roas = (iP / gP) if gP > 0 else 0.0
-        cpa = (gP / nP) if nP > 0 else 0.0
-        filas.append({"Producto": P, "Gasto (USD)": round(gP, 2), "Ventas": nP,
-                      "Ingresos (USD)": round(iP, 2), "ROAS": round(roas, 2),
-                      "CPA (USD)": round(cpa, 2), "Ganancia (USD)": round(iP - gP, 2)})
-
-    df = pd.DataFrame(filas).sort_values("Ingresos (USD)", ascending=False)
-    # Totales arriba.
-    tg = df["Gasto (USD)"].sum(); ti = df["Ingresos (USD)"].sum(); tv = int(df["Ventas"].sum())
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Productos", f"{len(df)}")
-    c2.metric("Gasto total", _usd(tg))
-    c3.metric("Ingresos", _usd(ti))
-    c4.metric("Ganancia", _usd(ti - tg))
-
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config={
-        "Gasto (USD)": st.column_config.NumberColumn(format="$%.2f"),
-        "Ingresos (USD)": st.column_config.NumberColumn(format="$%.2f"),
-        "CPA (USD)": st.column_config.NumberColumn(format="$%.2f"),
-        "Ganancia (USD)": st.column_config.NumberColumn(format="$%.2f"),
-        "ROAS": st.column_config.NumberColumn(format="%.2f x"),
-    })
-
-    # Gráfica: ganancia por producto (verde gana, rojo pierde).
-    if not df.empty:
-        dch = df.sort_values("Ganancia (USD)", ascending=True)
-        cols = ["#1F8A4C" if g >= 0 else "#E11D48" for g in dch["Ganancia (USD)"]]
-        fig = go.Figure(go.Bar(x=dch["Ganancia (USD)"], y=dch["Producto"], orientation="h",
-                               marker_color=cols))
-        fig.update_layout(height=max(240, 42 * len(df)), margin=dict(t=20, b=10, l=10, r=10),
-                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                          font=dict(color="#18181B"), xaxis=dict(gridcolor="#DED9D0"))
-        st.subheader("Ganancia por producto")
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.caption("El **gasto** se atribuye por el **nombre de la campaña** (que contenga el producto) "
-               "y las **ventas/ingresos** por la **columna 'producto'** de tus ventas. Para que "
-               "cuadren perfecto, usa el mismo nombre de producto en la campaña y en esa columna.")
-
-
-def pagina_ventas():
-    """Historial de TODAS las ventas de los últimos 3 días (todas las fuentes)."""
-    st.title("Ventas — últimos 3 días")
-    ahora = db.ahora()
-    # 3 días calendario: desde anteayer 00:00 hasta ahora (hoy + ayer + anteayer).
-    cutoff = ahora.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=2)
-    ventas = db.ventas_en_rango(cutoff)
-    st.caption(f"Todas las ventas registradas desde **{cutoff.strftime('%d/%m %H:%M')}** hasta ahora "
-               "(todas las fuentes: Excel, Google Sheets, Supabase y manuales). "
-               "Para corregir una venta mal subida usa **🩹 Corregir venta** en el Dashboard.")
-    if not ventas:
-        st.info("No hay ventas registradas en los últimos 3 días.")
-        return
-    nombres = {a["ad_id"]: a.get("nombre") for a in db.obtener_anuncios(solo_activos=False)}
-    total = sum(float(v.get("valor_venta") or 0) for v in ventas)
-    c1, c2 = st.columns(2)
-    c1.metric("Ventas (3 días)", f"{len(ventas)}")
-    c2.metric("Total (moneda local)", _num(total))
-
-    filas = []
-    for v in ventas:
-        aid = str(v.get("ad_id") or "").strip()
-        anom = nombres.get(aid) or (aid if aid else "(sin ad_id)")
-        fch = str(v.get("hora_venta") or "").replace("T", " ")[:16]
-        filas.append({
-            "#": v.get("id"),
-            "Fecha/hora": fch,
-            "Anuncio": (anom or "")[:60],
-            "ad_id": aid or "—",
-            "Valor": round(float(v.get("valor_venta") or 0), 2),
-            "Producto": v.get("producto") or "",
-            "País": v.get("pais") or "",
-            "Fuente": v.get("hoja_origen") or "",
-        })
-    df = pd.DataFrame(filas)
-    st.caption("✏️ Editable: corrige el **Valor** de cualquier venta, o borra filas con el icono "
-               "🗑️ de la izquierda. Luego pulsa **Guardar cambios**.")
-    edited = st.data_editor(
-        df, hide_index=True, use_container_width=True, height=520, num_rows="dynamic",
-        key="ventas_editor",
-        disabled=["#", "Fecha/hora", "Anuncio", "ad_id", "Producto", "País", "Fuente"],
-        column_config={"Valor": st.column_config.NumberColumn(
-            "Valor", format="%.2f", min_value=0.0, help="Corrige aquí el valor mal importado.")})
-
-    cga, cgb = st.columns([1.2, 3])
-    if cga.button("💾 Guardar cambios", type="primary", use_container_width=True):
-        orig = {int(r["#"]): float(r["Valor"]) for r in filas if r.get("#") is not None}
-        vistos, n_upd = set(), 0
-        for _, row in edited.iterrows():
-            vid = row.get("#")
-            if vid is None or (isinstance(vid, float) and pd.isna(vid)):
-                continue  # fila agregada a mano: no se inserta desde aquí
-            vid = int(vid)
-            vistos.add(vid)
-            try:
-                nuevo = float(row.get("Valor") or 0)
-            except (TypeError, ValueError):
-                continue
-            if vid in orig and abs(nuevo - orig[vid]) > 1e-9:
-                db.actualizar_valor_venta(vid, nuevo)
-                n_upd += 1
-        borradas = set(orig) - vistos      # filas eliminadas en el editor
-        for vid in borradas:
-            db.borrar_venta(vid)
-        if n_upd or borradas:
-            db.set_config("ventas_cambio", db.a_texto(db.ahora()))  # refresca el dashboard
-            st.success(f"Guardado: {n_upd} corregida(s), {len(borradas)} borrada(s).")
-            time.sleep(0.8)
-            st.rerun()
-        else:
-            st.info("No hubo cambios que guardar.")
-    cgb.download_button("⬇️ Descargar CSV", df.to_csv(index=False).encode("utf-8"),
-                        "ventas_3dias.csv", "text/csv", use_container_width=True)
 
 
 def pagina_actividad():
@@ -4448,9 +3517,9 @@ def _timer_actualizacion():
         f'<span class="tb-pill">{b}</span>' for b in badges))
     st.markdown(
         '<style>.tb-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:2px 0 4px;}'
-        '.tb-pill{background:#FFFFFF;border:1px solid #DED9D0;'
-        "border-radius:7px;padding:2px 9px;font-size:11px;color:#71717A;font-family:'Space Mono',monospace;}"
-        '.tb-dot{color:#b3ac9e;margin:0 2px;}</style>'
+        '.tb-pill{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);'
+        'border-radius:7px;padding:2px 9px;font-size:11px;color:#94a3b8;font-family:Inter,sans-serif;}'
+        '.tb-dot{color:#475569;margin:0 2px;}</style>'
         f'<div class="tb-row">{pills}</div>', unsafe_allow_html=True)
 
     # Si llegaron datos nuevos (anuncios o ventas) desde el último render, refresca.
@@ -4519,9 +3588,9 @@ def _panel_sync_ventas():
 
 
 def pagina_dashboard():
-    _top_tabs("dashboard")
     top1, top2 = st.columns([2.5, 2.5])
     with top1:
+        st.title("Dashboard")
         _timer_actualizacion()
     with top2:
         st.write("")
@@ -4553,7 +3622,6 @@ def pagina_dashboard():
     # Paneles de la barra lateral (registrar venta arriba; el cuadre lo agrega
     # seccion_vista_general una vez calculados los datos).
     seccion_venta_manual()
-    seccion_corregir_ventas()
     seccion_vista_general()
     st.divider()
     seccion_por_pais()
@@ -4579,12 +3647,6 @@ def main():
         pagina_tutoriales()
     elif pagina == "actividad":
         pagina_actividad()
-    elif pagina == "ventas":
-        pagina_ventas()
-    elif pagina == "graficos":
-        pagina_graficos()
-    elif pagina == "productos":
-        pagina_productos()
     else:
         pagina_dashboard()
     # La navegación va al FINAL para que quede al pie de la barra lateral,

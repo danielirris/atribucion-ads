@@ -157,6 +157,9 @@ def init_db() -> None:
     _asegurar_columna("ventas", "ext_id", "TEXT")
     _asegurar_columna("ventas", "producto", "TEXT")
     _asegurar_columna("ventas", "pais", "TEXT")
+    # Moneda de CADA venta (VES, PEN, COP, CLP…). Permite convertir a USD con la tasa
+    # correcta por venta (no una sola tasa para todas).
+    _asegurar_columna("ventas", "moneda", "TEXT")
     # Gasto acumulado (lifetime) de Facebook al momento en que se abrió el período.
     # Sirve para calcular el gasto REAL desde el cambio: gasto_actual - gasto_snapshot.
     _asegurar_columna("periodos", "gasto_snapshot", "REAL")
@@ -460,16 +463,17 @@ def periodo_para_hora(ad_id: str, hora: datetime) -> Optional[dict]:
 def insertar_venta(ad_id: str, valor_venta: float, hora_venta: datetime,
                    periodo_id: Optional[int], hoja_origen: str,
                    ext_id: Optional[str] = None, producto: Optional[str] = None,
-                   pais: Optional[str] = None) -> int:
+                   pais: Optional[str] = None, moneda: Optional[str] = None) -> int:
     with _LOCK, _conn() as conn:
         cur = conn.execute(
             """
             INSERT INTO ventas
-                (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen, ext_id, producto, pais)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen, ext_id,
+                 producto, pais, moneda)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (str(ad_id), float(valor_venta), a_texto(hora_venta), periodo_id,
-             hoja_origen, ext_id, producto, pais),
+             hoja_origen, ext_id, producto, pais, moneda),
         )
         conn.commit()
         return cur.lastrowid
@@ -487,9 +491,16 @@ def ventas_por_pais(cutoff: Optional[datetime] = None,
     where = " WHERE " + " AND ".join(cond)
     with _conn() as conn:
         rows = conn.execute(
-            f"""SELECT pais, COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
-                FROM ventas{where} GROUP BY pais""", args)
-        return {r["pais"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+            f"""SELECT pais, COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon,
+                       COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
+                FROM ventas{where} GROUP BY pais, mon""", args)
+        out = {}
+        for r in rows:
+            d = out.setdefault(r["pais"], {"num": 0, "ingreso_nat": 0.0, "por_moneda": {}})
+            d["num"] += r["num"]
+            d["ingreso_nat"] += float(r["total"])
+            d["por_moneda"][r["mon"]] = d["por_moneda"].get(r["mon"], 0.0) + float(r["total"])
+        return out
 
 
 def ext_ids_de_fuente(hoja_origen: str) -> set:
@@ -507,11 +518,14 @@ def insertar_ventas_bulk(filas: list) -> int:
     """
     if not filas:
         return 0
+    # Acepta tuplas de 8 (sin moneda) o 9 (con moneda). Se rellena a 9.
+    norm = [tuple(f) + (None,) * (9 - len(f)) if len(f) < 9 else tuple(f) for f in filas]
     with _LOCK, _conn() as conn:
         conn.executemany(
             """INSERT INTO ventas
-               (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen, ext_id, producto, pais)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", filas)
+               (ad_id, valor_venta, hora_venta, periodo_id, hoja_origen, ext_id,
+                producto, pais, moneda)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", norm)
         conn.commit()
         return len(filas)
 
@@ -594,10 +608,17 @@ def ventas_agg_por_ad(cutoff: Optional[datetime] = None,
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
     with _conn() as conn:
         rows = conn.execute(
-            f"""SELECT ad_id, COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
-                FROM ventas{where} GROUP BY ad_id""", args)
-        return {r["ad_id"]: {"num_ventas": r["num"], "ingreso_total": float(r["total"])}
-                for r in rows}
+            f"""SELECT ad_id, COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon,
+                       COUNT(*) AS num, COALESCE(SUM(valor_venta),0) AS total
+                FROM ventas{where} GROUP BY ad_id, mon""", args)
+        out = {}
+        for r in rows:
+            d = out.setdefault(r["ad_id"], {"num_ventas": 0, "ingreso_total": 0.0,
+                                            "por_moneda": {}})
+            d["num_ventas"] += r["num"]
+            d["ingreso_total"] += float(r["total"])
+            d["por_moneda"][r["mon"]] = d["por_moneda"].get(r["mon"], 0.0) + float(r["total"])
+        return out
 
 
 def borrar_ventas(hoja_origen: str) -> int:
@@ -763,11 +784,17 @@ def ventas_sin_adid_por_fuente(cutoff: Optional[datetime] = None,
     where = " WHERE " + " AND ".join(cond)
     with _conn() as conn:
         rows = conn.execute(
-            f"""SELECT COALESCE(hoja_origen,'—') fuente, COUNT(*) num,
-                       COALESCE(SUM(valor_venta),0) total
-                FROM ventas{where} GROUP BY fuente""", args)
-        return {r["fuente"]: {"num": r["num"], "ingreso_nat": float(r["total"])}
-                for r in rows}
+            f"""SELECT COALESCE(hoja_origen,'—') fuente,
+                       COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon,
+                       COUNT(*) num, COALESCE(SUM(valor_venta),0) total
+                FROM ventas{where} GROUP BY fuente, mon""", args)
+        out = {}
+        for r in rows:
+            d = out.setdefault(r["fuente"], {"num": 0, "ingreso_nat": 0.0, "por_moneda": {}})
+            d["num"] += r["num"]
+            d["ingreso_nat"] += float(r["total"])
+            d["por_moneda"][r["mon"]] = d["por_moneda"].get(r["mon"], 0.0) + float(r["total"])
+        return out
 
 
 def auditoria_ventas(cutoff_hoy: Optional[datetime] = None,
@@ -845,9 +872,9 @@ def valores_venta_distintos() -> dict:
 
 
 def ventas_suma(ad_ids: list, desde: Optional[datetime] = None) -> dict:
-    """Suma de ventas (num, ingreso nativo) de varios anuncios desde una fecha."""
+    """Suma de ventas (num, ingreso nativo, desglose por moneda) de varios anuncios."""
     if not ad_ids:
-        return {"num": 0, "ingreso_nat": 0.0}
+        return {"num": 0, "ingreso_nat": 0.0, "por_moneda": {}}
     ph = ",".join("?" for _ in ad_ids)
     args = [str(a) for a in ad_ids]
     cond = ""
@@ -855,10 +882,16 @@ def ventas_suma(ad_ids: list, desde: Optional[datetime] = None) -> dict:
         cond = " AND hora_venta >= ?"
         args.append(a_texto(desde))
     with _conn() as conn:
-        r = conn.execute(
-            f"""SELECT COUNT(*) num, COALESCE(SUM(valor_venta),0) total
-                FROM ventas WHERE ad_id IN ({ph}){cond}""", args).fetchone()
-        return {"num": r["num"], "ingreso_nat": float(r["total"])}
+        rows = conn.execute(
+            f"""SELECT COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon,
+                       COUNT(*) num, COALESCE(SUM(valor_venta),0) total
+                FROM ventas WHERE ad_id IN ({ph}){cond} GROUP BY mon""", args)
+        out = {"num": 0, "ingreso_nat": 0.0, "por_moneda": {}}
+        for r in rows:
+            out["num"] += r["num"]
+            out["ingreso_nat"] += float(r["total"])
+            out["por_moneda"][r["mon"]] = out["por_moneda"].get(r["mon"], 0.0) + float(r["total"])
+        return out
 
 
 def ventas_diarias(ad_ids: list, desde: datetime) -> dict:
@@ -868,12 +901,19 @@ def ventas_diarias(ad_ids: list, desde: datetime) -> dict:
     ph = ",".join("?" for _ in ad_ids)
     with _conn() as conn:
         rows = conn.execute(
-            f"""SELECT substr(hora_venta,1,10) AS dia, COUNT(*) num,
+            f"""SELECT substr(hora_venta,1,10) AS dia,
+                       COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon, COUNT(*) num,
                        COALESCE(SUM(valor_venta),0) total
                 FROM ventas WHERE ad_id IN ({ph}) AND hora_venta >= ?
-                GROUP BY dia ORDER BY dia""",
+                GROUP BY dia, mon ORDER BY dia""",
             [*[str(a) for a in ad_ids], a_texto(desde)])
-        return {r["dia"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+        out = {}
+        for r in rows:
+            d = out.setdefault(r["dia"], {"num": 0, "ingreso_nat": 0.0, "por_moneda": {}})
+            d["num"] += r["num"]
+            d["ingreso_nat"] += float(r["total"])
+            d["por_moneda"][r["mon"]] = d["por_moneda"].get(r["mon"], 0.0) + float(r["total"])
+        return out
 
 
 def ingresos_diarios_por_ad(desde: datetime,
@@ -894,11 +934,12 @@ def ingresos_diarios_por_ad(desde: datetime,
     with _conn() as conn:
         rows = conn.execute(
             f"""SELECT ad_id, substr(hora_venta,1,10) AS dia,
+                       COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon,
                        COALESCE(SUM(valor_venta),0) AS total
                 FROM ventas{where}
-                GROUP BY ad_id, dia""", args)
+                GROUP BY ad_id, dia, mon""", args)
         for r in rows:
-            out.setdefault(r["ad_id"], {})[r["dia"]] = float(r["total"])
+            out.setdefault(r["ad_id"], {}).setdefault(r["dia"], {})[r["mon"]] = float(r["total"])
     return out
 
 
@@ -915,10 +956,16 @@ def ventas_por_producto(cutoff: Optional[datetime] = None,
     where = " WHERE " + " AND ".join(cond)
     with _conn() as conn:
         rows = conn.execute(
-            f"""SELECT TRIM(producto) AS p, COUNT(*) num,
-                       COALESCE(SUM(valor_venta),0) total
-                FROM ventas{where} GROUP BY p""", args)
-        return {r["p"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+            f"""SELECT TRIM(producto) AS p, COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon,
+                       COUNT(*) num, COALESCE(SUM(valor_venta),0) total
+                FROM ventas{where} GROUP BY p, mon""", args)
+        out = {}
+        for r in rows:
+            d = out.setdefault(r["p"], {"num": 0, "ingreso_nat": 0.0, "por_moneda": {}})
+            d["num"] += r["num"]
+            d["ingreso_nat"] += float(r["total"])
+            d["por_moneda"][r["mon"]] = d["por_moneda"].get(r["mon"], 0.0) + float(r["total"])
+        return out
 
 
 def ventas_por_hora(cutoff: datetime, hasta: Optional[datetime] = None) -> dict:
@@ -930,10 +977,16 @@ def ventas_por_hora(cutoff: datetime, hasta: Optional[datetime] = None) -> dict:
     where = " WHERE " + " AND ".join(cond)
     with _conn() as conn:
         rows = conn.execute(
-            f"""SELECT substr(hora_venta,12,2) AS h, COUNT(*) num,
-                       COALESCE(SUM(valor_venta),0) total
-                FROM ventas{where} GROUP BY h""", args)
-        return {r["h"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+            f"""SELECT substr(hora_venta,12,2) AS h, COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon,
+                       COUNT(*) num, COALESCE(SUM(valor_venta),0) total
+                FROM ventas{where} GROUP BY h, mon""", args)
+        out = {}
+        for r in rows:
+            d = out.setdefault(r["h"], {"num": 0, "ingreso_nat": 0.0, "por_moneda": {}})
+            d["num"] += r["num"]
+            d["ingreso_nat"] += float(r["total"])
+            d["por_moneda"][r["mon"]] = d["por_moneda"].get(r["mon"], 0.0) + float(r["total"])
+        return out
 
 
 def ventas_diarias_totales(desde: datetime, hasta: Optional[datetime] = None) -> dict:
@@ -945,10 +998,16 @@ def ventas_diarias_totales(desde: datetime, hasta: Optional[datetime] = None) ->
     where = " WHERE " + " AND ".join(cond)
     with _conn() as conn:
         rows = conn.execute(
-            f"""SELECT substr(hora_venta,1,10) AS dia, COUNT(*) num,
-                       COALESCE(SUM(valor_venta),0) total
-                FROM ventas{where} GROUP BY dia ORDER BY dia""", args)
-        return {r["dia"]: {"num": r["num"], "ingreso_nat": float(r["total"])} for r in rows}
+            f"""SELECT substr(hora_venta,1,10) AS dia, COALESCE(NULLIF(TRIM(moneda),''),'?') AS mon,
+                       COUNT(*) num, COALESCE(SUM(valor_venta),0) total
+                FROM ventas{where} GROUP BY dia, mon ORDER BY dia""", args)
+        out = {}
+        for r in rows:
+            d = out.setdefault(r["dia"], {"num": 0, "ingreso_nat": 0.0, "por_moneda": {}})
+            d["num"] += r["num"]
+            d["ingreso_nat"] += float(r["total"])
+            d["por_moneda"][r["mon"]] = d["por_moneda"].get(r["mon"], 0.0) + float(r["total"])
+        return out
 
 
 def ventas_en_rango(cutoff: datetime, hasta: Optional[datetime] = None) -> list:

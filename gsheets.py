@@ -249,8 +249,12 @@ def sincronizar() -> dict:
             pais = str(pais).strip() if pais is not None and str(pais).strip().lower() not in ("nan", "none", "") else None
             producto = fila.get(cmap["producto"]) if cmap.get("producto") else None
             producto = str(producto).strip() if producto is not None and str(producto).strip().lower() not in ("nan", "none", "") else None
+            # Moneda de la venta: se deriva del país (cada venta en la moneda local
+            # de su país). Sin país no se puede saber → None (se convierte con respaldo).
+            import supabase_source as _supa
+            moneda = _supa._moneda_de(pais, None)
             nuevos.add(ext_id)
-            lote.append((ad_id, float(valor), db.a_texto(hora), None, HOJA, ext_id, producto, pais))
+            lote.append((ad_id, float(valor), db.a_texto(hora), None, HOJA, ext_id, producto, pais, moneda))
             ins_hoja += 1
         detalle.append({"hoja": nombre_hoja, "leidas": len(dff), "insertadas": ins_hoja,
                         "columnas": cmap,

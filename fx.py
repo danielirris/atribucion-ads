@@ -19,6 +19,11 @@ import db
 FALLBACK = {
     "USD": 1.0, "MXN": 0.058, "EUR": 1.08, "COP": 0.00025, "ARS": 0.0011,
     "BRL": 0.19, "CLP": 0.0011, "PEN": 0.27, "GBP": 1.27, "CAD": 0.73,
+    # OJO: VES (bolívar) es muy volátil y muchas APIs no lo cotizan. Este respaldo
+    # es aproximado; fija una tasa manual (Configuración → tasa manual VES) para
+    # que la conversión sea correcta.
+    "VES": 0.020, "BOB": 0.145, "PYG": 0.00013, "UYU": 0.025,
+    "GTQ": 0.13, "DOP": 0.017, "CRC": 0.0020, "HNL": 0.040, "NIO": 0.027,
 }
 
 
