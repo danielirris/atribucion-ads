@@ -968,6 +968,31 @@ def ventas_por_producto(cutoff: Optional[datetime] = None,
         return out
 
 
+def productos_distintos() -> list:
+    """Lista de productos REALES (columna `producto` de las ventas), sin vacíos,
+    ordenada alfabéticamente. Es la fuente limpia para el filtro de producto."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT DISTINCT TRIM(producto) AS p FROM ventas
+               WHERE producto IS NOT NULL AND TRIM(producto) <> '' ORDER BY p""")
+        return [r["p"] for r in rows]
+
+
+def ad_ids_por_producto() -> dict:
+    """{producto: set(ad_ids)} — anuncios que han vendido cada producto (cruce por
+    ad_id). Es la forma correcta de saber a qué producto pertenece un anuncio:
+    lo dicen sus propias ventas, no el nombre de la campaña."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT DISTINCT TRIM(producto) AS p, ad_id FROM ventas
+               WHERE producto IS NOT NULL AND TRIM(producto) <> ''
+                 AND ad_id IS NOT NULL AND TRIM(ad_id) <> ''""")
+        out: dict = {}
+        for r in rows:
+            out.setdefault(r["p"], set()).add(str(r["ad_id"]))
+        return out
+
+
 def ventas_por_hora(cutoff: datetime, hasta: Optional[datetime] = None) -> dict:
     """Ventas agrupadas por HORA del día (00-23): {'HH': {'num', 'ingreso_nat'}}."""
     cond = ["hora_venta >= ?"]

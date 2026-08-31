@@ -36,7 +36,7 @@ import capi
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v138 · 2026-08-30"
+APP_VERSION = "v139 · 2026-08-30"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -572,13 +572,12 @@ def sidebar_filtros():
     cuentas = sorted({(a.get("cuenta_nombre") or "—") for a in todos})
     paises = sorted({(a.get("cuenta_pais") or "—") for a in todos})
     campanas = sorted({a.get("campaign_nombre") for a in todos if a.get("campaign_nombre")})
-    # Productos: se extraen del NOMBRE de las campañas (más los de las ventas).
-    vd = db.valores_venta_distintos()
-    productos = _extraer_productos(campanas)
-    extra = [p for p in (set(vd["origenes"]) | set(vd["productos"])) if p]
-    for p in sorted(extra):
-        if p.upper() not in {x.upper() for x in productos}:
-            productos.append(p)
+    # Productos: la columna `producto` de las ventas (Supabase) — nombres REALES.
+    # Cada anuncio se cruza por ad_id (sus ventas dicen qué producto es). Si aún no
+    # hay ventas con producto, caemos al viejo extractor por nombre de campaña.
+    productos = db.productos_distintos()
+    if not productos:
+        productos = _extraer_productos(campanas)
 
     # Cuenta cuántos filtros hay activos, para mostrarlo en el título del expander.
     n_act = sum(bool(st.session_state.get(k)) for k in
@@ -603,10 +602,10 @@ def sidebar_filtros():
                             "para ver sus conjuntos.")
         st.multiselect("Producto", productos, key="f_producto",
                        placeholder=("Todos los productos" if productos
-                                    else "Sin productos aún — pulsa Recargar"),
-                       help="Se saca del NOMBRE de la campaña (p. ej. BOLIS, LAVADORAS, "
-                            "EDUCARTE). Puedes elegir varios. Filtra las campañas/conjuntos "
-                            "que contengan ese producto.")
+                                    else "Sin productos aún — sincroniza ventas"),
+                       help="Son los productos REALES de tu columna 'producto' en Supabase. "
+                            "Cada anuncio se cruza por su ad_id (sus ventas dicen qué producto "
+                            "es). Puedes elegir varios.")
         st.selectbox("País", ["Todos"] + paises, key="f_pais")
         _resumen_pais(todos)
 
@@ -770,6 +769,11 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
                     _pm[mon] = _pm.get(mon, 0.0) + val
             ingresos = _ing_usd(_pm, moneda_v) if _pm else ingresos_nat * rate_v  # -> USD
 
+        # Equivalente en pesos colombianos (COP) del ingreso, como referencia bajo el
+        # valor en USD. Solo para ventas propias (Supabase/Sheets), no para Meta.
+        _rcop = _rate("COP") or 0.0
+        ingresos_cop = (ingresos / _rcop) if (fuente_ventas != "meta" and _rcop and ingresos) else None
+
         if nivel == "campaign":
             # ¿CBO? (presupuesto a nivel CAMPAÑA). Si lo es, el presupuesto es UNO
             # solo (el pote de la campaña), NO se suma por conjunto.
@@ -900,6 +904,7 @@ def _construir_filas(anuncios, nivel, insights, ventas_agg, ahora):
             "pct": (spend / presupuesto * 100) if (spend is not None and presupuesto) else None,
             "cpm": cpm, "ctr": ins.get("ctr"), "costo_venta": costo_venta,
             "num": num, "ingresos": ingresos, "ingresos_nat": ingresos_nat,
+            "ingresos_cop": ingresos_cop,
             "ganancia": ingresos - (gasto or 0.0), "roas": roas,
             "creado": rep.get("fecha_creacion"), "ult_mod": inicio_mod,
             "num_cambios": _ncambios, "ult_mod_ts": _ultmod_ts,
@@ -932,12 +937,29 @@ def _num(v):
         return "—"
 
 
-def _money_html(usd, nat, moneda, cls=""):
-    """USD grande + moneda original pequeña abajo."""
+def _money_html(usd, cls="", sub=None):
+    """Valor en USD (grande). Todo el dashboard va en dólares. `sub` = línea pequeña
+    opcional ya formateada (p. ej. el equivalente en pesos de las ventas)."""
     big = f'<div class="big {cls}">{_usd(usd)}</div>'
-    if nat is not None and (moneda or "USD").upper() != "USD":
-        return big + f'<div class="sub">{_num(nat)} {moneda}</div>'
+    if sub:
+        big += f'<div class="sub">{sub}</div>'
     return big
+
+
+def _pesos(cop):
+    """Formatea un monto en pesos colombianos, sin centavos (COP no usa decimales).
+    Ej.: 16000 -> '16.000 pesos'."""
+    try:
+        return f"{int(round(float(cop))):,}".replace(",", ".") + " pesos"
+    except Exception:
+        return None
+
+
+def _cop_html(cop):
+    """Subtítulo con el equivalente en pesos colombianos (para las ventas)."""
+    if not cop:
+        return None
+    return _pesos(cop)
 
 
 def _aplicar_presupuesto_grupo(fila, nuevo_usd):
@@ -1150,12 +1172,22 @@ def seccion_vista_general():
         anuncios = [a for a in anuncios if a.get("campaign_nombre") in campanas_sel]
     productos_sel = st.session_state.get("f_producto", []) or []
     if productos_sel:
-        pl = [p.lower() for p in productos_sel]
+        sel_norm = {_norm_txt(p) for p in productos_sel}
+        # 1) Cruce por ad_id: anuncios cuyas ventas son de un producto seleccionado.
+        mapa = db.ad_ids_por_producto()
+        ids_ok = set()
+        for prod, ids in mapa.items():
+            if _norm_txt(prod) in sel_norm:
+                ids_ok |= ids
 
+        # 2) Respaldo por nombre: anuncios sin ventas aún cuyo nombre contiene el
+        #    producto (así un anuncio nuevo que aún no vende también aparece).
         def _tiene_producto(a):
-            texto = ((a.get("campaign_nombre") or "") + " " + (a.get("adset_nombre") or "")
-                     + " " + (a.get("nombre") or "")).lower()
-            return any(p in texto for p in pl)
+            if str(a.get("ad_id")) in ids_ok:
+                return True
+            blob = _norm_txt((a.get("campaign_nombre") or "") + " "
+                             + (a.get("adset_nombre") or "") + " " + (a.get("nombre") or ""))
+            return any(pn and pn in blob for pn in sel_norm)
         anuncios = [a for a in anuncios if _tiene_producto(a)]
     if pais_sel != "Todos":
         anuncios = [a for a in anuncios if (a.get("cuenta_pais") or "—") == pais_sel]
@@ -1353,21 +1385,11 @@ def _render_totales(filas, sin_adid=None):
     costo_venta = (gasto / num) if num > 0 else 0.0
     costo_conv = (gasto / conv) if conv > 0 else 0.0
 
-    # Sumas en moneda local (solo si todo el conjunto es una misma moneda).
-    monedas = {(f.get("moneda") or "USD") for f in filas}
-    mon = monedas.pop() if len(monedas) == 1 else None
-    if mon and mon != "USD":
-        gn = sum(f.get("gasto_nat") or 0 for f in filas)
-        inn = sum(f.get("ingresos_nat") or 0 for f in filas)
-        def loc(v):
-            return f"{_num(v)} {mon}"
-        nat = {
-            "Gasto total": loc(gn), "Ingresos": loc(inn),
-            "Costo/venta": loc(gn / num) if num > 0 else "", "Ganancia": loc(inn - gn),
-            "Costo/conv": loc(gn / conv) if conv > 0 else "",
-        }
-    else:
-        nat = {}
+    # Todo el dashboard va en dólares. Como única referencia en moneda local, bajo
+    # "Ingresos" mostramos su equivalente en PESOS COLOMBIANOS (COP), y solo cuando las
+    # ventas son propias (Supabase/Sheets) — no para las compras que vienen de Meta.
+    ingresos_cop = sum(f.get("ingresos_cop") or 0.0 for f in filas)
+    nat = {"Ingresos": _pesos(ingresos_cop)} if ingresos_cop else {}
 
     # Paleta uniforme: tinta para números de venta, cobalto para inversión (Gasto),
     # semáforo (ámbar/crimson) solo para señalar. Sin neón como texto, sin efectos.
@@ -1712,9 +1734,9 @@ def _render_lista_nativa(filas, nivel):
         cpm = _usd(f["cpm"]) if f["cpm"] is not None else "—"
         ctr = f'{f["ctr"]:.2f}%' if f["ctr"] is not None else "—"
         conv = int(f["conv"]) if f["conv"] is not None else "—"
-        costoc = (_money_html(f["costo_conv"], f.get("costo_conv_nat"), f["moneda"])
+        costoc = (_money_html(f["costo_conv"])
                   if f.get("costo_conv") is not None else '<div class="big">—</div>')
-        costov = (_money_html(f["costo_venta"], None, "USD")
+        costov = (_money_html(f["costo_venta"])
                   if f.get("costo_venta") else '<div class="big">—</div>')
         # Color del nombre según estado: verde=activo, rojo=apagado, amarillo=mixto.
         a_n, t_n = f["activos"], f["total"]
@@ -1768,7 +1790,7 @@ def _render_lista_nativa(filas, nivel):
             nombre_html = (f'<div class="name-alert" title="Rinde muy mal: ROAS por '
                            f'debajo de 1x con gasto. Considera pausar o ajustar.">'
                            f'{nombre_html}</div>')
-        gastado_cell = (_money_html(f["gasto"], f["gasto_nat"], f["moneda"])
+        gastado_cell = (_money_html(f["gasto"])
                         + ('<div class="sub">est.</div>' if f["spend"] is None else ''))
         # Mini gráfico de barras: facturación de los últimos 7 días (una barra/día).
         # El color sigue la salud del anuncio (verde ROAS>2, amarillo 1-2, rojo <1).
@@ -1803,14 +1825,14 @@ def _render_lista_nativa(filas, nivel):
         cells = [
             nombre_html,
             cuenta_cell,
-            _money_html(f["presupuesto"], f["presup_nat"], f["moneda"], "m-peri"),
+            _money_html(f["presupuesto"], "m-peri"),
             gastado_cell,
             f'<div class="big">{conv}</div>',
             costoc,
             f'<div class="big">{cpm}</div><div class="sub">{ctr} CTR</div>',
             f'<div class="big">{f["num"]}</div>',
             costov,
-            _money_html(f["ingresos"], f["ingresos_nat"], f["moneda"], "m-mint"),
+            _money_html(f["ingresos"], "m-mint", sub=_cop_html(f.get("ingresos_cop"))),
             f'<div class="big" style="color:{"#1F8A4C" if g>=0 else "#E11D48"};font-weight:700">'
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0)
@@ -4115,43 +4137,74 @@ def pagina_productos():
         mv = max(set(mons), key=mons.count) if mons else "USD"
     rate_v = fx.tasa_a_usd(mv)
 
-    # Lista de productos: de las ventas (columna) + de los nombres de campaña.
-    prods_camp = _extraer_productos([a.get("campaign_nombre") for a in todos
-                                     if a.get("campaign_nombre")])
-    productos = sorted(set(vprod.keys()) | set(prods_camp), key=lambda s: s.lower())
+    # Lista de productos: la columna 'producto' de las ventas (Supabase) — nombres reales.
+    productos = db.productos_distintos()
     if not productos:
-        st.info("Aún no detecto productos. El producto se saca del **nombre de la campaña** "
-                "y/o de la **columna 'producto'** de tus ventas (configúrala en "
-                "Configuración → Fuentes de ventas). Pulsa **Recargar** en el Dashboard "
-                "para traer campañas.")
+        st.info("Aún no detecto productos. El producto sale de la **columna 'producto'** "
+                "de tus ventas de Supabase (configúrala en Configuración → Supabase) y se "
+                "cruza con los anuncios por **ad_id**. Sincroniza tus ventas para verlos.")
         return
 
-    filas = []
-    for P in productos:
-        pn = _norm_txt(P)
-        # Gasto: anuncios cuyo nombre (campaña/conjunto/anuncio) contiene el producto.
-        gP = 0.0
-        for a in todos:
-            blob = _norm_txt((a.get("campaign_nombre") or "") + " "
-                             + (a.get("adset_nombre") or "") + " " + (a.get("nombre") or ""))
+    # Cada anuncio se atribuye a UN producto: primero por sus VENTAS (cruce por ad_id),
+    # y si aún no vende, por el nombre de la campaña/conjunto/anuncio. El gasto de un
+    # anuncio que no cae en ningún producto va a "Otros (sin clasificar)".
+    mapa_ids = db.ad_ids_por_producto()            # {producto: set(ad_ids)}
+    prod_por_ad = {}
+    for prod, ids in mapa_ids.items():
+        for aid in ids:
+            prod_por_ad.setdefault(str(aid), prod)  # las ventas mandan
+    _prod_norm = [(P, _norm_txt(P)) for P in productos]
+    for a in todos:
+        aid = str(a["ad_id"])
+        if aid in prod_por_ad:
+            continue
+        blob = _norm_txt((a.get("campaign_nombre") or "") + " "
+                         + (a.get("adset_nombre") or "") + " " + (a.get("nombre") or ""))
+        for P, pn in _prod_norm:
             if pn and pn in blob:
-                m = insights.get(str(a["ad_id"]))
-                if m and m.get("spend"):
-                    gP += m["spend"] * _rate(a.get("cuenta_moneda"))
-        # Ventas/ingresos: por la columna 'producto' (match normalizado, tolerante).
-        nP, iP = 0, 0.0
-        for prod, d in vprod.items():
-            pnv = _norm_txt(prod)
-            if pn and (pn in pnv or pnv in pn):
-                nP += int(d["num"])
-                # Cada venta se convierte con SU moneda (país); '?' usa el respaldo mv.
-                iP += sum(val * _rate(mv if mon == "?" else mon)
-                          for mon, val in (d.get("por_moneda") or {}).items())
+                prod_por_ad[aid] = P
+                break
+
+    # Gasto por producto (atribuido por ad_id) + gasto sin clasificar.
+    gasto_prod = {P: 0.0 for P in productos}
+    gasto_otros = 0.0
+    for a in todos:
+        m = insights.get(str(a["ad_id"]))
+        if not (m and m.get("spend")):
+            continue
+        sp = m["spend"] * _rate(a.get("cuenta_moneda"))
+        P = prod_por_ad.get(str(a["ad_id"]))
+        if P in gasto_prod:
+            gasto_prod[P] += sp
+        else:
+            gasto_otros += sp
+
+    # Ventas/ingresos por producto (columna 'producto' de las ventas) -> USD por moneda.
+    ing_prod = {P: 0.0 for P in productos}
+    ven_prod = {P: 0 for P in productos}
+    for prod, d in vprod.items():
+        pnv = _norm_txt(prod)
+        P = next((PP for PP in productos if _norm_txt(PP) == pnv), prod)
+        ing_prod.setdefault(P, 0.0)
+        ven_prod.setdefault(P, 0)
+        ing_prod[P] += sum(val * _rate(mv if mon == "?" else mon)
+                           for mon, val in (d.get("por_moneda") or {}).items())
+        ven_prod[P] += int(d["num"])
+
+    filas = []
+    for P in sorted(set(gasto_prod) | set(ing_prod), key=lambda s: s.lower()):
+        gP = gasto_prod.get(P, 0.0)
+        iP = ing_prod.get(P, 0.0)
+        nP = ven_prod.get(P, 0)
         roas = (iP / gP) if gP > 0 else 0.0
         cpa = (gP / nP) if nP > 0 else 0.0
         filas.append({"Producto": P, "Gasto (USD)": round(gP, 2), "Ventas": nP,
                       "Ingresos (USD)": round(iP, 2), "ROAS": round(roas, 2),
                       "CPA (USD)": round(cpa, 2), "Ganancia (USD)": round(iP - gP, 2)})
+    if gasto_otros > 0:
+        filas.append({"Producto": "Otros (sin clasificar)", "Gasto (USD)": round(gasto_otros, 2),
+                      "Ventas": 0, "Ingresos (USD)": 0.0, "ROAS": 0.0, "CPA (USD)": 0.0,
+                      "Ganancia (USD)": round(-gasto_otros, 2)})
 
     df = pd.DataFrame(filas).sort_values("Ingresos (USD)", ascending=False)
     # Totales arriba.
@@ -4182,9 +4235,10 @@ def pagina_productos():
         st.subheader("Ganancia por producto")
         st.plotly_chart(fig, use_container_width=True)
 
-    st.caption("El **gasto** se atribuye por el **nombre de la campaña** (que contenga el producto) "
-               "y las **ventas/ingresos** por la **columna 'producto'** de tus ventas. Para que "
-               "cuadren perfecto, usa el mismo nombre de producto en la campaña y en esa columna.")
+    st.caption("Los productos salen de la **columna 'producto'** de tus ventas (Supabase). "
+               "El **gasto** se atribuye a cada anuncio por su **ad_id** (sus ventas dicen de qué "
+               "producto es); si un anuncio aún no vende, se usa el nombre de su campaña. El gasto "
+               "que no cae en ningún producto aparece como **Otros (sin clasificar)**.")
 
 
 def pagina_ventas():
