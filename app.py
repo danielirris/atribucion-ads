@@ -391,7 +391,6 @@ _PAGINAS = {
     "graficos": ("Gráficos", ":material/insights:"),
     "productos": ("Productos", ":material/category:"),
     "ventas": ("Ventas (3 días)", ":material/receipt_long:"),
-    "tutoriales": ("Tutoriales", ":material/school:"),
     "configuracion": ("Configuración", ":material/settings:"),
     "actividad": ("Bitácora", ":material/history:"),
 }
@@ -962,6 +961,38 @@ def _cop_html(cop):
     return _pesos(cop)
 
 
+# --- Subtítulo del dashboard: el valor GRANDE siempre va en USD (moneda oficial);
+#     debajo se muestra el equivalente en la moneda que el usuario elija (de estas 5).
+#     soles = PEN · chi = CLP · ven = VES ---
+_MONEDAS_SUBTITULO = ["MXN", "COP", "VES", "CLP", "PEN"]
+_DEC_MONEDA = {"MXN": 2, "COP": 0, "VES": 2, "CLP": 0, "PEN": 2}
+
+
+def _moneda_subtitulo():
+    m = db.get_config("moneda_subtitulo", "COP")
+    return m if m in _MONEDAS_SUBTITULO else "COP"
+
+
+def _fmt_local(monto, dec):
+    """Formato latino: miles con punto y decimales con coma. Ej. 1.234,56 / 45.000."""
+    if dec <= 0:
+        return f"{int(round(monto)):,}".replace(",", ".")
+    ent, _, fr = f"{monto:,.{dec}f}".partition(".")
+    return ent.replace(",", ".") + "," + fr
+
+
+def _sub_local(usd, cod=None):
+    """Subtítulo con el equivalente del valor en USD en la moneda elegida (5 opciones).
+    Devuelve None si no hay valor o no hay tipo de cambio."""
+    if usd in (None, ""):
+        return None
+    cod = cod or _moneda_subtitulo()
+    tasa = fx.tasa_a_usd(cod)          # USD por 1 unidad de `cod`
+    if not tasa:
+        return None
+    return f"{_fmt_local(float(usd) / tasa, _DEC_MONEDA.get(cod, 2))} {cod}"
+
+
 def _aplicar_presupuesto_grupo(fila, nuevo_usd):
     """Cambia el presupuesto (en USD, se convierte a la moneda de la cuenta)."""
     rate = fila.get("rate_c") or 1.0
@@ -1388,8 +1419,28 @@ def _render_totales(filas, sin_adid=None):
     # Todo el dashboard va en dólares. Como única referencia en moneda local, bajo
     # "Ingresos" mostramos su equivalente en PESOS COLOMBIANOS (COP), y solo cuando las
     # ventas son propias (Supabase/Sheets) — no para las compras que vienen de Meta.
+    # Selector de la moneda del subtítulo, ARRIBA de las tarjetas KPI. El valor
+    # grande siempre es USD (oficial); debajo, el equivalente en la moneda elegida.
+    _c1, _ = st.columns([1, 4])
+    csel = _c1.selectbox(
+        "Ver equivalente en", _MONEDAS_SUBTITULO,
+        index=_MONEDAS_SUBTITULO.index(_moneda_subtitulo()),
+        key="sel_moneda_subtitulo",
+        help="El valor principal siempre está en dólares (moneda oficial). "
+             "Debajo verás su equivalente en la moneda que elijas.")
+    if csel != _moneda_subtitulo():
+        db.set_config("moneda_subtitulo", csel)
+
     ingresos_cop = sum(f.get("ingresos_cop") or 0.0 for f in filas)
-    nat = {"Ingresos": _pesos(ingresos_cop)} if ingresos_cop else {}
+    # Subtítulo (equivalente en la moneda elegida) bajo cada valor en dinero.
+    # Ingresos solo cuando son propios (Supabase/Sheets), como antes.
+    nat = {
+        "Gasto total": _sub_local(gasto, csel),
+        "Ingresos": (_sub_local(ingresos, csel) if ingresos_cop else None),
+        "Costo/venta": _sub_local(costo_venta, csel),
+        "Costo/conv": _sub_local(costo_conv, csel),
+        "Ganancia": _sub_local(ganancia, csel),
+    }
 
     # Paleta uniforme: tinta para números de venta, cobalto para inversión (Gasto),
     # semáforo (ámbar/crimson) solo para señalar. Sin neón como texto, sin efectos.
@@ -1832,7 +1883,8 @@ def _render_lista_nativa(filas, nivel):
             f'<div class="big">{cpm}</div><div class="sub">{ctr} CTR</div>',
             f'<div class="big">{f["num"]}</div>',
             costov,
-            _money_html(f["ingresos"], "m-mint", sub=_cop_html(f.get("ingresos_cop"))),
+            _money_html(f["ingresos"], "m-mint",
+                        sub=(_sub_local(f["ingresos"]) if f.get("ingresos_cop") else None)),
             f'<div class="big" style="color:{"#1F8A4C" if g>=0 else "#E11D48"};font-weight:700">'
             f'{"+" if g>=0 else ""}{_usd(g)}</div>',
             _roas_pill(f["roas"] or 0.0)
