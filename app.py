@@ -3037,7 +3037,7 @@ def _inject_css():
         background:#18181B; display:flex; align-items:center; justify-content:center; }
     .acc-logo svg{ width:23px; height:23px; }
     .acc-name{ font-family:'Anton',sans-serif; font-weight:400; font-size:18px; line-height:1;
-        text-transform:uppercase; letter-spacing:-.01em; color:#18181B; }
+        text-transform:uppercase; letter-spacing:-.01em; color:var(--txt); }
     .acc-name small{ display:block; font-family:'Space Mono',monospace; font-size:8.5px; font-weight:400;
         letter-spacing:.16em; color:var(--sub); -webkit-text-fill-color:var(--sub); margin-top:4px; }
     [data-testid="stSidebar"] h3{ color:var(--sub); text-transform:uppercase; font-size:12px;
@@ -3192,13 +3192,9 @@ def _inject_css():
         "<style>"
         ".stApp::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;"
         "background:"
-        "radial-gradient(62% 56% at 12% 6%, rgba(182,228,0,.48) 0%, transparent 60%),"
-        "radial-gradient(58% 52% at 90% 16%, rgba(94,140,0,.38) 0%, transparent 62%),"
-        "radial-gradient(74% 66% at 74% 96%, rgba(120,190,120,.40) 0%, transparent 66%),"
-        "radial-gradient(54% 50% at 22% 84%, rgba(14,116,105,.30) 0%, transparent 62%);}"
-        ".stApp::after{content:'';position:fixed;top:0;left:0;right:0;height:460px;z-index:0;"
-        "pointer-events:none;"
-        f"background:url(\"{_WAVES_URI}\") top center / 100% 460px no-repeat;}}"
+        "radial-gradient(60% 55% at 14% 8%, rgba(94,140,0,.15) 0%, transparent 62%),"
+        "radial-gradient(55% 50% at 88% 20%, rgba(120,190,120,.12) 0%, transparent 62%),"
+        "radial-gradient(60% 55% at 80% 96%, rgba(14,116,105,.12) 0%, transparent 66%);}"
         "</style>",
         unsafe_allow_html=True)
 
