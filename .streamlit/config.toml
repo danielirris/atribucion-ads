@@ -17,9 +17,11 @@ enableStaticServing = true
 gatherUsageStats = false
 
 [theme]
-base = "dark"
+# El tema real lo controla el CSS por variables (?theme=light|dark que manda
+# Datibot). Aquí dejamos la base CLARA (el default de Datibot / caso común).
+base = "light"
 primaryColor = "#D7FF3A"
-backgroundColor = "#12150e"
-secondaryBackgroundColor = "#1c2016"
-textColor = "#ece9df"
+backgroundColor = "#F3F1EC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#18181B"
 font = "sans serif"
