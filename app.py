@@ -391,7 +391,6 @@ _PAGINAS = {
     "graficos": ("Gráficos", ":material/insights:"),
     "productos": ("Productos", ":material/category:"),
     "ventas": ("Ventas (3 días)", ":material/receipt_long:"),
-    "configuracion": ("Configuración", ":material/settings:"),
     "actividad": ("Bitácora", ":material/history:"),
 }
 
@@ -4504,8 +4503,15 @@ def pagina_dashboard():
 def main():
     _gate_password()
     _inject_css()
+    # Página por query param (?pagina=…) — permite abrir la Configuración desde
+    # Datibot aunque ya no esté en el menú. Se aplica una vez; luego manda la navegación.
+    _qp = st.query_params.get("pagina")
+    if _qp and not st.session_state.get("_qp_pagina_aplicado"):
+        st.session_state["_pagina"] = _qp
+        st.session_state["_qp_pagina_aplicado"] = True
     pagina = st.session_state.get("_pagina", "dashboard")
-    if pagina not in _PAGINAS:
+    # 'configuracion' sigue siendo válida aunque esté OCULTA del menú (se abre desde Datibot).
+    if pagina not in _PAGINAS and pagina != "configuracion":
         pagina = "dashboard"
     sidebar_estado(pagina)
     if pagina == "configuracion":
