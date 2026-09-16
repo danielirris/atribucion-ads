@@ -3001,7 +3001,8 @@ def _inject_css():
     [data-testid="stAppViewContainer"], [data-testid="stMain"],
     [data-testid="stMainBlockContainer"], .block-container,
     [data-testid="stHeader"]{ background:transparent !important; }
-    [data-testid="stMainBlockContainer"], .block-container{ position:relative; z-index:1; }
+    [data-testid="stMainBlockContainer"], .block-container{ position:relative; z-index:1;
+        padding-top:1.2rem !important; }
     [data-testid="stSidebar"]{ position:relative; z-index:1; }
 
     /* Scrollbar delgado neutro */
@@ -3112,6 +3113,10 @@ def _inject_css():
     button[data-variant="segmented_control"][data-selected="true"]{
         background:var(--signal) !important; border:1px solid var(--signal) !important;
         color:#18181B !important; font-weight:700 !important; }
+    /* El texto interno (Streamlit lo pinta con el primaryColor lima -> ilegible sobre
+       la píldora lima). Lo forzamos a negro. */
+    button[data-variant="segmented_control"][data-selected="true"] *{
+        color:#18181B !important; -webkit-text-fill-color:#18181B !important; }
 
     /* KPI cards: acento superior neón (clase .tcard de _render_totales) */
     .tcard{ position:relative; overflow:hidden; transition:border-color .2s ease, box-shadow .2s ease; }
