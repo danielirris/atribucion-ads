@@ -3105,13 +3105,13 @@ def _inject_css():
     /* Controles segmentados (Ver por / Estado): SIN recuadro, activo tinta + neón */
     [data-testid="stButtonGroup"]{ background:transparent !important;
         border:none !important; border-radius:0 !important; padding:0 !important; }
-    button[data-variant="segmented_control"]{ color:var(--sub) !important;
+    button[data-variant="segmented_control"]{ color:#c9c6bc !important;
         background:transparent !important; border:1px solid transparent !important; border-radius:9999px !important;
         font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.06em; font-size:12px; }
-    button[data-variant="segmented_control"]:hover{ color:#18181B !important; background:rgba(17,17,17,.05) !important; }
+    button[data-variant="segmented_control"]:hover{ color:var(--txt) !important; background:rgba(255,255,255,.06) !important; }
     button[data-variant="segmented_control"][data-selected="true"]{
-        background:var(--signal) !important; border:1px solid #18181B !important;
-        color:#18181B !important; }
+        background:var(--signal) !important; border:1px solid var(--signal) !important;
+        color:#18181B !important; font-weight:700 !important; }
 
     /* KPI cards: acento superior neón (clase .tcard de _render_totales) */
     .tcard{ position:relative; overflow:hidden; transition:border-color .2s ease, box-shadow .2s ease; }
@@ -3161,17 +3161,17 @@ def _inject_css():
     /* Tabs (Configuración) */
     .stTabs [data-baseweb="tab-list"]{ gap:6px; border-bottom:1px solid var(--card-brd); }
     .stTabs [data-baseweb="tab"]{ border-radius:10px 10px 0 0; color:var(--sub); }
-    .stTabs [aria-selected="true"]{ color:#18181B !important; }
-    .stTabs [data-baseweb="tab-highlight"]{ background:#18181B !important; height:3px; }
+    .stTabs [aria-selected="true"]{ color:var(--txt) !important; }
+    .stTabs [data-baseweb="tab-highlight"]{ background:var(--signal) !important; height:3px; }
 
     [data-testid="stAlert"]{ border-radius:14px; }
-    [data-testid="stMetricValue"]{ font-family:'Anton',sans-serif; color:#18181B; }
+    [data-testid="stMetricValue"]{ font-family:'Anton',sans-serif; color:var(--txt); }
     [data-testid="stMetricLabel"]{ font-family:'Space Mono',monospace; text-transform:uppercase;
         letter-spacing:.08em; color:var(--sub); }
     /* Pestañas grandes arriba (DASHBOARD | GRÁFICOS) con tipografía de título Anton.
        La activa es un <div>; las inactivas son <button> estilizados como título gris. */
     .toptab.active{ font-family:'Anton',sans-serif; text-transform:uppercase; letter-spacing:-.02em;
-        font-size:clamp(30px,4.2vw,56px); line-height:.92; color:#18181B; }
+        font-size:clamp(30px,4.2vw,56px); line-height:.92; color:var(--txt); }
     [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button{
         background:transparent !important; background-color:transparent !important;
         border:none !important; box-shadow:none !important; padding:0 !important;
