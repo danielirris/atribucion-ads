@@ -3064,16 +3064,16 @@ def _inject_css():
     [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-secondary"],
     [data-testid="baseButton-primary"], [data-testid="baseButton-secondary"],
     button[kind="primary"], button[kind="secondary"]{
-        border-radius:9999px !important; font-weight:700 !important; color:#18181B !important;
-        transition:all .3s ease-out; background:#D7FF3A !important; background-color:#D7FF3A !important;
-        border:1px solid #18181B !important; box-shadow:none !important;
-        font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.04em;
+        border-radius:9999px !important; font-weight:600 !important; color:#18181B !important;
+        transition:all .2s ease-out; background:#D7FF3A !important; background-color:#D7FF3A !important;
+        border:1px solid transparent !important; box-shadow:none !important;
+        font-family:'Inter',sans-serif !important; text-transform:none !important; letter-spacing:0 !important;
     }
     .stButton button:hover, .stDownloadButton button:hover, .stFormSubmitButton button:hover,
     [data-testid="stBaseButton-primary"]:hover, [data-testid="stBaseButton-secondary"]:hover,
     button[kind="primary"]:hover, button[kind="secondary"]:hover{
-        border-color:#18181B !important; transform:translateY(-2px);
-        box-shadow:0 10px 22px -10px rgba(17,17,17,.45) !important; filter:brightness(1.03);
+        transform:translateY(-1px);
+        box-shadow:0 8px 18px -10px rgba(17,17,17,.30) !important; filter:brightness(1.02);
     }
     .stButton button p, .stDownloadButton button p, .stFormSubmitButton button p,
     button[kind="primary"] p, button[kind="secondary"] p{ color:#18181B !important; }
@@ -3192,10 +3192,10 @@ def _inject_css():
         "<style>"
         ".stApp::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;"
         "background:"
-        "radial-gradient(50% 44% at 8% 4%, rgba(182,228,0,.30) 0%, transparent 58%),"
-        "radial-gradient(48% 44% at 92% 14%, rgba(94,140,0,.22) 0%, transparent 60%),"
-        "radial-gradient(60% 55% at 74% 94%, rgba(120,190,120,.24) 0%, transparent 64%),"
-        "radial-gradient(42% 40% at 24% 82%, rgba(14,116,105,.18) 0%, transparent 60%);}"
+        "radial-gradient(62% 56% at 12% 6%, rgba(182,228,0,.48) 0%, transparent 60%),"
+        "radial-gradient(58% 52% at 90% 16%, rgba(94,140,0,.38) 0%, transparent 62%),"
+        "radial-gradient(74% 66% at 74% 96%, rgba(120,190,120,.40) 0%, transparent 66%),"
+        "radial-gradient(54% 50% at 22% 84%, rgba(14,116,105,.30) 0%, transparent 62%);}"
         ".stApp::after{content:'';position:fixed;top:0;left:0;right:0;height:460px;z-index:0;"
         "pointer-events:none;"
         f"background:url(\"{_WAVES_URI}\") top center / 100% 460px no-repeat;}}"
