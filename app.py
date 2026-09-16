@@ -42,10 +42,10 @@ APP_VERSION = "v139 · 2026-08-30"
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
 #  generados desde Python. Los estilos globales viven en _inject_css().
 # --------------------------------------------------------------------------- #
-C_PAPER = "#F3F1EC"     # fondo papel
+C_PAPER = "#12150e"     # fondo papel
 C_INK = "#18181B"       # texto principal (tinta)
 C_MUTED = "#71717A"     # texto secundario
-C_LINE = "#DED9D0"      # bordes/hairlines sobre papel
+C_LINE = "#2f3427"      # bordes/hairlines sobre papel
 C_SIGNAL = "#D7FF3A"    # acento neón (lima)
 C_OK = "#5E8C00"        # verde legible sobre papel
 
@@ -1470,8 +1470,8 @@ def _render_totales(filas, sin_adid=None):
         for t, v, c in tarjetas)
     st.markdown(
         '<style>.trow{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0 10px;}'
-        '.tcard{flex:1;min-width:120px;background:#FFFFFF;'
-        'border:1px solid #DED9D0;border-radius:16px;padding:16px 16px 14px;}'
+        '.tcard{flex:1;min-width:120px;background:#1c2016;'
+        'border:1px solid #2f3427;border-radius:16px;padding:16px 16px 14px;}'
         ".tlbl{font-family:'Space Mono',monospace;font-size:10.5px;text-transform:uppercase;"
         'letter-spacing:.1em;color:#71717A;font-weight:400;}'
         ".tval{font-family:Anton,sans-serif;font-weight:400;font-size:39px;margin-top:8px;line-height:1;}"
@@ -2015,7 +2015,7 @@ def _dialog_info():
                       legend=dict(orientation="h", y=1.15),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       font=dict(color="#18181B"),
-                      xaxis=dict(gridcolor="#DED9D0"), yaxis=dict(gridcolor="#DED9D0"))
+                      xaxis=dict(gridcolor="#2f3427"), yaxis=dict(gridcolor="#2f3427"))
     st.plotly_chart(fig, use_container_width=True)
     if not serie:
         st.caption("El gasto por día se llena cuando hay conexión de Facebook. Los ingresos "
@@ -2181,14 +2181,14 @@ def esc_nombre(f):
 # --------------------------------------------------------------------------- #
 _TABLA_CSS = """
 <style>
-.tbl-wrap { overflow-x:auto; border:1px solid #DED9D0; border-radius:18px;
-    background:#FBFAF7; box-shadow:none; }
+.tbl-wrap { overflow-x:auto; border:1px solid #2f3427; border-radius:18px;
+    background:#1c2016; box-shadow:none; }
 table.ads { width:100%; border-collapse:collapse; font-size:12px; color:#18181B;
     background:transparent; min-width:1080px; }
 table.ads thead th { text-align:left; font-weight:700; color:#71717A; font-size:10px;
     text-transform:uppercase; letter-spacing:.08em; padding:12px 12px; white-space:nowrap;
     font-family:'Space Mono',monospace;
-    background:transparent; border-bottom:1px solid #DED9D0; }
+    background:transparent; border-bottom:1px solid #2f3427; }
 table.ads td { padding:11px 12px; border-bottom:1px solid #EAE6DD; vertical-align:middle; }
 table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
 .big { font-size:17px; font-weight:600; color:#18181B; line-height:1.15; }
@@ -2220,12 +2220,12 @@ hr.rowline { margin:2px 0; border:none; border-top:1px solid #EAE6DD; }
 /* Fija (sticky) la fila de títulos de la tabla al hacer scroll hacia abajo.
    El hermano siguiente al marcador puede ser stLayoutWrapper o stHorizontalBlock. */
 [data-testid="stElementContainer"]:has(.tbl-hdr-anchor) + *{
-    position:sticky; top:0; z-index:30; background:#F3F1EC;
+    position:sticky; top:0; z-index:30; background:#12150e;
     box-shadow:0 6px 10px -10px rgba(17,17,17,.3); padding:6px 0 4px;
-    border-bottom:1px solid #DED9D0;
+    border-bottom:1px solid #2f3427;
 }
 /* Bloque "Rendimiento desde el último cambio" (fila + card) */
-.perf-block{ background:#F1EEE6; border-radius:8px; padding:6px 10px;
+.perf-block{ background:#22271b; border-radius:8px; padding:6px 10px;
     margin-top:5px; border:1px solid transparent; }
 .perf-block.perf-alert{ border:1px solid rgba(192,57,43,.45); }
 .perf-line{ font-size:10.5px; color:#333333; line-height:1.35; }
@@ -2711,14 +2711,14 @@ _LOGIN_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="collapsedControl"], header[data-testid="stHeader"], [data-testid="stToolbar"]{ display:none !important; }
-[data-testid="stAppViewContainer"], .stApp{ background:#F3F1EC !important; overflow:hidden; }
+[data-testid="stAppViewContainer"], .stApp{ background:#12150e !important; overflow:hidden; }
 /* Centrado perfecto: una sola columna en el centro exacto */
 [data-testid="stMain"]{ display:flex !important; align-items:center !important; justify-content:center !important; min-height:100vh; }
 [data-testid="stMainBlockContainer"], .block-container{ max-width:420px !important; width:100%;
     padding:2.5vh 1.1rem !important; position:relative; z-index:2; }
 
 /* ---------- Fondo papel con verde MUY difuminado (patrón suave) ---------- */
-.login-bg{ position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background:#F3F1EC; }
+.login-bg{ position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background:#12150e; }
 .login-bg .aurora{ position:absolute; inset:-40%;
     background:
       radial-gradient(45% 45% at 26% 26%, rgba(94,140,0,.20) 0%, transparent 60%),
@@ -2760,8 +2760,8 @@ _LOGIN_CSS = """
 /* ---------- Tarjeta blanca ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"]{
     position:relative; overflow:hidden;
-    background:#FFFFFF !important; backdrop-filter:none;
-    border:1px solid #DED9D0 !important; border-radius:20px !important;
+    background:#1c2016 !important; backdrop-filter:none;
+    border:1px solid #2f3427 !important; border-radius:20px !important;
     box-shadow:0 24px 60px -30px rgba(17,17,17,.25);
     animation:fadeInUp .8s cubic-bezier(.2,.7,.3,1) .15s both; }
 div[data-testid="stVerticalBlockBorderWrapper"]::before{
@@ -2776,9 +2776,9 @@ div[data-testid="stVerticalBlockBorderWrapper"]::before{
 .stTextInput:nth-of-type(2){ animation-delay:.40s; }
 .stTextInput label p, .stTextInput label{ color:#71717A !important; font-family:'Space Mono',monospace;
     font-size:11px !important; font-weight:400 !important; text-transform:uppercase; letter-spacing:.1em; }
-.stTextInput div[data-baseweb="input"], .stTextInput input{ background:#FBFAF7 !important;
+.stTextInput div[data-baseweb="input"], .stTextInput input{ background:#1c2016 !important;
     border-radius:10px !important; }
-.stTextInput input{ border:1px solid #CDC8BE !important; color:#18181B !important;
+.stTextInput input{ border:1px solid #3a4030 !important; color:#18181B !important;
     padding:13px 14px !important; font-family:'Inter',sans-serif; }
 .stTextInput input:focus{ border-color:#18181B !important;
     box-shadow:0 0 0 3px rgba(215,255,58,.55) !important; }
@@ -2801,7 +2801,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]::before{
 .login-feats2 .feat{ display:flex; align-items:center; gap:7px; color:#71717A;
     font-family:'Space Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; }
 .login-feats2 .feat svg{ width:15px; height:15px; stroke:#5E8C00; opacity:.9; }
-.login-feats2 .sep{ width:1px; height:14px; background:#DED9D0; }
+.login-feats2 .sep{ width:1px; height:14px; background:#2f3427; }
 .login-foot{ position:fixed; left:0; right:0; bottom:14px; text-align:center;
     font-family:'Space Mono',monospace; color:#9a968c; font-size:11px; z-index:3; line-height:1.7; }
 .login-foot .ver{ color:#b3ac9e; font-size:10.5px; }
@@ -2989,15 +2989,15 @@ def _inject_css():
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
     :root{
-        --bg:#F3F1EC; --card:#FFFFFF; --card-brd:#DED9D0;
-        --txt:#18181B; --sub:#71717A; --ter:#9a968c;
+        --bg:#12150e; --card:#1c2016; --card-brd:#2f3427;
+        --txt:#ece9df; --sub:#a3a396; --ter:#6f6f64;
         --p1:#18181B; --p2:#18181B; --ok:#5E8C00; --warn:#E11D48; --plight:#18181B;
         --signal:#D7FF3A;
     }
     /* Base crema en body/stApp; los contenedores TRANSPARENTES para que se vea el
        fondo (verde difuminado + ondas) que va en .stApp::before / ::after (2º inject). */
-    html, body{ background:#F3F1EC; }
-    .stApp{ background:#F3F1EC !important; color:var(--txt) !important; }
+    html, body{ background:#12150e; }
+    .stApp{ background:#12150e !important; color:var(--txt) !important; }
     [data-testid="stAppViewContainer"], [data-testid="stMain"],
     [data-testid="stMainBlockContainer"], .block-container,
     [data-testid="stHeader"]{ background:transparent !important; }
@@ -3030,7 +3030,7 @@ def _inject_css():
         -webkit-text-fill-color:initial;
     }
     /* Sidebar: papel un punto más cálido, con línea a la derecha */
-    [data-testid="stSidebar"]{ background:#ECE9E1 !important; border-right:1px solid var(--card-brd); }
+    [data-testid="stSidebar"]{ background:#171a12 !important; border-right:1px solid var(--card-brd); }
     /* Marca ACC arriba a la izquierda */
     .acc-brand{ display:flex; align-items:center; gap:11px; padding:2px 2px 8px; }
     .acc-logo{ width:42px; height:42px; border-radius:12px; flex:none;
@@ -3080,7 +3080,7 @@ def _inject_css():
 
     /* Inputs y selects: fondo blanco, borde línea, foco tinta con anillo neón sutil */
     .stTextInput input, .stNumberInput input, [data-baseweb="textarea"] textarea{
-        background:#ffffff !important; border:1px solid #CDC8BE !important;
+        background:#1c2016 !important; border:1px solid #3a4030 !important;
         border-radius:10px !important; color:var(--txt) !important;
     }
     .stTextInput input:focus, .stNumberInput input:focus{
@@ -3088,13 +3088,13 @@ def _inject_css():
         box-shadow:0 0 0 3px rgba(215,255,58,.55) !important;
     }
     input::placeholder{ color:var(--ter) !important; }
-    [data-baseweb="select"]>div{ background:#ffffff !important;
-        border:1px solid #CDC8BE !important; border-radius:10px !important; color:var(--txt) !important; }
+    [data-baseweb="select"]>div{ background:#1c2016 !important;
+        border:1px solid #3a4030 !important; border-radius:10px !important; color:var(--txt) !important; }
     [data-baseweb="popover"] li:hover, [role="option"]:hover{ background:rgba(17,17,17,.06) !important; }
 
     /* Cards / contenedores / expanders: superficie blanca, borde línea, bien redondeado */
     [data-testid="stExpander"], div[data-testid="stVerticalBlockBorderWrapper"]{
-        background:#FBFAF7 !important; backdrop-filter:none;
+        background:#1c2016 !important; backdrop-filter:none;
         border:1px solid var(--card-brd) !important; border-radius:16px;
         box-shadow:none; transition:border-color .2s ease;
     }
@@ -3124,8 +3124,8 @@ def _inject_css():
        que se emite justo antes de cada botón -> selector de hermano, 100% fiable. */
     [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button,
     [data-testid="stPopoverButton"]{
-        background:#ffffff !important; background-color:#ffffff !important;
-        border:1px solid #CDC8BE !important; border-radius:9px !important;
+        background:#1c2016 !important; background-color:#1c2016 !important;
+        border:1px solid #3a4030 !important; border-radius:9px !important;
         color:#18181B !important; min-height:0 !important;
         padding:6px 8px !important; transition:all .15s ease;
     }
@@ -3140,7 +3140,7 @@ def _inject_css():
     [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]{
         padding:9px 12px !important; min-height:38px !important; width:100% !important;
         justify-content:space-between !important; font-size:14px !important;
-        background:#ffffff !important; border:1px solid #CDC8BE !important;
+        background:#1c2016 !important; border:1px solid #3a4030 !important;
         color:#18181B !important; border-radius:10px !important;
     }
     [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]:hover{
@@ -3855,7 +3855,7 @@ def _fig_editorial(fig, height=300):
                       legend=dict(orientation="h", y=1.12),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       font=dict(color="#18181B", family="Inter"),
-                      xaxis=dict(gridcolor="#DED9D0"), yaxis=dict(gridcolor="#DED9D0"))
+                      xaxis=dict(gridcolor="#2f3427"), yaxis=dict(gridcolor="#2f3427"))
     return fig
 
 
@@ -4111,7 +4111,7 @@ def pagina_productos():
                                marker_color=cols))
         fig.update_layout(height=max(240, 42 * len(df)), margin=dict(t=20, b=10, l=10, r=10),
                           paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                          font=dict(color="#18181B"), xaxis=dict(gridcolor="#DED9D0"))
+                          font=dict(color="#18181B"), xaxis=dict(gridcolor="#2f3427"))
         st.subheader("Ganancia por producto")
         st.plotly_chart(fig, use_container_width=True)
 
@@ -4382,7 +4382,7 @@ def _timer_actualizacion():
         f'<span class="tb-pill">{b}</span>' for b in badges))
     st.markdown(
         '<style>.tb-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:2px 0 4px;}'
-        '.tb-pill{background:#FFFFFF;border:1px solid #DED9D0;'
+        '.tb-pill{background:#1c2016;border:1px solid #2f3427;'
         "border-radius:7px;padding:2px 9px;font-size:11px;color:#71717A;font-family:'Space Mono',monospace;}"
         '.tb-dot{color:#b3ac9e;margin:0 2px;}</style>'
         f'<div class="tb-row">{pills}</div>', unsafe_allow_html=True)
