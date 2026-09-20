@@ -1754,7 +1754,8 @@ def _render_lista_nativa(filas, nivel):
         '{width:100% !important;text-align:center !important;}'
         ".stButton button[kind=\"tertiary\"] p{font-size:10px !important;font-weight:700 !important;"
         "font-family:'Space Mono',monospace;"
-        'text-transform:uppercase;margin:0 !important;white-space:nowrap;text-align:center !important;}'
+        'text-transform:uppercase;margin:0 !important;white-space:nowrap;text-align:center !important;'
+        'color:var(--sub) !important;}'  # <- sin esto el <p> hereda #18181B del rule global y en oscuro es invisible
         '.stButton button[kind="tertiary"]:hover p{color:var(--txt) !important;}</style>',
         unsafe_allow_html=True)
 
@@ -3038,8 +3039,8 @@ def _inject_css():
 
     /* Scrollbar delgado neutro */
     ::-webkit-scrollbar{ width:9px; height:9px; }
-    ::-webkit-scrollbar-thumb{ background:rgba(17,17,17,.18); border-radius:8px; }
-    ::-webkit-scrollbar-thumb:hover{ background:rgba(17,17,17,.32); }
+    ::-webkit-scrollbar-thumb{ background:rgba(128,128,128,.35); border-radius:8px; }
+    ::-webkit-scrollbar-thumb:hover{ background:rgba(128,128,128,.55); }
     ::-webkit-scrollbar-track{ background:transparent; }
 
     body, .stMarkdown, p, label, input, textarea, button, li, td, th{ font-family:'Inter',sans-serif; color:var(--txt); }
@@ -3077,7 +3078,7 @@ def _inject_css():
     /* "Letras" de la columna izquierda: etiquetas de filtros/inputs en mono editorial */
     [data-testid="stSidebar"] label, [data-testid="stSidebar"] label p{
         font-family:'Space Mono',monospace !important; text-transform:uppercase;
-        letter-spacing:.08em; font-size:11px !important; font-weight:400 !important; color:#4a4a4a !important; }
+        letter-spacing:.08em; font-size:11px !important; font-weight:400 !important; color:var(--sub) !important; }
     [data-testid="stSidebar"] [data-testid="stCaptionContainer"], [data-testid="stSidebar"] small{
         font-family:'Space Mono',monospace; color:var(--sub) !important; }
     /* Encabezados de expanders del sidebar (Filtros, Cuadre…): mono uppercase */
@@ -3116,13 +3117,13 @@ def _inject_css():
         border-radius:10px !important; color:var(--txt) !important;
     }
     .stTextInput input:focus, .stNumberInput input:focus{
-        border-color:#18181B !important;
+        border-color:var(--txt) !important;
         box-shadow:0 0 0 3px rgba(215,255,58,.55) !important;
     }
     input::placeholder{ color:var(--ter) !important; }
     [data-baseweb="select"]>div{ background:var(--card) !important;
         border:1px solid var(--brd2) !important; border-radius:10px !important; color:var(--txt) !important; }
-    [data-baseweb="popover"] li:hover, [role="option"]:hover{ background:rgba(17,17,17,.06) !important; }
+    [data-baseweb="popover"] li:hover, [role="option"]:hover{ background:rgba(128,128,128,.16) !important; }
 
     /* Cards / contenedores / expanders: superficie blanca, borde línea, bien redondeado */
     [data-testid="stExpander"], div[data-testid="stVerticalBlockBorderWrapper"]{
@@ -3131,13 +3132,13 @@ def _inject_css():
         box-shadow:none; transition:border-color .2s ease;
     }
     [data-testid="stExpander"]:hover, div[data-testid="stVerticalBlockBorderWrapper"]:hover{
-        border-color:#18181B !important;
+        border-color:var(--txt) !important;
     }
 
     /* Controles segmentados (Ver por / Estado): SIN recuadro, activo tinta + neón */
     [data-testid="stButtonGroup"]{ background:transparent !important;
         border:none !important; border-radius:0 !important; padding:0 !important; }
-    button[data-variant="segmented_control"]{ color:#c9c6bc !important;
+    button[data-variant="segmented_control"]{ color:var(--sub) !important;
         background:transparent !important; border:1px solid transparent !important; border-radius:9999px !important;
         font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.06em; font-size:12px; }
     button[data-variant="segmented_control"]:hover{ color:var(--txt) !important; background:rgba(255,255,255,.06) !important; }
@@ -3153,7 +3154,7 @@ def _inject_css():
     .tcard{ position:relative; overflow:hidden; transition:border-color .2s ease, box-shadow .2s ease; }
     .tcard::before{ content:""; position:absolute; top:0; left:0; right:0; height:3px;
         background:var(--acc, var(--signal)); }
-    .tcard:hover{ border-color:#18181B !important; box-shadow:0 12px 26px -14px rgba(17,17,17,.22); }
+    .tcard:hover{ border-color:var(--txt) !important; box-shadow:0 12px 26px -14px rgba(17,17,17,.22); }
 
     /* Botones de acción de la tabla (Info/Editar presupuesto): blancos, cuadrados
        redondeados, NO píldora neón. Se identifican por un ANCLA (.iconbtn-anchor)
@@ -3162,7 +3163,7 @@ def _inject_css():
     [data-testid="stPopoverButton"]{
         background:var(--card) !important; background-color:var(--card) !important;
         border:1px solid var(--brd2) !important; border-radius:9px !important;
-        color:#18181B !important; min-height:0 !important;
+        color:var(--txt) !important; min-height:0 !important;
         padding:6px 8px !important; transition:all .15s ease;
     }
     [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button:hover,
@@ -3170,6 +3171,10 @@ def _inject_css():
         background:#D7FF3A !important; background-color:#D7FF3A !important; border-color:#18181B !important;
     }
     [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button [data-testid="stIconMaterial"]{
+        color:var(--txt) !important;
+    }
+    /* Al hover el fondo de estos botones pasa a lima -> el icono vuelve a tinta oscura. */
+    [data-testid="stElementContainer"]:has(.iconbtn-anchor) + [data-testid="stElementContainer"] button:hover [data-testid="stIconMaterial"]{
         color:#18181B !important;
     }
     /* El popover de "Rango de fechas": dropdown claro y visible (con su "📅 Hoy"). */
@@ -3177,10 +3182,10 @@ def _inject_css():
         padding:9px 12px !important; min-height:38px !important; width:100% !important;
         justify-content:space-between !important; font-size:14px !important;
         background:var(--card) !important; border:1px solid var(--brd2) !important;
-        color:#18181B !important; border-radius:10px !important;
+        color:var(--txt) !important; border-radius:10px !important;
     }
     [data-testid="stElementContainer"]:has(.rango-anchor) ~ * [data-testid="stPopoverButton"]:hover{
-        border-color:#18181B !important;
+        border-color:var(--txt) !important;
     }
     /* Toggle On/Off: OFF gris claro, ON neón lima (mismo verde de los botones);
        perilla oscura para que se vea sobre el neón. */
@@ -3208,17 +3213,104 @@ def _inject_css():
        La activa es un <div>; las inactivas son <button> estilizados como título gris. */
     .toptab.active{ font-family:'Anton',sans-serif; text-transform:uppercase; letter-spacing:-.02em;
         font-size:clamp(30px,4.2vw,56px); line-height:.92; color:var(--txt); }
-    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button{
+    /* Streamlit 1.57 envuelve st.columns en stLayoutWrapper (antes stHorizontalBlock
+       directo). Targeteamos AMBOS para que el toptab GRÁFICOS no caiga al estilo de
+       píldora lima global. */
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button,
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stLayoutWrapper"] button{
         background:transparent !important; background-color:transparent !important;
         border:none !important; box-shadow:none !important; padding:0 !important;
         justify-content:flex-start !important; transform:none !important; min-height:0 !important; }
-    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button p{
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button p,
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stLayoutWrapper"] button p{
         font-family:'Anton',sans-serif !important; text-transform:uppercase; letter-spacing:-.02em;
         font-size:clamp(30px,4.2vw,56px) !important; line-height:.92 !important; font-weight:400 !important;
-        color:#C4C0B4 !important; }
-    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button:hover p{
-        color:#18181B !important; }
+        color:var(--sub) !important; }
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stHorizontalBlock"] button:hover p,
+    [data-testid="stElementContainer"]:has(.toptabs-anchor) + [data-testid="stLayoutWrapper"] button:hover p{
+        color:var(--txt) !important; }
     hr{ border-color:var(--card-brd) !important; }
+
+    /* ===================================================================== *
+     *  PORTALES de Streamlit (diálogos, popovers, calendario, tooltips,     *
+     *  menús, toasts). Se montan a nivel <body>, FUERA de .stApp, así que    *
+     *  .stApp{background:var(--bg)} NO los alcanza y reciben la superficie   *
+     *  CLARA del tema base (config.toml base=light). Encima, el texto        *
+     *  hereda var(--txt) del tema activo (claro en oscuro) -> ilegible.      *
+     *  Solución: forzar la superficie de cada portal a var(--card)/surf2.    *
+     *  Así en oscuro el texto claro queda legible, y en claro var(--card)=   *
+     *  #FFFFFF con texto #18181B sigue correcto.                            */
+
+    /* Diálogos: Info / Presupuesto / Duplicar (@st.dialog) */
+    [data-testid="stDialog"] div[role="dialog"]{
+        background:var(--card) !important; color:var(--txt) !important;
+        border:1px solid var(--card-brd) !important; }
+    [data-testid="stDialog"] div[role="dialog"] h1,
+    [data-testid="stDialog"] div[role="dialog"] h2,
+    [data-testid="stDialog"] div[role="dialog"] h3,
+    [data-testid="stDialog"] div[role="dialog"] h4,
+    [data-testid="stDialog"] div[role="dialog"] p,
+    [data-testid="stDialog"] div[role="dialog"] label,
+    [data-testid="stDialog"] div[role="dialog"] li,
+    [data-testid="stDialog"] div[role="dialog"] [data-testid="stMarkdownContainer"]{ color:var(--txt) !important; }
+    [data-testid="stDialog"] [aria-label="Close"] svg,
+    [data-testid="stDialog"] button[kind="header"] svg{ color:var(--txt) !important; fill:var(--txt) !important; }
+
+    /* st.table dentro del diálogo Info (métricas del rango) */
+    [data-testid="stTable"] table, [data-testid="stTable"] th, [data-testid="stTable"] td{
+        background:var(--card) !important; color:var(--txt) !important;
+        border-color:var(--card-brd) !important; }
+
+    /* Tooltips de ayuda (help= de botones/columnas) */
+    [data-baseweb="tooltip"]{
+        background:var(--surf2) !important; color:var(--txt) !important;
+        border:1px solid var(--card-brd) !important; border-radius:10px !important; }
+    [data-testid="stTooltipContent"]{ background:var(--surf2) !important; border-radius:10px !important; }
+    [data-testid="stTooltipContent"], [data-testid="stTooltipContent"] *{ color:var(--txt) !important; }
+
+    /* Contenido de popovers (Rango de fechas y cualquier st.popover) */
+    [data-testid="stPopoverBody"]{
+        background:var(--card) !important; color:var(--txt) !important;
+        border:1px solid var(--card-brd) !important; }
+    [data-testid="stPopoverBody"] p, [data-testid="stPopoverBody"] label,
+    [data-testid="stPopoverBody"] li, [data-testid="stPopoverBody"] span{ color:var(--txt) !important; }
+
+    /* Calendario de st.date_input (BaseWeb) */
+    [data-baseweb="calendar"], [data-baseweb="datepicker"]{
+        background:var(--card) !important; color:var(--txt) !important;
+        border:1px solid var(--card-brd) !important; border-radius:12px !important; }
+    /* Celdas transparentes (las vacías de inicio/fin de mes salían con fondo claro). */
+    [data-baseweb="calendar"] [role="gridcell"]{ background:transparent !important; }
+    [data-baseweb="calendar"] [role="gridcell"],
+    [data-baseweb="calendar"] [role="gridcell"] > div,
+    [data-baseweb="calendar"] button{ color:var(--txt) !important; }
+    [data-baseweb="calendar"] [data-baseweb="calendar-header"],
+    [data-baseweb="calendar"] [data-baseweb="calendar-header"] *{ color:var(--txt) !important; background:transparent !important; }
+    [data-baseweb="calendar"] [role="gridcell"] > div:hover{ background:rgba(128,128,128,.18) !important; }
+    [data-baseweb="calendar"] [aria-selected="true"] > div,
+    [data-baseweb="calendar"] [aria-label][aria-selected="true"] > div{ background:var(--signal) !important; color:#18181B !important; }
+
+    /* Menú desplegable de selectbox/multiselect (BaseWeb) */
+    [data-baseweb="menu"], [data-baseweb="popover"] ul[role="listbox"]{
+        background:var(--card) !important; border:1px solid var(--card-brd) !important; }
+    [data-baseweb="menu"] li, [role="option"]{ color:var(--txt) !important; background:transparent !important; }
+    [data-baseweb="menu"] li[aria-selected="true"], [role="option"][aria-selected="true"]{
+        background:rgba(215,255,58,.16) !important; color:var(--txt) !important; }
+
+    /* Steppers de number_input (+ / -) */
+    [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"]{
+        background:var(--surf2) !important; color:var(--sub) !important; border-color:var(--brd2) !important; }
+    [data-testid="stNumberInputStepUp"]:hover, [data-testid="stNumberInputStepDown"]:hover{
+        background:rgba(128,128,128,.18) !important; color:var(--txt) !important; }
+
+    /* Avisos st.toast */
+    [data-testid="stToast"]{ background:var(--card) !important; color:var(--txt) !important;
+        border:1px solid var(--card-brd) !important; }
+    [data-testid="stToast"] *{ color:var(--txt) !important; }
+
+    /* Chips de multiselect (BaseWeb tag): lima de marca con tinta */
+    [data-baseweb="tag"]{ background:var(--signal) !important; }
+    [data-baseweb="tag"] span, [data-baseweb="tag"] svg{ color:#18181B !important; fill:#18181B !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -4419,13 +4511,25 @@ def _timer_actualizacion():
         '.tb-dot{color:var(--ter);margin:0 2px;}</style>'
         f'<div class="tb-row">{pills}</div>', unsafe_allow_html=True)
 
-    # Si llegaron datos nuevos (anuncios o ventas) desde el último render, refresca.
+    # Si llegaron datos nuevos (anuncios o ventas) desde el último render, OFRECEMOS
+    # actualizar con un botón — NO hacemos un st.rerun() automático. Motivo: un rerun
+    # completo aquí DESCARTA cualquier @st.dialog abierto (Info / Presupuesto /
+    # Duplicar). Como este fragmento corre cada 30 s y las ventas/anuncios se
+    # sincronizan seguido, el rerun automático cerraba los diálogos al instante o no
+    # dejaba ni abrirlos ("no se abre nada"). El botón deja al usuario refrescar cuando
+    # quiera, sin interrumpir lo que esté haciendo. (Reproducido y verificado: los ticks
+    # del fragmento NO cierran el diálogo; solo el st.rerun() completo lo cerraba.)
     vent_cambio = db.get_config("ventas_cambio", "") or ""
     firma = f"{ult}|{vent_cambio}"
     prev = st.session_state.get("_ult_sync_visto")
-    st.session_state["_ult_sync_visto"] = firma
-    if prev is not None and prev != firma:
-        st.rerun()  # rerun de app (mantiene sesión), no recarga la página
+    if prev is None:
+        st.session_state["_ult_sync_visto"] = firma
+    elif prev != firma:
+        if st.button("🔄 Hay datos nuevos — actualizar", key="_btn_datos_nuevos",
+                     use_container_width=True,
+                     help="Llegaron anuncios o ventas nuevos. Toca para verlos."):
+            st.session_state["_ult_sync_visto"] = firma
+            st.rerun()
 
 
 def _panel_sync_ventas():
