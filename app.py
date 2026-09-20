@@ -43,11 +43,19 @@ APP_VERSION = "v139 · 2026-08-30"
 #  generados desde Python. Los estilos globales viven en _inject_css().
 # --------------------------------------------------------------------------- #
 C_PAPER = "var(--bg)"     # fondo papel
-C_INK = "#18181B"       # texto principal (tinta)
-C_MUTED = "#71717A"     # texto secundario
+C_INK = "var(--txt)"    # texto principal (tinta) — variable de tema (negro en claro, claro en oscuro)
+C_MUTED = "var(--sub)"  # texto secundario — variable de tema
 C_LINE = "var(--card-brd)"      # bordes/hairlines sobre papel
 C_SIGNAL = "#D7FF3A"    # acento neón (lima)
 C_OK = "#5E8C00"        # verde legible sobre papel
+
+# HEX por tema para Plotly y SVGs inline. Plotly pinta a canvas/SVG y NO resuelve
+# variables CSS (var(--txt) le sale negro/transparente), así que necesita hex reales.
+# Los fija _inject_theme_vars() según ?theme; aquí van los valores por defecto (tema
+# oscuro, que es el que se sirve por defecto en el iframe).
+TXT_HEX = "#ece9df"     # texto/marcas de gráfica (equivale a --txt)
+GRID_HEX = "#2f3427"    # rejilla/ejes de gráfica (equivale a --card-brd)
+TER_HEX = "#a3a396"     # gris terciario para SVGs (roas None, etc.; equivale a --sub)
 
 # --------------------------------------------------------------------------- #
 #  Patrón de ondas SVG (marca de agua tecnológica en la parte superior).
@@ -180,12 +188,17 @@ def _salud_color_vivo(r):
     return C_BAD              # rojo
 
 
-def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color="#18181B"):
+def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color=None):
     """Mini-gráfica de BARRAS (una barra por día) para la facturación diaria, con
     una LÍNEA opcional encima (p. ej. el gasto). Barras y línea comparten la misma
     escala (el máximo de ambas series), así se ven a la par: si la línea de gasto
     queda por DEBAJO de las barras, el anuncio va en ganancia ese día. Los días en
     0 de facturación se dibujan como una barra mínima gris."""
+    # La línea de gasto sigue el tema (TXT_HEX): en claro es tinta, en oscuro es claro.
+    # (No puede ir como default del argumento: Python lo fijaría al DEFINIR la función,
+    # antes de que _inject_theme_vars ajuste TXT_HEX al tema real.)
+    if linea_color is None:
+        linea_color = TXT_HEX
     vals = [max(0.0, float(x or 0)) for x in (serie or [])]
     lvals = [max(0.0, float(x or 0)) for x in (linea or [])] if linea is not None else []
     n = max(len(vals), len(lvals))
@@ -194,14 +207,15 @@ def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color="#18181B"
     hi = max((vals + lvals) or [0.0])
     gap = 2.0
     bw = (w - gap * (n - 1)) / n
-    # Fondo papel redondeado (sutil) para enmarcar el mini-gráfico.
+    # Fondo redondeado (sutil) para enmarcar el mini-gráfico. Gris neutro con alfa:
+    # se ve tanto sobre papel claro como sobre tarjeta oscura (no asume fondo blanco).
     partes = [f'<rect x="0" y="0" width="{w}" height="{h}" rx="4" '
-              f'fill="rgba(17,17,17,.04)"/>']
+              f'fill="rgba(128,128,128,.07)"/>']
     # Track tenue detrás de cada barra (altura completa) para dar cuerpo visual.
     for i, v in enumerate(vals):
         x = i * (bw + gap)
         partes.append(f'<rect x="{x:.1f}" y="1" width="{bw:.1f}" height="{h - 2:.1f}" '
-                      f'rx="1.5" fill="rgba(17,17,17,.05)"/>')
+                      f'rx="1.5" fill="rgba(128,128,128,.09)"/>')
     # Barras: facturación por día (color según salud).
     for i, v in enumerate(vals):
         x = i * (bw + gap)
@@ -210,7 +224,7 @@ def _spark_bars(serie, color=C_OK, w=82, h=28, linea=None, linea_color="#18181B"
             fill = color
         else:
             bh = 2.0                      # día sin ventas: barrita gris al piso
-            fill = "rgba(17,17,17,.18)"
+            fill = "rgba(128,128,128,.34)"
         partes.append(f'<rect x="{x:.1f}" y="{h - 1 - bh:.1f}" width="{bw:.1f}" '
                       f'height="{bh:.1f}" rx="1.5" fill="{fill}"/>')
     # Línea: gasto por día (por el centro de cada barra).
@@ -1473,16 +1487,16 @@ def _render_totales(filas, sin_adid=None):
         '.tcard{flex:1;min-width:120px;background:var(--card);'
         'border:1px solid var(--card-brd);border-radius:16px;padding:16px 16px 14px;}'
         ".tlbl{font-family:'Space Mono',monospace;font-size:10.5px;text-transform:uppercase;"
-        'letter-spacing:.1em;color:#71717A;font-weight:400;}'
+        'letter-spacing:.1em;color:var(--sub);font-weight:400;}'
         ".tval{font-family:Anton,sans-serif;font-weight:400;font-size:39px;margin-top:8px;line-height:1;}"
         ".tnat{font-family:'Space Mono',monospace;font-size:11px;font-weight:400;"
-        'color:#9a968c;margin-top:6px;}</style>'
+        'color:var(--sub);margin-top:6px;}</style>'
         f'<div class="trow">{cards}</div>', unsafe_allow_html=True)
 
     # Nota chica de ventas sin ad_id (van incluidas en el total de arriba).
     if sa_num:
         st.markdown(
-            f'<div style="font-size:11px;color:#71717A;margin:-4px 0 10px;'
+            f'<div style="font-size:11px;color:var(--sub);margin:-4px 0 10px;'
             f"font-family:'Space Mono',monospace;\" "
             f'title="Sí están incluidas en el total; no se pudieron atribuir a un anuncio '
             f'(fila sin POST ID o ID que no coincide).">'
@@ -1723,25 +1737,25 @@ def _render_lista_nativa(filas, nivel):
               "Fact. 7d": ("Últimos 7 días: barras = facturación, línea = gasto. "
                            "Si la línea va por debajo de las barras, ese día hubo ganancia.")}
     st.markdown(
-        "<style>.meta-mini{font-size:11px;color:#71717A;line-height:1.25;margin-top:1px;"
+        "<style>.meta-mini{font-size:11px;color:var(--sub);line-height:1.25;margin-top:1px;"
         "font-family:'Space Mono',monospace;}"
-        '.meta-mini b{color:#18181B;font-weight:600;}'
+        '.meta-mini b{color:var(--txt);font-weight:600;}'
         # Datos centrados en cada columna (igual que sus títulos).
         '.gcell,.gcell .big,.gcell .sub,.gcell .meta-mini{text-align:center !important;}'
         # Botones de encabezado (ordenar) CENTRADOS, igual que los valores, sin recuadro.
         '.stButton button[kind="tertiary"]{padding:0 !important;min-height:0 !important;'
-        'color:#71717A !important;letter-spacing:0;line-height:1.1;'
+        'color:var(--sub) !important;letter-spacing:0;line-height:1.1;'
         'justify-content:center !important;text-align:center !important;'
         'border:none !important;box-shadow:none !important;background:transparent !important;}'
         '.stButton button[kind="tertiary"]:focus,.stButton button[kind="tertiary"]:active,'
         '.stButton button[kind="tertiary"]:focus-visible{box-shadow:none !important;'
-        'outline:none !important;border:none !important;color:#71717A !important;}'
+        'outline:none !important;border:none !important;color:var(--sub) !important;}'
         '.stButton button[kind="tertiary"] div[data-testid="stMarkdownContainer"]'
         '{width:100% !important;text-align:center !important;}'
         ".stButton button[kind=\"tertiary\"] p{font-size:10px !important;font-weight:700 !important;"
         "font-family:'Space Mono',monospace;"
         'text-transform:uppercase;margin:0 !important;white-space:nowrap;text-align:center !important;}'
-        '.stButton button[kind="tertiary"]:hover p{color:#18181B !important;}</style>',
+        '.stButton button[kind="tertiary"]:hover p{color:var(--txt) !important;}</style>',
         unsafe_allow_html=True)
 
     # Encabezados clicables (botones nativos): reordenan SIN recargar la página.
@@ -1762,7 +1776,7 @@ def _render_lista_nativa(filas, nivel):
                 col.markdown(
                     f'<div style="text-align:center;font-size:10px;font-weight:700;'
                     f'font-family:\'Space Mono\',monospace;'
-                    f'color:#71717A;text-transform:uppercase;letter-spacing:.06em" '
+                    f'color:var(--sub);text-transform:uppercase;letter-spacing:.06em" '
                     f'title="{esc(ayudas.get(label, ""))}">{esc(label)}</div>',
                     unsafe_allow_html=True)
                 continue
@@ -1806,10 +1820,10 @@ def _render_lista_nativa(filas, nivel):
         if _cta and _cta != "—":
             cuenta_cell = (f'<div class="sub" style="white-space:nowrap;overflow:hidden;'
                            f'text-overflow:ellipsis;font-size:12px">{_cta}'
-                           f'<span style="color:#9a968c;margin-left:7px">CRE. {creado}</span></div>')
+                           f'<span style="color:var(--sub);margin-left:7px">CRE. {creado}</span></div>')
         else:
             cuenta_cell = (f'<div class="sub" style="white-space:nowrap;font-size:12px;'
-                           f'color:#9a968c">CRE. {creado}</div>')
+                           f'color:var(--sub)">CRE. {creado}</div>')
         # El rendimiento "desde el último cambio" ya NO va fijo en la fila (ruido
         # visual); sale en el tooltip del botón ⓘ (abajo) y en la card de detalle.
         # Degradado rojo SOLO para los que van muy mal: gastan y su ROAS < 1 (pierden).
@@ -1829,7 +1843,7 @@ def _render_lista_nativa(filas, nivel):
         dot_html = (f'<span title="{est_txt}" style="color:{est_col};font-size:12px;'
                     f'margin-right:7px;vertical-align:middle;line-height:1">●</span>')
         # Identificador del anuncio/conjunto/campaña, en chico (mono), debajo del nombre.
-        id_html = (f'<div class="sub" style="font-size:12px;color:#9a968c;'
+        id_html = (f'<div class="sub" style="font-size:12px;color:var(--sub);'
                    f"font-family:'Space Mono',monospace;"
                    f'margin-top:2px;letter-spacing:.02em">{esc(str(f["sub"]))}</div>')
         nombre_html = (f'<div class="ad-name" style="{borde}color:{nombre_col};font-weight:600;'
@@ -1856,7 +1870,7 @@ def _render_lista_nativa(filas, nivel):
             f'{d[5:]}: fact {_usd(i)} / gasto {_usd(g)}'
             for d, i, g in zip(dias7, serie7, (gasto7 or [0] * len(serie7))))
         # Total facturado y, si hay línea, total gastado (tinta tenue) debajo.
-        _gasto_lbl = (f'<span style="color:#71717A"> · {_usd(totg7)}</span>'
+        _gasto_lbl = (f'<span style="color:var(--sub)"> · {_usd(totg7)}</span>'
                       if gasto7 else '')
         spark_cell = (
             f'<div title="Últimos 7 días — {esc(_tip)}">{spark7}'
@@ -2008,14 +2022,14 @@ def _dialog_info():
     etiquetas = [d[5:] for d in dias]  # MM-DD
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color="#18181B"))
+    fig.add_trace(go.Bar(x=etiquetas, y=gastos, name="Gasto (USD)", marker_color=TXT_HEX))
     fig.add_trace(go.Scatter(x=etiquetas, y=ingresos, name="Ingresos (USD)", mode="lines+markers",
                              line=dict(color="#1F8A4C", width=3)))
     fig.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10),
                       legend=dict(orientation="h", y=1.15),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                      font=dict(color="#18181B"),
-                      xaxis=dict(gridcolor="var(--card-brd)"), yaxis=dict(gridcolor="var(--card-brd)"))
+                      font=dict(color=TXT_HEX),
+                      xaxis=dict(gridcolor=GRID_HEX), yaxis=dict(gridcolor=GRID_HEX))
     st.plotly_chart(fig, use_container_width=True)
     if not serie:
         st.caption("El gasto por día se llena cuando hay conexión de Facebook. Los ingresos "
@@ -2183,17 +2197,17 @@ _TABLA_CSS = """
 <style>
 .tbl-wrap { overflow-x:auto; border:1px solid var(--card-brd); border-radius:18px;
     background:var(--card); box-shadow:none; }
-table.ads { width:100%; border-collapse:collapse; font-size:12px; color:#18181B;
+table.ads { width:100%; border-collapse:collapse; font-size:12px; color:var(--txt);
     background:transparent; min-width:1080px; }
-table.ads thead th { text-align:left; font-weight:700; color:#71717A; font-size:10px;
+table.ads thead th { text-align:left; font-weight:700; color:var(--sub); font-size:10px;
     text-transform:uppercase; letter-spacing:.08em; padding:12px 12px; white-space:nowrap;
     font-family:'Space Mono',monospace;
     background:transparent; border-bottom:1px solid var(--card-brd); }
-table.ads td { padding:11px 12px; border-bottom:1px solid #EAE6DD; vertical-align:middle; }
-table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
-.big { font-size:17px; font-weight:600; color:#18181B; line-height:1.15; }
-.sub { font-size:13.5px; color:#71717A; }
-.m-mint{ color:#1F8A4C; } .m-lav{ color:#18181B; } .m-peri{ color:#18181B; }
+table.ads td { padding:11px 12px; border-bottom:1px solid var(--card-brd); vertical-align:middle; }
+table.ads tbody tr:hover td { background:rgba(128,128,128,.08); }
+.big { font-size:17px; font-weight:600; color:var(--txt); line-height:1.15; }
+.sub { font-size:13.5px; color:var(--sub); }
+.m-mint{ color:#1F8A4C; } .m-lav{ color:var(--txt); } .m-peri{ color:var(--txt); }
 /* Alerta: solo el nombre, con difuminado rojo hacia la derecha */
 .name-alert{ background:linear-gradient(90deg, rgba(192,57,43,.16), rgba(192,57,43,0) 88%);
     border-radius:8px; padding:3px 10px; margin:-3px -10px; }
@@ -2205,18 +2219,18 @@ table.ads tbody tr:hover td { background:rgba(17,17,17,.03); }
 .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px;
     border-radius:999px; font-size:10.5px; font-weight:600; }
 .pill-run { background:rgba(215,255,58,.55); color:#18181B; }
-.pill-off { background:rgba(17,17,17,.07); color:#71717A; }
+.pill-off { background:var(--surf2); color:var(--sub); }
 .dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
 .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px;
     font-weight:700; color:#18181B; }
-.bar { height:5px; background:rgba(17,17,17,.08); border-radius:4px; margin-top:5px; overflow:hidden; }
-.bar > span { display:block; height:100%; background:#18181B; }
+.bar { height:5px; background:rgba(128,128,128,.16); border-radius:4px; margin-top:5px; overflow:hidden; }
+.bar > span { display:block; height:100%; background:var(--txt); }
 .chip { display:inline-block; background:rgba(215,255,58,.5); color:#18181B; border-radius:6px;
     padding:2px 8px; font-size:10px; font-weight:600; }
-.up { color:#18181B; } .down { color:#E11D48; } .flat { color:#71717A; }
-.hcol { color:#71717A; font-size:10px; font-weight:700; text-transform:uppercase;
+.up { color:var(--txt); } .down { color:#E11D48; } .flat { color:var(--sub); }
+.hcol { color:var(--sub); font-size:10px; font-weight:700; text-transform:uppercase;
     letter-spacing:.06em; padding:4px 0 2px; }
-hr.rowline { margin:2px 0; border:none; border-top:1px solid #EAE6DD; }
+hr.rowline { margin:2px 0; border:none; border-top:1px solid var(--card-brd); }
 /* Fija (sticky) la fila de títulos de la tabla al hacer scroll hacia abajo.
    El hermano siguiente al marcador puede ser stLayoutWrapper o stHorizontalBlock. */
 [data-testid="stElementContainer"]:has(.tbl-hdr-anchor) + *{
@@ -2228,18 +2242,18 @@ hr.rowline { margin:2px 0; border:none; border-top:1px solid #EAE6DD; }
 .perf-block{ background:var(--surf2); border-radius:8px; padding:6px 10px;
     margin-top:5px; border:1px solid transparent; }
 .perf-block.perf-alert{ border:1px solid rgba(192,57,43,.45); }
-.perf-line{ font-size:10.5px; color:#333333; line-height:1.35; }
-.perf-line b{ color:#18181B; font-weight:600; }
-.perf-time{ color:#71717A; }
-.perf-sep{ color:#b3ac9e; margin:0 1px; }
+.perf-line{ font-size:10.5px; color:var(--sub); line-height:1.35; }
+.perf-line b{ color:var(--txt); font-weight:600; }
+.perf-time{ color:var(--sub); }
+.perf-sep{ color:var(--ter); margin:0 1px; }
 .perf-warn{ margin-right:5px; animation:perfBlink 1s steps(1) infinite; }
 @keyframes perfBlink{ 50%{ opacity:.15; } }
 .perf-bar{ position:relative; height:5px; border-radius:3px;
-    background:rgba(17,17,17,.08); margin-top:5px; }
+    background:rgba(128,128,128,.16); margin-top:5px; }
 .perf-fill{ height:100%; border-radius:3px;
-    background:#18181B; transition:width .4s ease; }
+    background:var(--txt); transition:width .4s ease; }
 .perf-marker{ position:absolute; top:-1px; left:66.6%; width:2px; height:7px;
-    background:#18181B; opacity:.8; border-radius:1px; }
+    background:var(--txt); opacity:.8; border-radius:1px; }
 </style>
 """
 
@@ -2990,12 +3004,16 @@ def _inject_theme_vars():
     theme = (st.query_params.get("theme") or "dark").strip().lower()
     if theme not in ("light", "dark"):
         theme = "dark"
+    # Sincroniza los HEX de Plotly/SVG con el tema (esas capas NO resuelven var(--…)).
+    global TXT_HEX, GRID_HEX, TER_HEX
     if theme == "light":
         pal = ("--bg:#F3F1EC;--card:#FFFFFF;--surf2:#F1EEE6;--sbar:#ECE9E1;"
                "--card-brd:#DED9D0;--brd2:#CDC8BE;--txt:#18181B;--sub:#71717A;--ter:#9a968c;")
+        TXT_HEX, GRID_HEX, TER_HEX = "#18181B", "#DED9D0", "#9a968c"
     else:
         pal = ("--bg:#12150e;--card:#1c2016;--surf2:#22271b;--sbar:#171a12;"
                "--card-brd:#2f3427;--brd2:#3a4030;--txt:#ece9df;--sub:#a3a396;--ter:#6f6f64;")
+        TXT_HEX, GRID_HEX, TER_HEX = "#ece9df", "#2f3427", "#a3a396"
     st.markdown(
         f"<style>:root{{{pal}--p1:#18181B;--p2:#18181B;--ok:#5E8C00;--warn:#E11D48;"
         f"--plight:#18181B;--signal:#D7FF3A;}}</style>",
@@ -3868,8 +3886,8 @@ def _fig_editorial(fig, height=300):
     fig.update_layout(height=height, margin=dict(t=30, b=10, l=10, r=10),
                       legend=dict(orientation="h", y=1.12),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                      font=dict(color="#18181B", family="Inter"),
-                      xaxis=dict(gridcolor="var(--card-brd)"), yaxis=dict(gridcolor="var(--card-brd)"))
+                      font=dict(color=TXT_HEX, family="Inter"),
+                      xaxis=dict(gridcolor=GRID_HEX), yaxis=dict(gridcolor=GRID_HEX))
     return fig
 
 
@@ -3956,7 +3974,7 @@ def pagina_graficos():
     st.subheader("Rendimiento general — últimos días")
     f2 = go.Figure()
     f2.add_trace(go.Bar(x=etq, y=[round(gasto_dia[d], 2) for d in dias],
-                        name="Gasto (USD)", marker_color="#18181B"))
+                        name="Gasto (USD)", marker_color=TXT_HEX))
     f2.add_trace(go.Scatter(x=etq, y=[round(ing_dia[d], 2) for d in dias],
                             name="Ingresos (USD)", mode="lines+markers",
                             line=dict(color="#1F8A4C", width=3)))
@@ -4125,7 +4143,7 @@ def pagina_productos():
                                marker_color=cols))
         fig.update_layout(height=max(240, 42 * len(df)), margin=dict(t=20, b=10, l=10, r=10),
                           paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                          font=dict(color="#18181B"), xaxis=dict(gridcolor="var(--card-brd)"))
+                          font=dict(color=TXT_HEX), xaxis=dict(gridcolor=GRID_HEX))
         st.subheader("Ganancia por producto")
         st.plotly_chart(fig, use_container_width=True)
 
@@ -4397,8 +4415,8 @@ def _timer_actualizacion():
     st.markdown(
         '<style>.tb-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:2px 0 4px;}'
         '.tb-pill{background:var(--card);border:1px solid var(--card-brd);'
-        "border-radius:7px;padding:2px 9px;font-size:11px;color:#71717A;font-family:'Space Mono',monospace;}"
-        '.tb-dot{color:#b3ac9e;margin:0 2px;}</style>'
+        "border-radius:7px;padding:2px 9px;font-size:11px;color:var(--sub);font-family:'Space Mono',monospace;}"
+        '.tb-dot{color:var(--ter);margin:0 2px;}</style>'
         f'<div class="tb-row">{pills}</div>', unsafe_allow_html=True)
 
     # Si llegaron datos nuevos (anuncios o ventas) desde el último render, refresca.
