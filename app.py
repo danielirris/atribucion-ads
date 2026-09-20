@@ -36,7 +36,7 @@ import capi
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v139 · 2026-08-30"
+APP_VERSION = "v140 · 2026-09-19"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -4492,7 +4492,10 @@ def _timer_actualizacion():
     except Exception:
         est = {}
     # Línea de estado como micro-badges (pills) separados por puntos.
-    badges = [f"🔄 Anuncios: {cuando}", f"automática {cad}"]
+    # La versión va PRIMERO y visible en la barra superior (el sidebar no se ve en el
+    # iframe de Datibot): sirve para confirmar de un vistazo que el redespliegue tomó
+    # el código nuevo (si sigue una versión vieja, el build no se actualizó).
+    badges = [f"⚙️ {APP_VERSION}", f"🔄 Anuncios: {cuando}", f"automática {cad}"]
     uso = est.get("uso_api")
     if uso:  # solo si es > 0 (0% no aporta y confunde)
         badges.append(f"Uso API {uso}%")
