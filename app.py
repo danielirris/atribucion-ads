@@ -36,7 +36,7 @@ import capi
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v141 · 2026-09-20"
+APP_VERSION = "v142 · 2026-09-20"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3290,12 +3290,23 @@ def _inject_css():
     [data-baseweb="calendar"] [aria-selected="true"] > div,
     [data-baseweb="calendar"] [aria-label][aria-selected="true"] > div{ background:var(--signal) !important; color:#18181B !important; }
 
-    /* Menú desplegable de selectbox/multiselect (BaseWeb) */
+    /* Menú desplegable de selectbox/multiselect. En Streamlit 1.57 la lista es
+       ul[data-testid="stSelectboxVirtualDropdown"] dentro de un [data-baseweb="popover"]
+       de fondo BLANCO (no usa [data-baseweb="menu"] ni [role="listbox"]). Oscurecemos el
+       popover, sus divs contenedores y la lista virtual; las opciones (li) quedan con
+       texto claro sobre fondo oscuro. */
+    [data-baseweb="popover"],
+    [data-baseweb="popover"] > div,
+    [data-baseweb="popover"] [data-testid="stSelectboxVirtualDropdown"],
     [data-baseweb="menu"], [data-baseweb="popover"] ul[role="listbox"]{
-        background:var(--card) !important; border:1px solid var(--card-brd) !important; }
+        background:var(--card) !important; border-color:var(--card-brd) !important; }
+    [data-testid="stSelectboxVirtualDropdown"] li,
+    [data-baseweb="popover"] li[role="option"],
     [data-baseweb="menu"] li, [role="option"]{ color:var(--txt) !important; background:transparent !important; }
-    [data-baseweb="menu"] li[aria-selected="true"], [role="option"][aria-selected="true"]{
-        background:rgba(215,255,58,.16) !important; color:var(--txt) !important; }
+    [data-testid="stSelectboxVirtualDropdown"] li:hover,
+    [data-baseweb="popover"] li[role="option"]:hover,
+    [data-baseweb="popover"] li[aria-selected="true"],
+    [role="option"][aria-selected="true"]{ background:rgba(128,128,128,.16) !important; color:var(--txt) !important; }
 
     /* Steppers de number_input (+ / -) */
     [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"]{
