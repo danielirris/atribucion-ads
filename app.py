@@ -36,7 +36,7 @@ import capi
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v143 · 2026-09-20"
+APP_VERSION = "v144 · 2026-09-20"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3135,18 +3135,28 @@ def _inject_css():
         border-color:var(--txt) !important;
     }
 
-    /* Controles segmentados (Ver por / Estado): SIN recuadro, activo tinta + neón */
+    /* Controles segmentados (Ver por / Estado): SIN recuadro, activo tinta + neón.
+       OJO 1.57: NO usa data-variant/data-selected. La opción NO seleccionada es
+       kind="segmented_control" (venía con fondo Y texto CLAROS del tema base = invisible)
+       y la seleccionada es kind="segmented_controlActive". Se targetean ambos (más los
+       data-variant como respaldo). */
     [data-testid="stButtonGroup"]{ background:transparent !important;
         border:none !important; border-radius:0 !important; padding:0 !important; }
-    button[data-variant="segmented_control"]{ color:var(--sub) !important;
-        background:transparent !important; border:1px solid transparent !important; border-radius:9999px !important;
+    button[kind="segmented_control"], button[data-variant="segmented_control"]{ color:var(--sub) !important;
+        background:transparent !important; background-color:transparent !important;
+        border:1px solid transparent !important; border-radius:9999px !important;
         font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.06em; font-size:12px; }
-    button[data-variant="segmented_control"]:hover{ color:var(--txt) !important; background:rgba(255,255,255,.06) !important; }
-    button[data-variant="segmented_control"][data-selected="true"]{
-        background:var(--signal) !important; border:1px solid var(--signal) !important;
-        color:#18181B !important; font-weight:700 !important; }
+    button[kind="segmented_control"] *{ color:var(--sub) !important; -webkit-text-fill-color:var(--sub) !important; }
+    button[kind="segmented_control"]:hover, button[data-variant="segmented_control"]:hover{
+        color:var(--txt) !important; background-color:rgba(255,255,255,.06) !important; }
+    button[kind="segmented_control"]:hover *{ color:var(--txt) !important; -webkit-text-fill-color:var(--txt) !important; }
+    button[kind="segmented_controlActive"], button[data-variant="segmented_control"][data-selected="true"]{
+        background:var(--signal) !important; background-color:var(--signal) !important; border:1px solid var(--signal) !important;
+        color:#18181B !important; font-weight:700 !important; border-radius:9999px !important;
+        font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:.06em; font-size:12px; }
     /* El texto interno (Streamlit lo pinta con el primaryColor lima -> ilegible sobre
        la píldora lima). Lo forzamos a negro. */
+    button[kind="segmented_controlActive"] *,
     button[data-variant="segmented_control"][data-selected="true"] *{
         color:#18181B !important; -webkit-text-fill-color:#18181B !important; }
 
