@@ -36,7 +36,7 @@ import capi
 st.set_page_config(page_title="Ads Command Center", layout="wide")
 
 # Marcador de versión: sirve para confirmar que el redeploy tomó el código nuevo.
-APP_VERSION = "v142 · 2026-09-20"
+APP_VERSION = "v143 · 2026-09-20"
 
 # --------------------------------------------------------------------------- #
 #  Paleta editorial (tema "papel"). Estos colores se usan en los estilos inline
@@ -3275,20 +3275,20 @@ def _inject_css():
     [data-testid="stPopoverBody"] p, [data-testid="stPopoverBody"] label,
     [data-testid="stPopoverBody"] li, [data-testid="stPopoverBody"] span{ color:var(--txt) !important; }
 
-    /* Calendario de st.date_input (BaseWeb) */
+    /* Calendario de st.date_input (BaseWeb). OJO: en Streamlit 1.57 el
+       [data-baseweb="calendar-header"] NO existe, y el header (mes/año), la fila de días,
+       las celdas de relleno y el label "Choose a date range" vienen con fondo/tinta CLAROS
+       del tema base — con clases emotion inestables. En vez de perseguirlas: oscurecemos el
+       contenedor y ponemos TODO lo interno transparente (que se vea el oscuro), incluido el
+       ::after de las celdas (que salía BLANCO en las celdas vacías/de rango). El día
+       seleccionado conserva su aro lima (viene del ::after border del propio BaseWeb). */
     [data-baseweb="calendar"], [data-baseweb="datepicker"]{
         background:var(--card) !important; color:var(--txt) !important;
         border:1px solid var(--card-brd) !important; border-radius:12px !important; }
-    /* Celdas transparentes (las vacías de inicio/fin de mes salían con fondo claro). */
-    [data-baseweb="calendar"] [role="gridcell"]{ background:transparent !important; }
-    [data-baseweb="calendar"] [role="gridcell"],
-    [data-baseweb="calendar"] [role="gridcell"] > div,
-    [data-baseweb="calendar"] button{ color:var(--txt) !important; }
-    [data-baseweb="calendar"] [data-baseweb="calendar-header"],
-    [data-baseweb="calendar"] [data-baseweb="calendar-header"] *{ color:var(--txt) !important; background:transparent !important; }
-    [data-baseweb="calendar"] [role="gridcell"] > div:hover{ background:rgba(128,128,128,.18) !important; }
-    [data-baseweb="calendar"] [aria-selected="true"] > div,
-    [data-baseweb="calendar"] [aria-label][aria-selected="true"] > div{ background:var(--signal) !important; color:#18181B !important; }
+    [data-baseweb="calendar"] *{ background-color:transparent !important; color:var(--txt) !important; }
+    [data-baseweb="calendar"] [role="gridcell"]::after{ background-color:transparent !important; }
+    [data-baseweb="calendar"] [role="gridcell"] > div:hover{ background-color:rgba(128,128,128,.18) !important; }
+    [data-baseweb="calendar"] [aria-selected="true"] > div{ background-color:var(--signal) !important; color:#18181B !important; }
 
     /* Menú desplegable de selectbox/multiselect. En Streamlit 1.57 la lista es
        ul[data-testid="stSelectboxVirtualDropdown"] dentro de un [data-baseweb="popover"]
