@@ -1,4 +1,9 @@
-streamlit>=1.31
+# FIJADO a 1.57.0 a propósito: el estilado del panel (tema oscuro, diálogos,
+# calendario, menús) depende del DOM interno de Streamlit, que CAMBIA entre versiones.
+# Con ">=1.31" el build saltó solo a 1.64 y rompió todos los selectores CSS (diálogos
+# invisibles, calendario/menús mal). 1.57.0 es la versión contra la que está verificado
+# todo el CSS. NO desfijar sin volver a verificar el tema oscuro widget por widget.
+streamlit==1.57.0
 pandas>=2.0
 openpyxl>=3.1
 watchdog>=3.0
